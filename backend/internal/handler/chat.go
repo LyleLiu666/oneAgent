@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -342,6 +343,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			var tokenCount int
 			var lastBroadcast time.Time
 
+			// UTF-8 buffering state
+			var incompleteUTF8 []byte
+
 			// Update the callback to use the state
 			traceCallback.OnToken = func(ctx context.Context, token string) {
 				tokenCount++
@@ -445,10 +449,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			} else {
 				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
 					fullContent += chunk
-					broadcaster.Broadcast(StreamEvent{
-						Type: "content",
-						Data: chunk,
-					})
+
+					// Buffer content to ensure we only broadcast complete UTF-8 runes
+					incompleteUTF8 = append(incompleteUTF8, chunk...)
+					valid, rest := splitBuffer(incompleteUTF8)
+					incompleteUTF8 = rest
+
+					if len(valid) > 0 {
+						broadcaster.Broadcast(StreamEvent{
+							Type: "content",
+							Data: string(valid),
+						})
+					}
 					return nil
 				})
 			}
@@ -808,13 +820,21 @@ func runToolLoop(
 
 		if streamClient, ok := client.(toolStreamingCaller); ok {
 			var stepContent strings.Builder
+			var stepBuffer []byte
 			result, err = streamClient.ChatCompletionStreamWithTools(ctx, messages, opts, func(chunk string) error {
 				stepContent.WriteString(chunk)
 				combined.WriteString(chunk)
-				broadcaster.Broadcast(StreamEvent{
-					Type: "content",
-					Data: chunk,
-				})
+
+				stepBuffer = append(stepBuffer, chunk...)
+				valid, rest := splitBuffer(stepBuffer)
+				stepBuffer = rest
+
+				if len(valid) > 0 {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "content",
+						Data: string(valid),
+					})
+				}
 				return nil
 			})
 			if err == nil && stepContent.Len() == 0 && result.Content != "" {
@@ -1117,4 +1137,44 @@ func (sb *StreamBroadcaster) Finish() {
 		close(ch)
 	}
 	sb.clients = nil
+}
+
+// splitBuffer splits the byte slice at the last valid rune boundary.
+// It returns the valid prefix (to be sent) and the remaining suffix (to be buffered).
+func splitBuffer(b []byte) (toSend, toKeep []byte) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+
+	// Fast path: if last byte is ASCII, we are safe.
+	if b[len(b)-1] < 0x80 {
+		return b, nil
+	}
+
+	// Walk backwards from the end (up to UTFMax bytes)
+	// to find the start of the last sequence.
+	limit := len(b)
+	if limit > utf8.UTFMax {
+		limit = utf8.UTFMax
+	}
+
+	for i := 1; i <= limit; i++ {
+		start := len(b) - i
+		// Check if the sequence starting here is a rune start
+		if utf8.RuneStart(b[start]) {
+			// Check if it forms a complete rune from here to end
+			if utf8.FullRune(b[start:]) {
+				return b, nil // Complete rune at end
+			}
+			// Incomplete rune at end
+			return b[:start], b[start:]
+		}
+	}
+
+	// If we exhausted lookback and found no start, it's either:
+	// 1. Just continuation bytes (invalid UTF-8 independently)
+	// 2. A long sequence of garbage
+	// In strict mode, we might want to buffer, but if it's invalid, it stays invalid.
+	// We treat it as "complete" so it gets flushed (and replaced by replacement chars).
+	return b, nil
 }
