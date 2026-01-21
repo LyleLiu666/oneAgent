@@ -13,6 +13,7 @@ import {
   Sun,
   Moon,
   Terminal,
+  Bot,
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -101,10 +102,10 @@ const sidebarWidth = computed(() => (isCollapsed.value ? 'w-16' : 'w-64'))
           <div
             class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-600 flex items-center justify-center shadow-lg shadow-primary-500/20"
           >
-            <span class="text-white font-bold text-sm">B</span>
+            <Bot class="w-5 h-5 text-white" />
           </div>
           <span class="font-bold text-lg text-surface-900 dark:text-white whitespace-nowrap">
-            Base App
+            OneAgent
           </span>
         </div>
         <div class="flex items-center gap-1">

@@ -51,7 +51,7 @@ onMounted(() => {
           <Shield class="w-8 h-8 text-white" />
         </div>
         <h1 class="text-3xl font-bold text-surface-100 mb-2">Welcome Back</h1>
-        <p class="text-surface-400">Sign in to continue to Base App</p>
+        <p class="text-surface-400">Sign in to continue to OneAgent</p>
       </div>
 
       <!-- Login card -->
@@ -79,7 +79,7 @@ onMounted(() => {
 
       <!-- Footer -->
       <p class="mt-8 text-center text-sm text-surface-500">
-        &copy; {{ new Date().getFullYear() }} Base App. All rights reserved.
+        &copy; {{ new Date().getFullYear() }} OneAgent. All rights reserved.
       </p>
     </div>
   </div>
