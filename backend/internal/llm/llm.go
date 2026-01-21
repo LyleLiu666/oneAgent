@@ -689,9 +689,11 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			continue
 		}
 		if builder, ok := toolArgs[idx]; ok {
-			call.Function.Arguments = builder.String()
+			call.Function.Arguments = normalizeToolArguments(builder.String())
+		} else {
+			call.Function.Arguments = normalizeToolArguments(call.Function.Arguments)
 		}
-		if call.Function.Arguments == "" {
+		if strings.TrimSpace(call.Function.Arguments) == "" {
 			call.Function.Arguments = "{}"
 		}
 		finalCalls = append(finalCalls, *call)
@@ -721,4 +723,34 @@ func BuildUserMessage(content string) ChatMessage {
 // BuildAssistantMessage creates an assistant message.
 func BuildAssistantMessage(content string) ChatMessage {
 	return ChatMessage{Role: "assistant", Content: content}
+}
+
+func normalizeToolArguments(args string) string {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return ""
+	}
+	if json.Valid([]byte(trimmed)) {
+		return trimmed
+	}
+
+	raw := []byte(trimmed)
+	for i := len(raw) - 1; i >= 0; i-- {
+		if raw[i] != '}' {
+			continue
+		}
+		j := i + 1
+		for j < len(raw) && (raw[j] == ' ' || raw[j] == '\n' || raw[j] == '\r' || raw[j] == '\t') {
+			j++
+		}
+		if j >= len(raw) || raw[j] != '{' {
+			continue
+		}
+		candidate := strings.TrimSpace(string(raw[j:]))
+		if candidate != "" && json.Valid([]byte(candidate)) {
+			return candidate
+		}
+	}
+
+	return trimmed
 }

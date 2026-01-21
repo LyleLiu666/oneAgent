@@ -517,9 +517,11 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 			continue
 		}
 		if builder, ok := toolArgs[idx]; ok {
-			call.Function.Arguments = builder.String()
+			call.Function.Arguments = normalizeToolArguments(builder.String())
+		} else {
+			call.Function.Arguments = normalizeToolArguments(call.Function.Arguments)
 		}
-		if call.Function.Arguments == "" {
+		if strings.TrimSpace(call.Function.Arguments) == "" {
 			call.Function.Arguments = "{}"
 		}
 		finalCalls = append(finalCalls, *call)
