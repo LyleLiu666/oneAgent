@@ -159,8 +159,6 @@ var blockedCommands = map[string]struct{}{
 	"wipe":       {},
 
 	// Network and remote access.
-	"curl":         {},
-	"wget":         {},
 	"wget2":        {},
 	"aria2c":       {},
 	"axel":         {},
