@@ -85,6 +85,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     wkhtmltopdf \
     texlive-latex-base \
+    fonts-noto-cjk \
+    fonts-droid-fallback \
+    fonts-wqy-zenhei \
+    fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
 # Generate locales
