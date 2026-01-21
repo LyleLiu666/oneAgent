@@ -42,12 +42,20 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 # Final stage
 FROM alpine:3.19
 
-RUN apk --no-cache add ca-certificates tzdata bash
+RUN apk --no-cache add ca-certificates tzdata bash \
+    && addgroup -S app \
+    && adduser -S -G app -h /app app \
+    && mkdir -p /data \
+    && chown -R app:app /data
 
 WORKDIR /app
 
 # Copy the binary
-COPY --from=backend-builder /app/server .
+COPY --from=backend-builder --chown=app:app /app/server .
+
+ENV BASH_ROOT_DIR=/data/bash-root
+
+USER app
 
 # Expose port
 EXPOSE 8080

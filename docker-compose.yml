@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres123
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - /Users/liu_y/Documents/vol/oneAgent/db:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -28,6 +28,7 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://postgres:postgres123@postgres:5432/oneagent?sslmode=disable
+      BASH_ROOT_DIR: /data/bash-root
 
       KEYCLOAK_URL: ${KEYCLOAK_URL:-https://keycloak.i.strategylab.xyz:10003}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-homeService}
@@ -38,6 +39,18 @@ services:
       JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
 
       ENABLE_TRACE: "true"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: "1.0"
+    volumes:
+      - /Users/liu_y/Documents/vol/oneAgent/data:/data
     ports:
       - "20001:8080"
     depends_on:
@@ -46,8 +59,7 @@ services:
     networks:
       - oneagent-network
 
-volumes:
-  postgres_data:
+
 
 
 networks:
