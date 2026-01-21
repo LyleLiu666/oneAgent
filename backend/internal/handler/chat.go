@@ -829,8 +829,13 @@ func runToolLoop(
 					Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, err),
 				})
 				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
-				return combined.String(), err
+
+				// FEEDBACK: Return error to LLM so it can retry
+				payload = map[string]string{
+					"error": fmt.Sprintf("Tool execution failed: %v", err),
+				}
 			}
+
 			response, err := json.Marshal(payload)
 			if err != nil {
 				broadcaster.Broadcast(StreamEvent{
@@ -838,7 +843,9 @@ func runToolLoop(
 					Data: fmt.Sprintf("Tool %s response error: %v", call.Function.Name, err),
 				})
 				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
-				return combined.String(), err
+
+				// If marshaling fails, send a plain text error
+				response = []byte(fmt.Sprintf(`{"error": "Failed to marshal tool response: %v"}`, err))
 			}
 
 			messages = append(messages, llm.ChatMessage{
