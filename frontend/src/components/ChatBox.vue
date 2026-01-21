@@ -311,6 +311,16 @@ const sendChat = async (rawMessage: string) => {
           if (lastMsg) {
             lastMsg.trace = (lastMsg.trace || '') + event.data + '\n'
           }
+        } else if (event.type === 'usage') {
+          try {
+             // Expecting {"response_tokens": 123}
+             const data = JSON.parse(event.data)
+             if (typeof data.response_tokens === 'number') {
+               chatStore.updateLastMessage(chatStore.streamingContent, true, data.response_tokens)
+             }
+          } catch(e) {
+             console.warn('Failed to parse usage event:', e)
+          }
         } else if (event.type === 'error') {
           streamHadError = true
           const suffix = event.data ? `\n\n[Error] ${event.data}` : '\n\n[Error] Request failed.'
@@ -567,7 +577,7 @@ onMounted(async () => {
                     <div class="absolute inset-0 bg-primary-400/20 blur-md rounded-full animate-pulse"></div>
                   </div>
                   <div class="flex items-center gap-1 text-sm font-medium text-surface-300">
-                    <span>Thinking</span>
+                    <span>Thinking <span v-if="message.responseTokens" class="text-surface-400 font-normal text-xs">({{ message.responseTokens }} tokens)</span></span>
                     <span class="flex gap-0.5 ml-0.5">
                       <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.3s]"></span>
                       <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.15s]"></span>

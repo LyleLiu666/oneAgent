@@ -9,6 +9,7 @@ export interface ChatMessage {
     trace?: string
     createdAt: Date
     isStreaming?: boolean
+    responseTokens?: number
 }
 
 export interface ChatSession {
@@ -66,11 +67,14 @@ export const useChatStore = defineStore(
             messages.value.push(message)
         }
 
-        function updateLastMessage(content: string, isStreaming: boolean = true) {
+        function updateLastMessage(content: string, isStreaming: boolean = true, responseTokens?: number) {
             const lastMessage = messages.value[messages.value.length - 1]
             if (lastMessage && lastMessage.role === 'assistant') {
                 lastMessage.content = content
                 lastMessage.isStreaming = isStreaming
+                if (responseTokens !== undefined) {
+                    lastMessage.responseTokens = responseTokens
+                }
             }
         }
 

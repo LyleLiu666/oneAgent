@@ -24,7 +24,7 @@ export const api = ofetch.create({
 
 // Stream event interface
 export interface StreamEvent {
-    type: 'session' | 'content' | 'trace' | 'done' | 'error'
+    type: 'session' | 'content' | 'trace' | 'done' | 'error' | 'usage'
     data: string
 }
 

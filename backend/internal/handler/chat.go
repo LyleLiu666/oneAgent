@@ -299,6 +299,36 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						})
 					}
 				},
+				OnToken: func(ctx context.Context, token string) {
+					// Count tokens (approximate relying on stream chunks)
+					// In a real implementation we might use a tokenizer, but counting chunks/words is a naive proxy
+					// or if the provider sends raw token usage we'd use that.
+					// For this feature request, we just want "activity" to be visible.
+					// We'll increment a counter and broadcast occasionally.
+
+					// Hack: use a closure variable for state since we can't easily change the method signature
+					// We need to define the counter outside this struct literal.
+					// See below for the implementation integration.
+				},
+			}
+
+			// Token tracking state
+			var tokenCount int
+			var lastBroadcast time.Time
+
+			// Update the callback to use the state
+			traceCallback.OnToken = func(ctx context.Context, token string) {
+				tokenCount++
+
+				// Throttle updates: every 5 tokens or 100ms
+				now := time.Now()
+				if tokenCount%5 == 0 || now.Sub(lastBroadcast) > 100*time.Millisecond {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "usage",
+						Data: fmt.Sprintf(`{"response_tokens": %d}`, tokenCount),
+					})
+					lastBroadcast = now
+				}
 			}
 
 			// Trace internal steps (fake ones purely for UI experience if config enabled)
@@ -363,7 +393,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					})
 					err = fmt.Errorf("tool calling not supported for this provider")
 				} else {
-					fullContent, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster)
+					fullContent, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel)
 				}
 			} else {
 				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
@@ -395,13 +425,24 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			if h.cfg.EnableTrace && len(traceEntries) > 0 {
 				traceEntries[0].Complete()
 				traceEntries[0].Output = fullContent
+				if err != nil {
+					traceEntries[0].Error = err.Error()
+				}
 			}
 
-			// Save assistant message to database
-			if db != nil && fullContent != "" {
+			// Save assistant message to database (also persist error cases so history shows an "air bubble" + trace).
+			if db != nil && (fullContent != "" || err != nil) {
+				entries := traceEntries
+				if err != nil && len(entries) == 0 {
+					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+					entry.Error = err.Error()
+					entry.Complete()
+					entries = []model.TraceEntry{entry}
+				}
+
 				traceData := model.TraceDataJSON{
 					TraceData: model.TraceData{
-						Entries:  traceEntries,
+						Entries:  entries,
 						Model:    resolvedModel.ModelName,
 						Duration: time.Since(traceStart).Milliseconds(),
 					},
@@ -696,6 +737,9 @@ func runToolLoop(
 	opts *llm.ChatCompletionOptions,
 	defs []tool.Definition,
 	broadcaster *StreamBroadcaster,
+	sessionID string,
+	userID string,
+	resolved *resolvedModel,
 ) (string, error) {
 	if len(defs) == 0 {
 		return "", fmt.Errorf("no tools configured")
@@ -732,6 +776,7 @@ func runToolLoop(
 			result, err = client.ChatCompletionWithTools(ctx, messages, opts)
 		}
 		if err != nil {
+			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
 			return "", err
 		}
 
@@ -758,6 +803,7 @@ func runToolLoop(
 					Type: "error",
 					Data: fmt.Sprintf("Unknown tool: %s", call.Function.Name),
 				})
+				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, fmt.Errorf("unknown tool"))
 				return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
 			}
 
@@ -772,6 +818,7 @@ func runToolLoop(
 					Type: "error",
 					Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, err),
 				})
+				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
 				return "", err
 			}
 			response, err := json.Marshal(payload)
@@ -780,6 +827,7 @@ func runToolLoop(
 					Type: "error",
 					Data: fmt.Sprintf("Tool %s response error: %v", call.Function.Name, err),
 				})
+				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
 				return "", err
 			}
 
@@ -792,7 +840,34 @@ func runToolLoop(
 		}
 	}
 
+	recordToolFailure(sessionID, userID, resolved, "", "", "", fmt.Errorf("tool call limit reached"))
 	return "", fmt.Errorf("tool call limit reached")
+}
+
+func recordToolFailure(sessionID, userID string, resolved *resolvedModel, toolName, toolCallID, args string, err error) {
+	if err == nil {
+		return
+	}
+	db := database.GetDB()
+	if db == nil {
+		return
+	}
+
+	failure := model.ToolCallFailure{
+		SessionID:  sessionID,
+		UserID:     userID,
+		ToolName:   toolName,
+		ToolCallID: toolCallID,
+		Arguments:  args,
+		Error:      err.Error(),
+	}
+	if resolved != nil {
+		failure.ProviderID = resolved.ProviderID
+		failure.ModelID = resolved.ModelID
+		failure.ModelName = resolved.ModelName
+	}
+
+	_ = db.Create(&failure).Error
 }
 
 func extractToolIDs(metadata model.JSONB) ([]string, bool) {

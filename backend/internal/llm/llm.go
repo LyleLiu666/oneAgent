@@ -54,6 +54,7 @@ type StreamCallback func(chunk string) error
 type TraceCallback struct {
 	OnStart      func(ctx context.Context, input []ChatMessage)
 	OnFirstToken func(ctx context.Context)
+	OnToken      func(ctx context.Context, token string)
 	OnComplete   func(ctx context.Context, fullOutput string, err error)
 }
 
@@ -438,6 +439,12 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 
 			content := chunk.Choices[0].Delta.Content
 			fullContent += content
+
+			// Trace: OnToken
+			if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+				opts.Trace.OnToken(ctx, content)
+			}
+
 			if err := callback(content); err != nil {
 				// Trace: OnComplete (cancelled by callback)
 				if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
@@ -588,6 +595,12 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			}
 
 			fullContent.WriteString(choice.Delta.Content)
+
+			// Trace: OnToken
+			if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+				opts.Trace.OnToken(ctx, choice.Delta.Content)
+			}
+
 			if err := callback(choice.Delta.Content); err != nil {
 				if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 					opts.Trace.OnComplete(ctx, fullContent.String(), err)
@@ -623,6 +636,11 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 					toolArgs[delta.Index] = builder
 				}
 				builder.WriteString(delta.Function.Arguments)
+
+				// Trace: OnToken for tool call arguments
+				if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+					opts.Trace.OnToken(ctx, delta.Function.Arguments)
+				}
 			}
 		}
 

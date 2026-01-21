@@ -65,6 +65,7 @@ func AutoMigrate() error {
 		&model.LLMProvider{},
 		&model.LLMModel{},
 		&model.LLMCall{},
+		&model.ToolCallFailure{},
 		&model.UserSettings{},
 	)
 }
