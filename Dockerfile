@@ -92,7 +92,7 @@ RUN groupadd -r app && useradd -r -g app -d /app -s /bin/bash -m app \
 WORKDIR /app
 
 # Install Python libraries
-RUN pip3 install --no-cache-dir \
+RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir \
     requests \
     pandas \
     numpy \
@@ -102,7 +102,7 @@ RUN pip3 install --no-cache-dir \
     Pillow \
     opencv-python-headless \
     pydub \
-    librosa -i https://pypi.tuna.tsinghua.edu.cn/simple
+    librosa 
 
 # Copy the binary
 COPY --from=backend-builder --chown=app:app /app/server .
