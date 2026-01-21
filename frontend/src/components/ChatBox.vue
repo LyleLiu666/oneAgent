@@ -196,7 +196,7 @@ const loadSessionMessages = async (sessionId: string, showLoading = true) => {
       })
 
     chatStore.setCurrentSession(sessionId)
-    chatStore.setMessages(mapped)
+    chatStore.setMessages(insertAssistantPlaceholders(mapped))
     scrollToBottom(false)
   } catch (error) {
     console.error('Failed to load session:', error)
@@ -211,6 +211,39 @@ const loadSessionMessages = async (sessionId: string, showLoading = true) => {
   } finally {
     if (showLoading) loadingHistory.value = false
   }
+}
+
+const insertAssistantPlaceholders = (messages: ChatMessage[]) => {
+  if (messages.length === 0) return messages
+
+  const out: ChatMessage[] = []
+  const placeholderBase = Date.now() + 1000000
+  let placeholderIndex = 0
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i]
+    out.push(message)
+
+    if (message.role !== 'user') {
+      continue
+    }
+
+    const next = messages[i + 1]
+    if (next && next.role === 'assistant') {
+      continue
+    }
+
+    out.push({
+      id: placeholderBase + placeholderIndex,
+      role: 'assistant',
+      content: '',
+      createdAt: message.createdAt,
+      isStreaming: false,
+    })
+    placeholderIndex += 1
+  }
+
+  return out
 }
 
 const selectSession = async (sessionId: string) => {
@@ -258,6 +291,7 @@ const sendChat = async (rawMessage: string) => {
   chatStore.addMessage(assistantMessage)
   chatStore.setLoading(true)
   chatStore.clearStreamingContent()
+  let streamHadError = false
 
   try {
     await streamChat(
@@ -277,13 +311,18 @@ const sendChat = async (rawMessage: string) => {
           if (lastMsg) {
             lastMsg.trace = (lastMsg.trace || '') + event.data + '\n'
           }
+        } else if (event.type === 'error') {
+          streamHadError = true
+          const suffix = event.data ? `\n\n[Error] ${event.data}` : '\n\n[Error] Request failed.'
+          chatStore.appendStreamingContent(suffix)
+          chatStore.updateLastMessage(chatStore.streamingContent, false)
         } else if (event.type === 'done') {
           chatStore.updateLastMessage(chatStore.streamingContent, false)
           chatStore.clearStreamingContent()
           // Refresh sessions list to show new session or update time
           loadSessions()
           // Reload session messages to ensure trace and metadata are up to date
-          if (chatStore.currentSessionId) {
+          if (chatStore.currentSessionId && !streamHadError) {
             loadSessionMessages(chatStore.currentSessionId, false)
           }
         }

@@ -357,6 +357,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
 				})
 				if !ok {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "error",
+						Data: "Tool calling not supported for this provider",
+					})
 					err = fmt.Errorf("tool calling not supported for this provider")
 				} else {
 					fullContent, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster)
@@ -681,6 +685,10 @@ type toolCaller interface {
 	ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
 }
 
+type toolStreamingCaller interface {
+	ChatCompletionStreamWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions, llm.StreamCallback) (llm.ChatCompletionResult, error)
+}
+
 func runToolLoop(
 	ctx context.Context,
 	client toolCaller,
@@ -700,13 +708,35 @@ func runToolLoop(
 
 	const maxSteps = 20
 	for step := 0; step < maxSteps; step++ {
-		result, err := client.ChatCompletionWithTools(ctx, messages, opts)
+		var (
+			result   llm.ChatCompletionResult
+			err      error
+			streamed bool
+		)
+
+		if streamClient, ok := client.(toolStreamingCaller); ok {
+			streamed = true
+			var stepContent strings.Builder
+			result, err = streamClient.ChatCompletionStreamWithTools(ctx, messages, opts, func(chunk string) error {
+				stepContent.WriteString(chunk)
+				broadcaster.Broadcast(StreamEvent{
+					Type: "content",
+					Data: chunk,
+				})
+				return nil
+			})
+			if result.Content == "" {
+				result.Content = stepContent.String()
+			}
+		} else {
+			result, err = client.ChatCompletionWithTools(ctx, messages, opts)
+		}
 		if err != nil {
 			return "", err
 		}
 
 		if len(result.ToolCalls) == 0 {
-			if result.Content != "" {
+			if !streamed && result.Content != "" {
 				broadcaster.Broadcast(StreamEvent{
 					Type: "content",
 					Data: result.Content,

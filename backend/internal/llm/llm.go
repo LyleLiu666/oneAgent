@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -249,110 +250,61 @@ type streamChunk struct {
 	} `json:"choices"`
 }
 
+type streamToolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"function,omitempty"`
+}
+
+type streamChunkWithTools struct {
+	ID      string `json:"id"`
+	Choices []struct {
+		Delta struct {
+			Role      string                `json:"role,omitempty"`
+			Content   string                `json:"content,omitempty"`
+			ToolCalls []streamToolCallDelta `json:"tool_calls,omitempty"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+}
+
 // ChatCompletion performs a non-streaming chat completion.
 func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (string, error) {
-	result, err := c.ChatCompletionWithTools(ctx, messages, opts)
-	if err != nil {
+	var fullContent strings.Builder
+
+	if opts != nil && len(opts.Tools) > 0 {
+		result, err := c.ChatCompletionStreamWithTools(ctx, messages, opts, func(chunk string) error {
+			fullContent.WriteString(chunk)
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+		if result.Content != "" {
+			return result.Content, nil
+		}
+		return fullContent.String(), nil
+	}
+
+	if err := c.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+		fullContent.WriteString(chunk)
+		return nil
+	}); err != nil {
 		return "", err
 	}
-	return result.Content, nil
+
+	return fullContent.String(), nil
 }
 
 // ChatCompletionWithTools performs a non-streaming chat completion and returns tool calls.
 func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (ChatCompletionResult, error) {
-	model := c.model
-	if opts != nil && opts.Model != "" {
-		model = opts.Model
-	}
-
-	// Trace: OnStart
-	if opts != nil && opts.Trace != nil && opts.Trace.OnStart != nil {
-		opts.Trace.OnStart(ctx, messages)
-	}
-
-	reqMessages := messages
-	if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
-		reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
-	}
-
-	defaultMaxTokens := 4096
-	reqBody := chatCompletionRequest{
-		Model:    model,
-		Messages: reqMessages,
-		Stream:   false,
-	}
-
-	if opts != nil && opts.MaxTokens != nil {
-		reqBody.MaxTokens = opts.MaxTokens
-	} else {
-		reqBody.MaxTokens = &defaultMaxTokens
-	}
-
-	if opts != nil {
-		reqBody.Temperature = opts.Temperature
-		reqBody.TopP = opts.TopP
-		reqBody.FrequencyPenalty = opts.FrequencyPenalty
-		reqBody.PresencePenalty = opts.PresencePenalty
-		reqBody.Stop = opts.Stop
-		reqBody.PromptCacheKey = opts.PromptCacheKey
-		if len(opts.Tools) > 0 {
-			reqBody.Tools = normalizeTools(opts.Tools)
-		}
-		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
-		}
-	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return ChatCompletionResult{}, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result chatCompletionResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	parsed, err := parseChatCompletionResult(result)
-	if err != nil {
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
-		}
-		return ChatCompletionResult{}, err
-	}
-	// Trace: OnComplete (success)
-	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-		// Non-streaming implies "first token" happened instantly with the response
-		if opts.Trace.OnFirstToken != nil {
-			opts.Trace.OnFirstToken(ctx)
-		}
-		opts.Trace.OnComplete(ctx, parsed.Content, nil)
-	}
-
-	return parsed, nil
+	return c.ChatCompletionStreamWithTools(ctx, messages, opts, func(string) error {
+		return nil
+	})
 }
 
 // ChatCompletionStream performs a streaming chat completion.
@@ -502,6 +454,213 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 	}
 
 	return nil
+}
+
+// ChatCompletionStreamWithTools performs a streaming chat completion and returns tool calls.
+func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions, callback StreamCallback) (ChatCompletionResult, error) {
+	model := c.model
+	if opts != nil && opts.Model != "" {
+		model = opts.Model
+	}
+
+	if opts != nil && opts.Trace != nil && opts.Trace.OnStart != nil {
+		opts.Trace.OnStart(ctx, messages)
+	}
+
+	reqMessages := messages
+	if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
+		reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
+	}
+
+	defaultMaxTokens := 4096
+	reqBody := chatCompletionRequest{
+		Model:    model,
+		Messages: reqMessages,
+		Stream:   true,
+	}
+
+	if opts != nil && opts.MaxTokens != nil {
+		reqBody.MaxTokens = opts.MaxTokens
+	} else {
+		reqBody.MaxTokens = &defaultMaxTokens
+	}
+
+	if opts != nil {
+		reqBody.Temperature = opts.Temperature
+		reqBody.TopP = opts.TopP
+		reqBody.FrequencyPenalty = opts.FrequencyPenalty
+		reqBody.PresencePenalty = opts.PresencePenalty
+		reqBody.Stop = opts.Stop
+		reqBody.PromptCacheKey = opts.PromptCacheKey
+		if len(opts.Tools) > 0 {
+			reqBody.Tools = normalizeTools(opts.Tools)
+		}
+		if opts.ToolChoice != nil {
+			reqBody.ToolChoice = opts.ToolChoice
+		}
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return ChatCompletionResult{}, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Cache-Control", "no-cache")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		err = fmt.Errorf("request failed: %w", err)
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, "", err)
+		}
+		return ChatCompletionResult{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, "", err)
+		}
+		return ChatCompletionResult{}, err
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	var fullContent strings.Builder
+	var firstTokenReceived bool
+	toolCalls := make(map[int]*ToolCall)
+	toolArgs := make(map[int]*strings.Builder)
+	finishReason := ""
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			readErr := fmt.Errorf("stream read error: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, fullContent.String(), readErr)
+			}
+			return ChatCompletionResult{}, readErr
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var chunk streamChunkWithTools
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+
+		if len(chunk.Choices) == 0 {
+			continue
+		}
+
+		choice := chunk.Choices[0]
+		if choice.Delta.Content != "" {
+			if !firstTokenReceived {
+				firstTokenReceived = true
+				if opts != nil && opts.Trace != nil && opts.Trace.OnFirstToken != nil {
+					opts.Trace.OnFirstToken(ctx)
+				}
+			}
+
+			fullContent.WriteString(choice.Delta.Content)
+			if err := callback(choice.Delta.Content); err != nil {
+				if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+					opts.Trace.OnComplete(ctx, fullContent.String(), err)
+				}
+				return ChatCompletionResult{}, err
+			}
+		}
+
+		for _, delta := range choice.Delta.ToolCalls {
+			acc, ok := toolCalls[delta.Index]
+			if !ok {
+				acc = &ToolCall{
+					Type: delta.Type,
+					Function: ToolCallFunction{
+						Name: delta.Function.Name,
+					},
+				}
+				toolCalls[delta.Index] = acc
+			}
+			if delta.ID != "" {
+				acc.ID = delta.ID
+			}
+			if delta.Type != "" {
+				acc.Type = delta.Type
+			}
+			if delta.Function.Name != "" {
+				acc.Function.Name = delta.Function.Name
+			}
+			if delta.Function.Arguments != "" {
+				builder, ok := toolArgs[delta.Index]
+				if !ok {
+					builder = &strings.Builder{}
+					toolArgs[delta.Index] = builder
+				}
+				builder.WriteString(delta.Function.Arguments)
+			}
+		}
+
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = *choice.FinishReason
+		}
+	}
+
+	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+		opts.Trace.OnComplete(ctx, fullContent.String(), nil)
+	}
+
+	indices := make([]int, 0, len(toolCalls))
+	for idx := range toolCalls {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	finalCalls := make([]ToolCall, 0, len(indices))
+	for _, idx := range indices {
+		call := toolCalls[idx]
+		if call == nil {
+			continue
+		}
+		if builder, ok := toolArgs[idx]; ok {
+			call.Function.Arguments = builder.String()
+		}
+		if call.Function.Arguments == "" {
+			call.Function.Arguments = "{}"
+		}
+		finalCalls = append(finalCalls, *call)
+	}
+
+	return ChatCompletionResult{
+		Content:      fullContent.String(),
+		ToolCalls:    finalCalls,
+		FinishReason: finishReason,
+	}, nil
 }
 
 // ============================================================================

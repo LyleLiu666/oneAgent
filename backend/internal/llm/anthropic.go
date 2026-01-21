@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -35,8 +36,14 @@ type anthropicCacheControl struct {
 
 type anthropicContent struct {
 	Type         string                 `json:"type"`
-	Text         string                 `json:"text"`
+	Text         string                 `json:"text,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Name         string                 `json:"name,omitempty"`
+	Input        map[string]any         `json:"input,omitempty"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	Content      string                 `json:"content,omitempty"`
+	IsError      bool                   `json:"is_error,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -53,6 +60,14 @@ type anthropicRequest struct {
 	TopP          *float64           `json:"top_p,omitempty"`
 	StopSequences []string           `json:"stop_sequences,omitempty"`
 	Stream        bool               `json:"stream"`
+	Tools         []anthropicTool    `json:"tools,omitempty"`
+	ToolChoice    any                `json:"tool_choice,omitempty"`
+}
+
+type anthropicTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -68,17 +83,26 @@ type anthropicResponse struct {
 	} `json:"error,omitempty"`
 }
 
+type anthropicStreamDelta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+}
+
+type anthropicStreamContentBlock struct {
+	Type  string         `json:"type"`
+	Text  string         `json:"text,omitempty"`
+	ID    string         `json:"id,omitempty"`
+	Name  string         `json:"name,omitempty"`
+	Input map[string]any `json:"input,omitempty"`
+}
+
 type anthropicStreamEvent struct {
-	Type  string `json:"type"`
-	Delta *struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"delta,omitempty"`
-	ContentBlock *struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content_block,omitempty"`
-	Error *struct {
+	Type         string                       `json:"type"`
+	Delta        *anthropicStreamDelta        `json:"delta,omitempty"`
+	ContentBlock *anthropicStreamContentBlock `json:"content_block,omitempty"`
+	Index        *int                         `json:"index,omitempty"`
+	Error        *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error,omitempty"`
@@ -86,103 +110,37 @@ type anthropicStreamEvent struct {
 
 // ChatCompletion performs a non-streaming completion with Claude.
 func (c *AnthropicClient) ChatCompletion(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (string, error) {
-	model := c.model
-	if opts != nil && opts.Model != "" {
-		model = opts.Model
-	}
+	var fullContent strings.Builder
 
-	if opts != nil && opts.Trace != nil && opts.Trace.OnStart != nil {
-		opts.Trace.OnStart(ctx, messages)
-	}
-
-	system, anthropicMessages := buildAnthropicPayload(messages, opts != nil && opts.EnablePromptCache)
-	maxTokens := 4096
-	if opts != nil && opts.MaxTokens != nil {
-		maxTokens = *opts.MaxTokens
-	}
-
-	reqBody := anthropicRequest{
-		Model:         model,
-		MaxTokens:     maxTokens,
-		Messages:      anthropicMessages,
-		System:        system,
-		Temperature:   nil,
-		TopP:          nil,
-		StopSequences: nil,
-		Stream:        false,
-	}
-
-	if opts != nil {
-		reqBody.Temperature = opts.Temperature
-		reqBody.TopP = opts.TopP
-		reqBody.StopSequences = opts.Stop
-	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/messages", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	if opts != nil && opts.EnablePromptCache {
-		req.Header.Set("anthropic-beta", "prompt-caching")
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result anthropicResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if result.Type == "error" || result.Error != nil {
-		msg := "unknown error"
-		if result.Error != nil && result.Error.Message != "" {
-			msg = result.Error.Message
+	if opts != nil && len(opts.Tools) > 0 {
+		result, err := c.ChatCompletionStreamWithTools(ctx, messages, opts, func(chunk string) error {
+			fullContent.WriteString(chunk)
+			return nil
+		})
+		if err != nil {
+			return "", err
 		}
-		err := fmt.Errorf("API error: %s", msg)
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
+		if result.Content != "" {
+			return result.Content, nil
 		}
+		return fullContent.String(), nil
+	}
+
+	if err := c.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+		fullContent.WriteString(chunk)
+		return nil
+	}); err != nil {
 		return "", err
 	}
 
-	var contentBuilder strings.Builder
-	for _, block := range result.Content {
-		if block.Type == "text" {
-			contentBuilder.WriteString(block.Text)
-		}
-	}
+	return fullContent.String(), nil
+}
 
-	content := contentBuilder.String()
-	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-		if opts.Trace.OnFirstToken != nil {
-			opts.Trace.OnFirstToken(ctx)
-		}
-		opts.Trace.OnComplete(ctx, content, nil)
-	}
-
-	return content, nil
+// ChatCompletionWithTools performs a non-streaming completion and returns tool calls.
+func (c *AnthropicClient) ChatCompletionWithTools(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (ChatCompletionResult, error) {
+	return c.ChatCompletionStreamWithTools(ctx, messages, opts, func(string) error {
+		return nil
+	})
 }
 
 // ChatCompletionStream performs a streaming completion with Claude.
@@ -329,6 +287,217 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, messages []C
 	return nil
 }
 
+// ChatCompletionStreamWithTools performs a streaming completion and returns tool calls.
+func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions, callback StreamCallback) (ChatCompletionResult, error) {
+	model := c.model
+	if opts != nil && opts.Model != "" {
+		model = opts.Model
+	}
+
+	if opts != nil && opts.Trace != nil && opts.Trace.OnStart != nil {
+		opts.Trace.OnStart(ctx, messages)
+	}
+
+	system, anthropicMessages := buildAnthropicPayload(messages, opts != nil && opts.EnablePromptCache)
+	maxTokens := 4096
+	if opts != nil && opts.MaxTokens != nil {
+		maxTokens = *opts.MaxTokens
+	}
+
+	reqBody := anthropicRequest{
+		Model:         model,
+		MaxTokens:     maxTokens,
+		Messages:      anthropicMessages,
+		System:        system,
+		Temperature:   nil,
+		TopP:          nil,
+		StopSequences: nil,
+		Stream:        true,
+	}
+	if opts != nil {
+		reqBody.Temperature = opts.Temperature
+		reqBody.TopP = opts.TopP
+		reqBody.StopSequences = opts.Stop
+		if len(opts.Tools) > 0 {
+			reqBody.Tools = buildAnthropicTools(opts.Tools)
+		}
+		if opts.ToolChoice != nil {
+			reqBody.ToolChoice = opts.ToolChoice
+		}
+	}
+
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/messages", bytes.NewReader(body))
+	if err != nil {
+		return ChatCompletionResult{}, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Cache-Control", "no-cache")
+	if opts != nil && opts.EnablePromptCache {
+		req.Header.Set("anthropic-beta", "prompt-caching")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		err = fmt.Errorf("request failed: %w", err)
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, "", err)
+		}
+		return ChatCompletionResult{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, "", err)
+		}
+		return ChatCompletionResult{}, err
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	var fullContent strings.Builder
+	var firstTokenReceived bool
+	toolCalls := make(map[int]*ToolCall)
+	toolArgs := make(map[int]*strings.Builder)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			readErr := fmt.Errorf("stream read error: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, fullContent.String(), readErr)
+			}
+			return ChatCompletionResult{}, readErr
+		}
+
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+
+		var event anthropicStreamEvent
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+
+		if event.Error != nil {
+			err = fmt.Errorf("API error: %s", event.Error.Message)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, fullContent.String(), err)
+			}
+			return ChatCompletionResult{}, err
+		}
+
+		switch event.Type {
+		case "content_block_start":
+			if event.ContentBlock == nil || event.Index == nil {
+				continue
+			}
+			if event.ContentBlock.Type == "tool_use" {
+				index := *event.Index
+				toolCalls[index] = &ToolCall{
+					ID:   event.ContentBlock.ID,
+					Type: "function",
+					Function: ToolCallFunction{
+						Name: event.ContentBlock.Name,
+					},
+				}
+				if event.ContentBlock.Input != nil {
+					args, err := json.Marshal(event.ContentBlock.Input)
+					if err == nil {
+						builder := &strings.Builder{}
+						builder.Write(args)
+						toolArgs[index] = builder
+					}
+				}
+			}
+		case "content_block_delta":
+			if event.Delta == nil {
+				continue
+			}
+			switch event.Delta.Type {
+			case "text_delta":
+				if event.Delta.Text == "" {
+					continue
+				}
+				if !firstTokenReceived {
+					firstTokenReceived = true
+					if opts != nil && opts.Trace != nil && opts.Trace.OnFirstToken != nil {
+						opts.Trace.OnFirstToken(ctx)
+					}
+				}
+				fullContent.WriteString(event.Delta.Text)
+				if err := callback(event.Delta.Text); err != nil {
+					if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+						opts.Trace.OnComplete(ctx, fullContent.String(), err)
+					}
+					return ChatCompletionResult{}, err
+				}
+			case "input_json_delta":
+				if event.Index == nil || event.Delta.PartialJSON == "" {
+					continue
+				}
+				builder, ok := toolArgs[*event.Index]
+				if !ok {
+					builder = &strings.Builder{}
+					toolArgs[*event.Index] = builder
+				}
+				builder.WriteString(event.Delta.PartialJSON)
+			}
+		}
+	}
+
+	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+		opts.Trace.OnComplete(ctx, fullContent.String(), nil)
+	}
+
+	indices := make([]int, 0, len(toolCalls))
+	for idx := range toolCalls {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	finalCalls := make([]ToolCall, 0, len(indices))
+	for _, idx := range indices {
+		call := toolCalls[idx]
+		if call == nil {
+			continue
+		}
+		if builder, ok := toolArgs[idx]; ok {
+			call.Function.Arguments = builder.String()
+		}
+		if call.Function.Arguments == "" {
+			call.Function.Arguments = "{}"
+		}
+		finalCalls = append(finalCalls, *call)
+	}
+
+	return ChatCompletionResult{
+		Content:   fullContent.String(),
+		ToolCalls: finalCalls,
+	}, nil
+}
+
 func buildAnthropicPayload(messages []ChatMessage, enableCache bool) ([]anthropicContent, []anthropicMessage) {
 	cacheIndexes := map[int]bool{}
 	if enableCache {
@@ -339,24 +508,125 @@ func buildAnthropicPayload(messages []ChatMessage, enableCache bool) ([]anthropi
 	converted := make([]anthropicMessage, 0)
 
 	for idx, msg := range messages {
-		block := anthropicContent{
-			Type: "text",
-			Text: msg.Content,
-		}
-		if enableCache && cacheIndexes[idx] {
-			block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
-		}
-
 		if msg.Role == "system" {
+			block := anthropicContent{
+				Type: "text",
+				Text: msg.Content,
+			}
+			if enableCache && cacheIndexes[idx] {
+				block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+			}
 			system = append(system, block)
 			continue
 		}
 
-		converted = append(converted, anthropicMessage{
-			Role:    msg.Role,
-			Content: []anthropicContent{block},
-		})
+		switch msg.Role {
+		case "assistant":
+			blocks := make([]anthropicContent, 0, 1+len(msg.ToolCalls))
+			if msg.Content != "" {
+				block := anthropicContent{
+					Type: "text",
+					Text: msg.Content,
+				}
+				if enableCache && cacheIndexes[idx] {
+					block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+				}
+				blocks = append(blocks, block)
+			}
+
+			for _, call := range msg.ToolCalls {
+				blocks = append(blocks, anthropicContent{
+					Type:  "tool_use",
+					ID:    call.ID,
+					Name:  call.Function.Name,
+					Input: parseToolInput(call.Function.Arguments),
+				})
+			}
+
+			converted = append(converted, anthropicMessage{
+				Role:    "assistant",
+				Content: blocks,
+			})
+		case "tool":
+			converted = append(converted, anthropicMessage{
+				Role: "user",
+				Content: []anthropicContent{{
+					Type:      "tool_result",
+					ToolUseID: msg.ToolCallID,
+					Content:   msg.Content,
+				}},
+			})
+		default:
+			block := anthropicContent{
+				Type: "text",
+				Text: msg.Content,
+			}
+			if enableCache && cacheIndexes[idx] {
+				block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+			}
+			converted = append(converted, anthropicMessage{
+				Role:    msg.Role,
+				Content: []anthropicContent{block},
+			})
+		}
 	}
 
 	return system, converted
+}
+
+func buildAnthropicTools(tools []Tool) []anthropicTool {
+	if len(tools) == 0 {
+		return nil
+	}
+
+	out := make([]anthropicTool, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, anthropicTool{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+			InputSchema: tool.Function.Parameters,
+		})
+	}
+	return out
+}
+
+func parseToolInput(raw string) map[string]any {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]any{}
+	}
+	var input map[string]any
+	if err := json.Unmarshal([]byte(raw), &input); err != nil {
+		return map[string]any{"_raw": raw}
+	}
+	if input == nil {
+		return map[string]any{}
+	}
+	return input
+}
+
+func extractAnthropicContent(blocks []anthropicContent) (string, []ToolCall) {
+	var contentBuilder strings.Builder
+	toolCalls := make([]ToolCall, 0)
+
+	for _, block := range blocks {
+		switch block.Type {
+		case "text":
+			contentBuilder.WriteString(block.Text)
+		case "tool_use":
+			args, err := json.Marshal(block.Input)
+			if err != nil {
+				args = []byte("{}")
+			}
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: ToolCallFunction{
+					Name:      block.Name,
+					Arguments: string(args),
+				},
+			})
+		}
+	}
+
+	return contentBuilder.String(), toolCalls
 }

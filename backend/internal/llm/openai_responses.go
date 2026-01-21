@@ -68,90 +68,14 @@ type responsesResponse struct {
 
 // ChatCompletion performs a non-streaming response request.
 func (c *OpenAIResponsesClient) ChatCompletion(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (string, error) {
-	model := c.model
-	if opts != nil && opts.Model != "" {
-		model = opts.Model
-	}
-
-	if opts != nil && opts.Trace != nil && opts.Trace.OnStart != nil {
-		opts.Trace.OnStart(ctx, messages)
-	}
-
-	defaultMaxTokens := 4096
-	reqBody := responsesRequest{
-		Model:  model,
-		Input:  buildResponsesInput(messages),
-		Stream: false,
-	}
-
-	if opts != nil && opts.MaxTokens != nil {
-		reqBody.MaxOutputTokens = opts.MaxTokens
-	} else {
-		reqBody.MaxOutputTokens = &defaultMaxTokens
-	}
-
-	if opts != nil {
-		reqBody.Temperature = opts.Temperature
-		reqBody.TopP = opts.TopP
-		reqBody.PromptCacheKey = opts.PromptCacheKey
-		if len(opts.Tools) > 0 {
-			reqBody.Tools = normalizeTools(opts.Tools)
-		}
-		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
-		}
-	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/responses", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
-	}
-
-	var result responsesResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if result.Error != nil {
-		err := fmt.Errorf("API error: %s", result.Error.Message)
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
-		}
+	var fullContent strings.Builder
+	if err := c.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+		fullContent.WriteString(chunk)
+		return nil
+	}); err != nil {
 		return "", err
 	}
-
-	content := extractResponsesOutput(result)
-	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-		if opts.Trace.OnFirstToken != nil {
-			opts.Trace.OnFirstToken(ctx)
-		}
-		opts.Trace.OnComplete(ctx, content, nil)
-	}
-
-	return content, nil
+	return fullContent.String(), nil
 }
 
 // ChatCompletionStream performs a streaming response request.
