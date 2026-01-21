@@ -58,6 +58,10 @@ const selectedToolIds = computed({
   get: () => chatStore.currentToolIds,
   set: (value: string[]) => chatStore.setCurrentTools(value),
 })
+const selectedToolProtocol = computed({
+  get: () => chatStore.currentToolProtocol,
+  set: (value: string) => chatStore.setCurrentToolProtocol(value),
+})
 
 // Methods
 const scrollToBottom = (smooth = true) => {
@@ -172,6 +176,12 @@ const loadSessionMessages = async (sessionId: string, showLoading = true) => {
       selectedToolIds.value = sessionToolIds.map((id: any) => String(id))
     } else {
       selectedToolIds.value = []
+    }
+    const sessionToolProtocol = raw?.metadata?.tool_protocol
+    if (sessionToolProtocol) {
+      selectedToolProtocol.value = String(sessionToolProtocol).toLowerCase()
+    } else {
+      selectedToolProtocol.value = 'json'
     }
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
     const mapped: ChatMessage[] = rawMessages
@@ -299,6 +309,7 @@ const sendChat = async (rawMessage: string) => {
       chatStore.currentSessionId,
       chatStore.currentModelId,
       chatStore.currentToolIds,
+      chatStore.currentToolProtocol,
       (event) => {
         if (event.type === 'session') {
           chatStore.setCurrentSession(event.data)
@@ -503,6 +514,14 @@ onMounted(async () => {
               <option v-for="model in models" :key="model.id" :value="model.id">
                 {{ model.name || model.model }}{{ model.provider?.name ? ` · ${model.provider.name}` : '' }}
               </option>
+            </select>
+            <select
+              v-model="selectedToolProtocol"
+              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+              title="Tool protocol"
+            >
+              <option value="json">json tools</option>
+              <option value="xml">xml tools</option>
             </select>
             <div v-if="tools.length > 0" class="flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-surface-400" />

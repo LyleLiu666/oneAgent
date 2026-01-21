@@ -40,15 +40,67 @@ COPY --from=frontend-builder /app/frontend/dist/ ./cmd/server/static/
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 
 # Final stage
-FROM alpine:3.19
+FROM ubuntu:22.04
 
-RUN apk --no-cache add ca-certificates tzdata bash \
-    && addgroup -S app \
-    && adduser -S -G app -h /app app \
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Use Aliyun mirror for apt
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list \
+    && sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list \
+    && sed -i 's/ports.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+
+# Install system dependencies and Python
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    tzdata \
+    curl \
+    pandoc \
+    wget \
+    git \
+    gnupg \
+    locales \
+    zip \
+    unzip \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libffi-dev \
+    nano \
+    procps \
+    jq \
+    tree \
+    poppler-utils \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Generate locales
+RUN locale-gen en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
+
+# Create app user and directory
+RUN groupadd -r app && useradd -r -g app -d /app -s /bin/bash -m app \
     && mkdir -p /data \
     && chown -R app:app /data
 
 WORKDIR /app
+
+# Install Python libraries
+RUN pip3 install --no-cache-dir \
+    requests \
+    pandas \
+    numpy \
+    pypdf \
+    pdfminer.six \
+    beautifulsoup4 \
+    Pillow \
+    opencv-python-headless \
+    pydub \
+    librosa -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Copy the binary
 COPY --from=backend-builder --chown=app:app /app/server .

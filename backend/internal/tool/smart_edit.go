@@ -216,7 +216,7 @@ func parseSmartEditInput(raw json.RawMessage) ([]sbe.EditBlock, bool, []smartEdi
 			return nil, commandReq.ReplaceAll, fileWrites, nil
 		}
 
-		return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w", parseErr)
+		return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w (cat heredoc parse: %v)", parseErr, writeErr)
 	}
 
 	var legacy smartEditToolRequest
@@ -251,7 +251,7 @@ func parseSmartEditInput(raw json.RawMessage) ([]sbe.EditBlock, bool, []smartEdi
 		if writeErr == nil {
 			return nil, false, fileWrites, nil
 		}
-		return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w", parseErr)
+		return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w (cat heredoc parse: %v)", parseErr, writeErr)
 	}
 
 	// Last resort: treat the raw bytes as a plain script (lenient input).
@@ -268,7 +268,7 @@ func parseSmartEditInput(raw json.RawMessage) ([]sbe.EditBlock, bool, []smartEdi
 	if writeErr == nil {
 		return nil, false, fileWrites, nil
 	}
-	return nil, false, nil, fmt.Errorf("invalid smart_edit arguments: %w", parseErr)
+	return nil, false, nil, fmt.Errorf("invalid smart_edit arguments: %w (cat heredoc parse: %v)", parseErr, writeErr)
 }
 
 func decodeCommandLines(raw json.RawMessage) ([]string, error) {
@@ -342,16 +342,16 @@ func parseCatHeredocWrites(lines []string) ([]smartEditFileWrite, error) {
 		var contentLines []string
 		for i < len(lines) {
 			rawLine := lines[i]
-			if strings.TrimSpace(rawLine) == marker {
+			trimmedLine := strings.TrimSpace(rawLine)
+			if trimmedLine == marker || stripOptionalQuotes(trimmedLine) == marker {
 				break
 			}
 			contentLines = append(contentLines, rawLine)
 			i++
 		}
-		if i >= len(lines) {
-			return nil, fmt.Errorf("cat heredoc missing closing marker %q", marker)
-		}
-		i++ // consume marker line
+		if i < len(lines) {
+			i++ // consume marker line
+		} // else: leniently accept EOF as end-of-input
 
 		writes = append(writes, smartEditFileWrite{
 			FilePath: path,

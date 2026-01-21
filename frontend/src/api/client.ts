@@ -36,6 +36,7 @@ export async function streamChat(
     sessionId: string = '',
     modelId: string = '',
     toolIds: string[] = [],
+    toolProtocol: string = 'json',
     onEvent: (event: StreamEvent) => void,
     onError: (error: Error) => void
 ): Promise<void> {
@@ -54,6 +55,7 @@ export async function streamChat(
                 session_id: sessionId,
                 model_id: modelId,
                 tool_ids: toolIds,
+                tool_protocol: toolProtocol,
             }),
         })
 

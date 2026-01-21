@@ -27,6 +27,7 @@ export const useChatStore = defineStore(
         const currentSessionId = ref<string>('')
         const currentModelId = ref<string>('')
         const currentToolIds = ref<string[]>([])
+        const currentToolProtocol = ref<string>('json')
         const messages = ref<ChatMessage[]>([])
         const isLoading = ref(false)
         const streamingContent = ref('')
@@ -57,6 +58,10 @@ export const useChatStore = defineStore(
 
         function setCurrentTools(toolIds: string[]) {
             currentToolIds.value = [...toolIds]
+        }
+
+        function setCurrentToolProtocol(protocol: string) {
+            currentToolProtocol.value = protocol
         }
 
         function setMessages(newMessages: ChatMessage[]) {
@@ -110,6 +115,7 @@ export const useChatStore = defineStore(
             currentSessionId,
             currentModelId,
             currentToolIds,
+            currentToolProtocol,
             messages,
             isLoading,
             streamingContent,
@@ -119,6 +125,7 @@ export const useChatStore = defineStore(
             setCurrentSession,
             setCurrentModel,
             setCurrentTools,
+            setCurrentToolProtocol,
             setMessages,
             addMessage,
             updateLastMessage,
@@ -135,7 +142,7 @@ export const useChatStore = defineStore(
         persist: {
             key: 'chat',
             storage: localStorage,
-            paths: ['currentSessionId', 'currentModelId', 'currentToolIds'],
+            paths: ['currentSessionId', 'currentModelId', 'currentToolIds', 'currentToolProtocol'],
         },
     }
 )

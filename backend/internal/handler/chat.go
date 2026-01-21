@@ -38,6 +38,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/model"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
+	"github.com/liu_y/oneAgent/backend/internal/toolxml"
 )
 
 // ============================================================================
@@ -64,6 +65,7 @@ type ChatRequest struct {
 	SystemPrompt string   `json:"system_prompt,omitempty"` // EXTENSION: Custom system prompt
 	ModelID      string   `json:"model_id,omitempty"`
 	ToolIDs      []string `json:"tool_ids,omitempty"`
+	ToolProtocol string   `json:"tool_protocol,omitempty"` // "json" (default) or "xml"
 }
 
 // StreamEvent represents a Server-Sent Event.
@@ -184,12 +186,32 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		selectedToolIDs = filterKnownToolIDs(selectedToolIDs)
 	}
 
+	toolProtocol := strings.TrimSpace(req.ToolProtocol)
+	toolProtocolSet := toolProtocol != ""
+	if !toolProtocolSet {
+		if stored, ok := extractToolProtocol(session.Metadata); ok {
+			toolProtocol = stored
+		}
+	}
+	toolProtocol = strings.ToLower(strings.TrimSpace(toolProtocol))
+	if toolProtocol == "" {
+		toolProtocol = "json"
+	}
+	if toolProtocol != "json" && toolProtocol != "xml" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tool_protocol"})
+		return
+	}
+
 	toolDefs, err := tool.Mount(selectedToolIDs)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
+
+	if toolProtocol == "xml" && len(toolDefs) > 0 && len(messages) > 0 && messages[0].Role == "system" {
+		messages[0].Content = strings.TrimSpace(messages[0].Content) + "\n\n" + toolxml.SystemPrompt(toolDefs)
+	}
 
 	resolvedModel, err := h.resolveModel(db, userID, selectedModelID)
 	if err != nil {
@@ -210,6 +232,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		}
 		if toolIDsSet {
 			metadata["tool_ids"] = selectedToolIDs
+			shouldUpdate = true
+		}
+		if toolProtocolSet {
+			metadata["tool_protocol"] = toolProtocol
 			shouldUpdate = true
 		}
 
@@ -358,7 +384,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					opts.PromptCacheKey = sessionID
 				}
 			}
-			if len(toolDefs) > 0 {
+			if toolProtocol == "json" && len(toolDefs) > 0 {
 				opts.Tools = tool.ToolsForLLM(toolDefs)
 			}
 
@@ -382,7 +408,28 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			var err error
-			if len(toolDefs) > 0 {
+			if len(toolDefs) > 0 && toolProtocol == "xml" {
+				fullContent, err = toolxml.RunLoop(
+					ctx,
+					resolvedModel.Client,
+					messages,
+					opts,
+					toolDefs,
+					func(chunk string) error {
+						broadcaster.Broadcast(StreamEvent{Type: "content", Data: chunk})
+						return nil
+					},
+					func(msg string) {
+						broadcaster.Broadcast(StreamEvent{Type: "trace", Data: msg})
+					},
+					func(msg string) {
+						broadcaster.Broadcast(StreamEvent{Type: "error", Data: msg})
+					},
+					func(toolName, toolCallID, args string, toolErr error) {
+						recordToolFailure(sessionID, userID, resolvedModel, toolName, toolCallID, args, toolErr)
+					},
+				)
+			} else if len(toolDefs) > 0 {
 				toolClient, ok := resolvedModel.Client.(interface {
 					ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
 				})
@@ -910,6 +957,25 @@ func extractToolIDs(metadata model.JSONB) ([]string, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func extractToolProtocol(metadata model.JSONB) (string, bool) {
+	if metadata == nil {
+		return "", false
+	}
+	raw, ok := metadata["tool_protocol"]
+	if !ok {
+		return "", false
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 func filterKnownToolIDs(ids []string) []string {
