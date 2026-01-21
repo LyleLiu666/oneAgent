@@ -12,6 +12,7 @@ import {
   User,
   Sun,
   Moon,
+  Terminal,
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -30,6 +31,7 @@ const navItems = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Chat', path: '/chat', icon: MessageSquare },
   { name: 'Settings', path: '/settings', icon: Settings },
+  { name: 'Bash', path: '/bash', icon: Terminal },
 ]
 
 const isActive = (path: string) => route.path === path

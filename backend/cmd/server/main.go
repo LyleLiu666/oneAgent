@@ -89,6 +89,9 @@ func main() {
 		api.PUT("/llm/models/:id", handler.UpdateModel)
 		api.DELETE("/llm/models/:id", handler.DeleteModel)
 
+		// Bash command test endpoint
+		api.POST("/bash", handler.RunBash)
+
 		// Bocha search services
 		api.GET("/bocha/settings", bocha.GetSettingsHandler)
 		api.PUT("/bocha/settings", bocha.UpdateSettingsHandler)
