@@ -44,31 +44,40 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Use Aliyun mirror for apt
-RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list \
-    && sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list \
-    && sed -i 's/ports.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+# Use Tsinghua mirror for apt
+RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list \
+    && sed -i 's/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list \
+    && sed -i 's/ports.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list
 
 # Install system dependencies and Python
-RUN apt-get update && apt-get install -y \
+# Install basic system utilities
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     curl \
-    pandoc \
     wget \
     git \
     gnupg \
     locales \
     zip \
     unzip \
-    build-essential \
-    pkg-config \
-    libssl-dev \
-    libffi-dev \
     nano \
     procps \
     jq \
     tree \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install application dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pandoc \
     poppler-utils \
     ffmpeg \
     python3 \
