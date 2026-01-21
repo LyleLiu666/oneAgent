@@ -195,21 +195,73 @@ func findIndentationFlexibleMatch(source, search []string) *MatchResult {
 }
 
 func findEscapeNormalizedMatch(source, search []string) *MatchResult {
-	unescape := func(s string) string {
-		s = strings.ReplaceAll(s, "\\n", "\n")
-		s = strings.ReplaceAll(s, "\\t", "\t")
-		s = strings.ReplaceAll(s, "\\\"", "\"")
-		return s
+	unescape := func(input string) string {
+		var builder strings.Builder
+		builder.Grow(len(input))
+		for i := 0; i < len(input); i++ {
+			ch := input[i]
+			if ch != '\\' || i+1 >= len(input) {
+				builder.WriteByte(ch)
+				continue
+			}
+
+			next := input[i+1]
+			switch next {
+			case 'n':
+				builder.WriteByte('\n')
+				i++
+			case 't':
+				builder.WriteByte('\t')
+				i++
+			case 'r':
+				builder.WriteByte('\r')
+				i++
+			case '\'':
+				builder.WriteByte('\'')
+				i++
+			case '"':
+				builder.WriteByte('"')
+				i++
+			case '`':
+				builder.WriteByte('`')
+				i++
+			case '\\':
+				builder.WriteByte('\\')
+				i++
+			case '$':
+				builder.WriteByte('$')
+				i++
+			case '\n':
+				builder.WriteByte('\n')
+				i++
+			default:
+				builder.WriteByte(ch)
+			}
+		}
+		return builder.String()
 	}
 
-	searchBlock := unescape(strings.Join(search, "\n"))
+	searchBlock := strings.Join(search, "\n")
+	unescapedFind := unescape(searchBlock)
 	sourceBlock := strings.Join(source, "\n")
 
-	if idx := strings.Index(sourceBlock, searchBlock); idx != -1 {
+	if idx := strings.Index(sourceBlock, unescapedFind); idx != -1 {
 		pre := sourceBlock[:idx]
 		startLine := strings.Count(pre, "\n")
-		lineCount := strings.Count(searchBlock, "\n")
+		lineCount := strings.Count(unescapedFind, "\n")
 		return &MatchResult{StartLine: startLine, EndLine: startLine + lineCount, Score: 0.80}
+	}
+
+	findLines := strings.Split(unescapedFind, "\n")
+	if len(findLines) == 0 {
+		return nil
+	}
+
+	for i := 0; i <= len(source)-len(findLines); i++ {
+		block := strings.Join(source[i:i+len(findLines)], "\n")
+		if unescape(block) == unescapedFind {
+			return &MatchResult{StartLine: i, EndLine: i + len(findLines) - 1, Score: 0.80}
+		}
 	}
 	return nil
 }

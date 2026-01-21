@@ -2,9 +2,10 @@ package sbe
 
 // EditBlock represents a single replacement operation
 type EditBlock struct {
-	FilePath string
-	Search   []string // Lines to find
-	Replace  []string // Lines to replace with
+	FilePath   string
+	Search     []string // Lines to find
+	Replace    []string // Lines to replace with
+	ReplaceAll bool
 }
 
 // MatchResult contains the location of the best match

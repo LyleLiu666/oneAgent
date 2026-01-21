@@ -42,6 +42,8 @@ type responsesRequest struct {
 	MaxOutputTokens *int               `json:"max_output_tokens,omitempty"`
 	TopP            *float64           `json:"top_p,omitempty"`
 	PromptCacheKey  string             `json:"prompt_cache_key,omitempty"`
+	Tools           []Tool             `json:"tools,omitempty"`
+	ToolChoice      any                `json:"tool_choice,omitempty"`
 }
 
 type responsesResponse struct {
@@ -92,6 +94,12 @@ func (c *OpenAIResponsesClient) ChatCompletion(ctx context.Context, messages []C
 		reqBody.Temperature = opts.Temperature
 		reqBody.TopP = opts.TopP
 		reqBody.PromptCacheKey = opts.PromptCacheKey
+		if len(opts.Tools) > 0 {
+			reqBody.Tools = normalizeTools(opts.Tools)
+		}
+		if opts.ToolChoice != nil {
+			reqBody.ToolChoice = opts.ToolChoice
+		}
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -172,6 +180,12 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 		reqBody.Temperature = opts.Temperature
 		reqBody.TopP = opts.TopP
 		reqBody.PromptCacheKey = opts.PromptCacheKey
+		if len(opts.Tools) > 0 {
+			reqBody.Tools = normalizeTools(opts.Tools)
+		}
+		if opts.ToolChoice != nil {
+			reqBody.ToolChoice = opts.ToolChoice
+		}
 	}
 
 	body, err := json.Marshal(reqBody)

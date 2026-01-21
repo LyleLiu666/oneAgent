@@ -35,6 +35,7 @@ export async function streamChat(
     message: string,
     sessionId: string = '',
     modelId: string = '',
+    toolIds: string[] = [],
     onEvent: (event: StreamEvent) => void,
     onError: (error: Error) => void
 ): Promise<void> {
@@ -52,6 +53,7 @@ export async function streamChat(
                 message,
                 session_id: sessionId,
                 model_id: modelId,
+                tool_ids: toolIds,
             }),
         })
 
@@ -194,6 +196,10 @@ export async function deleteProvider(providerId: string) {
 export async function getModels(providerId?: string) {
     const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : ''
     return api(`/api/llm/models${query}`)
+}
+
+export async function getTools() {
+    return api('/api/tools')
 }
 
 export async function createModel(payload: {

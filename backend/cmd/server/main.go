@@ -95,6 +95,9 @@ func main() {
 		// Smart Edit endpoint
 		api.POST("/sbe/apply", handler.HandleSmartEdit)
 
+		// Tool metadata
+		api.GET("/tools", handler.ListTools)
+
 		// Bocha search services
 		api.GET("/bocha/settings", bocha.GetSettingsHandler)
 		api.PUT("/bocha/settings", bocha.UpdateSettingsHandler)

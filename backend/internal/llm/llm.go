@@ -70,9 +70,36 @@ type ChatMessage struct {
 	CachePoint   *CacheControl `json:"cachePoint,omitempty"`
 
 	// EXTENSION FIELDS (optional, for tool calls):
-	// Name       string      `json:"name,omitempty"`       // Function name for tool messages
-	// ToolCalls  []ToolCall  `json:"tool_calls,omitempty"` // Tool calls from assistant
-	// ToolCallID string      `json:"tool_call_id,omitempty"` // ID for tool response
+	Name       string     `json:"name,omitempty"`         // Function name for tool messages
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // Tool calls from assistant
+	ToolCallID string     `json:"tool_call_id,omitempty"` // ID for tool response
+}
+
+// Tool describes an OpenAI-compatible tool definition.
+type Tool struct {
+	ID       string       `json:"-"`
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction defines a function-style tool.
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+// ToolCall represents a tool invocation returned by the model.
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function ToolCallFunction `json:"function"`
+}
+
+// ToolCallFunction contains the arguments for a tool call.
+type ToolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // ChatCompletionOptions configures the chat completion request.
@@ -87,13 +114,13 @@ type ChatCompletionOptions struct {
 	Stop              []string `json:"stop,omitempty"`              // Stop sequences
 	PromptCacheKey    string   `json:"-"`
 	EnablePromptCache bool     `json:"-"`
+	Tools             []Tool   `json:"-"`
+	ToolChoice        any      `json:"-"`
 
 	// Trace options
 	Trace *TraceCallback `json:"-"` // Not sent to API
 
-	// EXTENSION: Add for tool/function calling support:
-	// Tools      []Tool `json:"tools,omitempty"`
-	// ToolChoice any    `json:"tool_choice,omitempty"`
+	// EXTENSION: Add for tool/function calling support.
 }
 
 // ============================================================================
@@ -156,6 +183,8 @@ type chatCompletionRequest struct {
 	PresencePenalty  *float64      `json:"presence_penalty,omitempty"`
 	Stop             []string      `json:"stop,omitempty"`
 	PromptCacheKey   string        `json:"prompt_cache_key,omitempty"`
+	Tools            []Tool        `json:"tools,omitempty"`
+	ToolChoice       any           `json:"tool_choice,omitempty"`
 }
 
 // chatCompletionResponse is the response for non-streaming requests.
@@ -163,8 +192,9 @@ type chatCompletionResponse struct {
 	ID      string `json:"id"`
 	Choices []struct {
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role      string     `json:"role"`
+			Content   *string    `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -177,6 +207,34 @@ type chatCompletionResponse struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error,omitempty"`
+}
+
+// ChatCompletionResult includes text content plus any tool calls.
+type ChatCompletionResult struct {
+	Content      string
+	ToolCalls    []ToolCall
+	FinishReason string
+}
+
+func parseChatCompletionResult(result chatCompletionResponse) (ChatCompletionResult, error) {
+	if result.Error != nil {
+		return ChatCompletionResult{}, fmt.Errorf("API error: %s", result.Error.Message)
+	}
+	if len(result.Choices) == 0 {
+		return ChatCompletionResult{}, fmt.Errorf("no choices in response")
+	}
+
+	message := result.Choices[0].Message
+	content := ""
+	if message.Content != nil {
+		content = *message.Content
+	}
+
+	return ChatCompletionResult{
+		Content:      content,
+		ToolCalls:    message.ToolCalls,
+		FinishReason: result.Choices[0].FinishReason,
+	}, nil
 }
 
 // streamChunk represents a chunk in the streaming response.
@@ -193,6 +251,15 @@ type streamChunk struct {
 
 // ChatCompletion performs a non-streaming chat completion.
 func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (string, error) {
+	result, err := c.ChatCompletionWithTools(ctx, messages, opts)
+	if err != nil {
+		return "", err
+	}
+	return result.Content, nil
+}
+
+// ChatCompletionWithTools performs a non-streaming chat completion and returns tool calls.
+func (c *OpenAIClient) ChatCompletionWithTools(ctx context.Context, messages []ChatMessage, opts *ChatCompletionOptions) (ChatCompletionResult, error) {
 	model := c.model
 	if opts != nil && opts.Model != "" {
 		model = opts.Model
@@ -228,16 +295,22 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []ChatMessag
 		reqBody.PresencePenalty = opts.PresencePenalty
 		reqBody.Stop = opts.Stop
 		reqBody.PromptCacheKey = opts.PromptCacheKey
+		if len(opts.Tools) > 0 {
+			reqBody.Tools = normalizeTools(opts.Tools)
+		}
+		if opts.ToolChoice != nil {
+			reqBody.ToolChoice = opts.ToolChoice
+		}
 	}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return ChatCompletionResult{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -245,53 +318,41 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, messages []ChatMessag
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
+		return ChatCompletionResult{}, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return ChatCompletionResult{}, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		return ChatCompletionResult{}, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var result chatCompletionResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		return ChatCompletionResult{}, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if result.Error != nil {
-		err := fmt.Errorf("API error: %s", result.Error.Message)
-		// Trace: OnComplete (error)
+	parsed, err := parseChatCompletionResult(result)
+	if err != nil {
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
-		return "", err
+		return ChatCompletionResult{}, err
 	}
-
-	if len(result.Choices) == 0 {
-		err := fmt.Errorf("no choices in response")
-		// Trace: OnComplete (error)
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
-		}
-		return "", err
-	}
-
-	content := result.Choices[0].Message.Content
 	// Trace: OnComplete (success)
 	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 		// Non-streaming implies "first token" happened instantly with the response
 		if opts.Trace.OnFirstToken != nil {
 			opts.Trace.OnFirstToken(ctx)
 		}
-		opts.Trace.OnComplete(ctx, content, nil)
+		opts.Trace.OnComplete(ctx, parsed.Content, nil)
 	}
 
-	return content, nil
+	return parsed, nil
 }
 
 // ChatCompletionStream performs a streaming chat completion.
@@ -332,6 +393,12 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 		reqBody.PresencePenalty = opts.PresencePenalty
 		reqBody.Stop = opts.Stop
 		reqBody.PromptCacheKey = opts.PromptCacheKey
+		if len(opts.Tools) > 0 {
+			reqBody.Tools = normalizeTools(opts.Tools)
+		}
+		if opts.ToolChoice != nil {
+			reqBody.ToolChoice = opts.ToolChoice
+		}
 	}
 
 	body, err := json.Marshal(reqBody)

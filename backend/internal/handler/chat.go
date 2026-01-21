@@ -37,6 +37,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
 
 // ============================================================================
@@ -58,10 +59,11 @@ const DefaultSystemPrompt = `You are a helpful AI assistant. Be concise and help
 // ChatRequest represents an incoming chat message.
 // EXTENSION: Add fields for temperature, model override, etc.
 type ChatRequest struct {
-	Message      string `json:"message" binding:"required"`
-	SessionID    string `json:"session_id"`
-	SystemPrompt string `json:"system_prompt,omitempty"` // EXTENSION: Custom system prompt
-	ModelID      string `json:"model_id,omitempty"`
+	Message      string   `json:"message" binding:"required"`
+	SessionID    string   `json:"session_id"`
+	SystemPrompt string   `json:"system_prompt,omitempty"` // EXTENSION: Custom system prompt
+	ModelID      string   `json:"model_id,omitempty"`
+	ToolIDs      []string `json:"tool_ids,omitempty"`
 }
 
 // StreamEvent represents a Server-Sent Event.
@@ -173,6 +175,22 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		}
 	}
 
+	toolIDsSet := req.ToolIDs != nil
+	selectedToolIDs := req.ToolIDs
+	if !toolIDsSet {
+		if stored, ok := extractToolIDs(session.Metadata); ok {
+			selectedToolIDs = stored
+		}
+		selectedToolIDs = filterKnownToolIDs(selectedToolIDs)
+	}
+
+	toolDefs, err := tool.Mount(selectedToolIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
+
 	resolvedModel, err := h.resolveModel(db, userID, selectedModelID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -180,21 +198,22 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 
 	if db != nil && resolvedModel.ModelID != "" {
-		shouldUpdate := session.Metadata == nil
-		if !shouldUpdate {
-			if _, ok := session.Metadata["model_id"]; !ok {
-				shouldUpdate = true
-			}
+		metadata := session.Metadata
+		if metadata == nil {
+			metadata = model.JSONB{}
 		}
-		if req.ModelID != "" {
+
+		shouldUpdate := false
+		if _, ok := metadata["model_id"]; !ok || req.ModelID != "" {
+			metadata["model_id"] = resolvedModel.ModelID
 			shouldUpdate = true
 		}
+		if toolIDsSet {
+			metadata["tool_ids"] = selectedToolIDs
+			shouldUpdate = true
+		}
+
 		if shouldUpdate {
-			metadata := session.Metadata
-			if metadata == nil {
-				metadata = model.JSONB{}
-			}
-			metadata["model_id"] = resolvedModel.ModelID
 			db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("metadata", metadata)
 		}
 	}
@@ -309,6 +328,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					opts.PromptCacheKey = sessionID
 				}
 			}
+			if len(toolDefs) > 0 {
+				opts.Tools = tool.ToolsForLLM(toolDefs)
+			}
 
 			var llmCallID uint
 			if db != nil {
@@ -329,14 +351,26 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			}
 
-			err := resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
-				fullContent += chunk
-				broadcaster.Broadcast(StreamEvent{
-					Type: "content",
-					Data: chunk,
+			var err error
+			if len(toolDefs) > 0 {
+				toolClient, ok := resolvedModel.Client.(interface {
+					ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
 				})
-				return nil
-			})
+				if !ok {
+					err = fmt.Errorf("tool calling not supported for this provider")
+				} else {
+					fullContent, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster)
+				}
+			} else {
+				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+					fullContent += chunk
+					broadcaster.Broadcast(StreamEvent{
+						Type: "content",
+						Data: chunk,
+					})
+					return nil
+				})
+			}
 
 			if err != nil {
 				log.Printf("LLM stream error: %v", err)
@@ -641,6 +675,154 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+type toolCaller interface {
+	ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
+}
+
+func runToolLoop(
+	ctx context.Context,
+	client toolCaller,
+	messages []llm.ChatMessage,
+	opts *llm.ChatCompletionOptions,
+	defs []tool.Definition,
+	broadcaster *StreamBroadcaster,
+) (string, error) {
+	if len(defs) == 0 {
+		return "", fmt.Errorf("no tools configured")
+	}
+
+	handlers := make(map[string]tool.Handler)
+	for _, def := range defs {
+		handlers[def.Spec.Function.Name] = def.Handler
+	}
+
+	const maxSteps = 20
+	for step := 0; step < maxSteps; step++ {
+		result, err := client.ChatCompletionWithTools(ctx, messages, opts)
+		if err != nil {
+			return "", err
+		}
+
+		if len(result.ToolCalls) == 0 {
+			if result.Content != "" {
+				broadcaster.Broadcast(StreamEvent{
+					Type: "content",
+					Data: result.Content,
+				})
+			}
+			return result.Content, nil
+		}
+
+		messages = append(messages, llm.ChatMessage{
+			Role:      model.MessageRoleAssistant,
+			Content:   result.Content,
+			ToolCalls: result.ToolCalls,
+		})
+
+		for _, call := range result.ToolCalls {
+			handler, ok := handlers[call.Function.Name]
+			if !ok {
+				broadcaster.Broadcast(StreamEvent{
+					Type: "error",
+					Data: fmt.Sprintf("Unknown tool: %s", call.Function.Name),
+				})
+				return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
+			}
+
+			broadcaster.Broadcast(StreamEvent{
+				Type: "trace",
+				Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
+			})
+
+			payload, err := handler(ctx, json.RawMessage(call.Function.Arguments))
+			if err != nil {
+				broadcaster.Broadcast(StreamEvent{
+					Type: "error",
+					Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, err),
+				})
+				return "", err
+			}
+			response, err := json.Marshal(payload)
+			if err != nil {
+				broadcaster.Broadcast(StreamEvent{
+					Type: "error",
+					Data: fmt.Sprintf("Tool %s response error: %v", call.Function.Name, err),
+				})
+				return "", err
+			}
+
+			messages = append(messages, llm.ChatMessage{
+				Role:       model.MessageRoleTool,
+				Content:    string(response),
+				ToolCallID: call.ID,
+				Name:       call.Function.Name,
+			})
+		}
+	}
+
+	return "", fmt.Errorf("tool call limit reached")
+}
+
+func extractToolIDs(metadata model.JSONB) ([]string, bool) {
+	if metadata == nil {
+		return nil, false
+	}
+	raw, ok := metadata["tool_ids"]
+	if !ok {
+		return nil, false
+	}
+
+	switch value := raw.(type) {
+	case []string:
+		return value, true
+	case []any:
+		ids := make([]string, 0, len(value))
+		for _, item := range value {
+			if str, ok := item.(string); ok {
+				ids = append(ids, str)
+			}
+		}
+		return ids, true
+	default:
+		return nil, false
+	}
+}
+
+func filterKnownToolIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	known := make(map[string]struct{})
+	for _, def := range tool.All() {
+		known[def.ID] = struct{}{}
+	}
+
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := known[trimmed]; ok {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func toolIDsFromDefinitions(defs []tool.Definition) []string {
+	if len(defs) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(defs))
+	for _, def := range defs {
+		ids = append(ids, def.ID)
+	}
+	return ids
 }
 
 // ============================================================================

@@ -25,6 +25,7 @@ export const useChatStore = defineStore(
         const sessions = ref<ChatSession[]>([])
         const currentSessionId = ref<string>('')
         const currentModelId = ref<string>('')
+        const currentToolIds = ref<string[]>([])
         const messages = ref<ChatMessage[]>([])
         const isLoading = ref(false)
         const streamingContent = ref('')
@@ -51,6 +52,10 @@ export const useChatStore = defineStore(
 
         function setCurrentModel(modelId: string) {
             currentModelId.value = modelId
+        }
+
+        function setCurrentTools(toolIds: string[]) {
+            currentToolIds.value = [...toolIds]
         }
 
         function setMessages(newMessages: ChatMessage[]) {
@@ -100,6 +105,7 @@ export const useChatStore = defineStore(
             sessions,
             currentSessionId,
             currentModelId,
+            currentToolIds,
             messages,
             isLoading,
             streamingContent,
@@ -108,6 +114,7 @@ export const useChatStore = defineStore(
             setSessions,
             setCurrentSession,
             setCurrentModel,
+            setCurrentTools,
             setMessages,
             addMessage,
             updateLastMessage,
@@ -124,7 +131,7 @@ export const useChatStore = defineStore(
         persist: {
             key: 'chat',
             storage: localStorage,
-            paths: ['currentSessionId', 'currentModelId'],
+            paths: ['currentSessionId', 'currentModelId', 'currentToolIds'],
         },
     }
 )

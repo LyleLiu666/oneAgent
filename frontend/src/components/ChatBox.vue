@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { Send, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu } from 'lucide-vue-next'
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
-import { streamChat, getSessions, getSession, truncateSession, getModels } from '@/api/client'
+import { streamChat, getSessions, getSession, truncateSession, getModels, getTools } from '@/api/client'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -21,6 +21,8 @@ const loadingHistory = ref(false)
 const showHistory = ref(true) // Control visibility of history panel
 const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
+const toolsLoading = ref(false)
+const tools = ref<ToolOption[]>([])
 
 interface ModelOption {
   id: string
@@ -36,6 +38,12 @@ interface ModelOption {
   }
 }
 
+interface ToolOption {
+  id: string
+  name: string
+  description?: string
+}
+
 // Computed
 const canSend = computed(
   () => inputMessage.value.trim() && !chatStore.isLoading && !loadingHistory.value
@@ -45,6 +53,10 @@ const currentSessionTitle = computed(() => chatStore.currentSession?.title || 'N
 const selectedModelId = computed({
   get: () => chatStore.currentModelId,
   set: (value: string) => chatStore.setCurrentModel(value),
+})
+const selectedToolIds = computed({
+  get: () => chatStore.currentToolIds,
+  set: (value: string[]) => chatStore.setCurrentTools(value),
 })
 
 // Methods
@@ -119,6 +131,32 @@ const loadModels = async () => {
   }
 }
 
+const loadTools = async () => {
+  toolsLoading.value = true
+  try {
+    const raw = await getTools()
+    const mapped = (Array.isArray(raw) ? raw : []).map((t: any) => ({
+      id: String(t.id || ''),
+      name: String(t.name || t.id || ''),
+      description: t.description ? String(t.description) : undefined,
+    }))
+    tools.value = mapped
+
+    if (selectedToolIds.value.length > 0) {
+      const known = new Set(mapped.map((t: ToolOption) => t.id))
+      const filtered = selectedToolIds.value.filter((id: string) => known.has(id))
+      if (filtered.length !== selectedToolIds.value.length) {
+        selectedToolIds.value = filtered
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load tools:', error)
+    tools.value = []
+  } finally {
+    toolsLoading.value = false
+  }
+}
+
 const loadSessionMessages = async (sessionId: string, showLoading = true) => {
   if (!sessionId) return
   if (showLoading) loadingHistory.value = true
@@ -128,6 +166,12 @@ const loadSessionMessages = async (sessionId: string, showLoading = true) => {
     const sessionModelId = raw?.metadata?.model_id
     if (sessionModelId) {
       selectedModelId.value = String(sessionModelId)
+    }
+    const sessionToolIds = raw?.metadata?.tool_ids
+    if (Array.isArray(sessionToolIds)) {
+      selectedToolIds.value = sessionToolIds.map((id: any) => String(id))
+    } else {
+      selectedToolIds.value = []
     }
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
     const mapped: ChatMessage[] = rawMessages
@@ -220,6 +264,7 @@ const sendChat = async (rawMessage: string) => {
       message,
       chatStore.currentSessionId,
       chatStore.currentModelId,
+      chatStore.currentToolIds,
       (event) => {
         if (event.type === 'session') {
           chatStore.setCurrentSession(event.data)
@@ -354,6 +399,7 @@ const handleWelcomeSelect = (prompt: string) => {
 }
 
 onMounted(async () => {
+  await loadTools()
   await loadModels()
   await loadSessions()
   const persistedId = chatStore.currentSessionId
@@ -397,7 +443,7 @@ onMounted(async () => {
             <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Session</p>
             <p class="text-sm text-surface-100 truncate">{{ currentSessionTitle }}</p>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap justify-end">
             <Cpu class="w-4 h-4 text-surface-400" />
             <select
               v-model="selectedModelId"
@@ -409,6 +455,27 @@ onMounted(async () => {
                 {{ model.name || model.model }}{{ model.provider?.name ? ` · ${model.provider.name}` : '' }}
               </option>
             </select>
+            <div v-if="tools.length > 0" class="flex items-center gap-2">
+              <Sparkles class="w-4 h-4 text-surface-400" />
+              <div class="flex items-center gap-2">
+                <label
+                  v-for="tool in tools"
+                  :key="tool.id"
+                  class="flex items-center gap-1 text-[11px] text-surface-300"
+                >
+                  <input
+                    v-model="selectedToolIds"
+                    type="checkbox"
+                    class="accent-primary-500"
+                    :value="tool.id"
+                    :disabled="toolsLoading"
+                  />
+                  <span class="max-w-[110px] truncate" :title="tool.description || tool.name">
+                    {{ tool.name }}
+                  </span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
       </div>
