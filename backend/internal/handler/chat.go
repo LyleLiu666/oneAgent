@@ -750,44 +750,54 @@ func runToolLoop(
 		handlers[def.Spec.Function.Name] = def.Handler
 	}
 
+	var combined strings.Builder
+
 	const maxSteps = 20
 	for step := 0; step < maxSteps; step++ {
 		var (
-			result   llm.ChatCompletionResult
-			err      error
-			streamed bool
+			result llm.ChatCompletionResult
+			err    error
 		)
 
 		if streamClient, ok := client.(toolStreamingCaller); ok {
-			streamed = true
 			var stepContent strings.Builder
 			result, err = streamClient.ChatCompletionStreamWithTools(ctx, messages, opts, func(chunk string) error {
 				stepContent.WriteString(chunk)
+				combined.WriteString(chunk)
 				broadcaster.Broadcast(StreamEvent{
 					Type: "content",
 					Data: chunk,
 				})
 				return nil
 			})
-			if result.Content == "" {
-				result.Content = stepContent.String()
-			}
-		} else {
-			result, err = client.ChatCompletionWithTools(ctx, messages, opts)
-		}
-		if err != nil {
-			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
-			return "", err
-		}
-
-		if len(result.ToolCalls) == 0 {
-			if !streamed && result.Content != "" {
+			if err == nil && stepContent.Len() == 0 && result.Content != "" {
+				combined.WriteString(result.Content)
 				broadcaster.Broadcast(StreamEvent{
 					Type: "content",
 					Data: result.Content,
 				})
 			}
-			return result.Content, nil
+			if result.Content == "" {
+				result.Content = stepContent.String()
+			}
+		} else {
+			result, err = client.ChatCompletionWithTools(ctx, messages, opts)
+			if err == nil && result.Content != "" {
+				combined.WriteString(result.Content)
+				broadcaster.Broadcast(StreamEvent{
+					Type: "content",
+					Data: result.Content,
+				})
+			}
+		}
+		if err != nil {
+			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
+			return combined.String(), err
+		}
+
+		if len(result.ToolCalls) == 0 {
+			// Return the content already streamed/broadcast across all steps so history matches realtime output.
+			return combined.String(), nil
 		}
 
 		messages = append(messages, llm.ChatMessage{
@@ -804,7 +814,7 @@ func runToolLoop(
 					Data: fmt.Sprintf("Unknown tool: %s", call.Function.Name),
 				})
 				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, fmt.Errorf("unknown tool"))
-				return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
+				return combined.String(), fmt.Errorf("unknown tool: %s", call.Function.Name)
 			}
 
 			broadcaster.Broadcast(StreamEvent{
@@ -819,7 +829,7 @@ func runToolLoop(
 					Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, err),
 				})
 				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
-				return "", err
+				return combined.String(), err
 			}
 			response, err := json.Marshal(payload)
 			if err != nil {
@@ -828,7 +838,7 @@ func runToolLoop(
 					Data: fmt.Sprintf("Tool %s response error: %v", call.Function.Name, err),
 				})
 				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
-				return "", err
+				return combined.String(), err
 			}
 
 			messages = append(messages, llm.ChatMessage{
@@ -841,7 +851,7 @@ func runToolLoop(
 	}
 
 	recordToolFailure(sessionID, userID, resolved, "", "", "", fmt.Errorf("tool call limit reached"))
-	return "", fmt.Errorf("tool call limit reached")
+	return combined.String(), fmt.Errorf("tool call limit reached")
 }
 
 func recordToolFailure(sessionID, userID string, resolved *resolvedModel, toolName, toolCallID, args string, err error) {
