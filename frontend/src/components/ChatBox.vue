@@ -569,7 +569,7 @@ onMounted(async () => {
               <div class="glass rounded-2xl rounded-tl-md px-4 py-3">
                 <!-- Thinking indicator -->
                 <div
-                  v-if="message.isStreaming && !message.content"
+                  v-if="message.isStreaming && (!message.content || !message.content.trim())"
                   class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface-900/40 backdrop-blur border border-surface-700/30"
                 >
                   <div class="relative">
@@ -615,6 +615,11 @@ onMounted(async () => {
                 >
                   <RotateCcw class="w-4 h-4" />
                 </button>
+                
+                <!-- Helper for streaming stats if content is showing -->
+                <div v-if="message.isStreaming && message.content && message.content.trim() && message.responseTokens" class="text-xs text-surface-500 ml-2">
+                  {{ message.responseTokens }} tokens
+                </div>
               </div>
               
               <!-- Trace Log Component -->
