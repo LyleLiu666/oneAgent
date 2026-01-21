@@ -1,0 +1,345 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Day Mode - Clean & Neutral (Mac-like) */
+    --color-bg-base: #ffffff;
+    /* Pure White */
+    --color-bg-surface: #f8fafc;
+    /* Slate 50 */
+    --color-bg-elevated: #f1f5f9;
+    /* Slate 100 */
+    --color-bg-inset: #e2e8f0;
+    /* Slate 200 */
+    --color-border: #e2e8f0;
+    /* Slate 200 */
+    --color-border-strong: #cbd5e1;
+    /* Slate 300 */
+    --color-text-main: #0f172a;
+    /* Slate 900 */
+    --color-text-muted: #475569;
+    /* Slate 600 */
+    --color-text-subtle: #64748b;
+    /* Slate 500 */
+    --color-text-faint: #94a3b8;
+    /* Slate 400 */
+    --color-text-inverse: #f8fafc;
+    /* Slate 50 */
+    --color-primary-500: #6366f1;
+    /* Indigo 500 - Modern & Clean */
+    --color-primary-600: #4f46e5;
+    /* Indigo 600 */
+
+    /* Semantic Colors - Inverted for Light Mode */
+    /* In light mode, surface-950 should be lightest (for backgrounds), surface-100 should be darkest (for text) */
+    --color-surface-50: #0f172a;
+    --color-surface-100: #1e293b;
+    --color-surface-200: #334155;
+    --color-surface-300: #475569;
+    --color-surface-400: #64748b;
+    --color-surface-500: #94a3b8;
+    --color-surface-600: #cbd5e1;
+    --color-surface-700: #e2e8f0;
+    --color-surface-800: #f1f5f9;
+    --color-surface-900: #f8fafc;
+    --color-surface-950: #ffffff;
+
+    --color-glass-bg: color-mix(
+      in srgb,
+      var(--color-bg-surface) 75%,
+      transparent
+    );
+    --color-glass-border: color-mix(
+      in srgb,
+      var(--color-border-strong) 70%,
+      transparent
+    );
+    --color-glass-card-bg: color-mix(
+      in srgb,
+      var(--color-bg-elevated) 85%,
+      transparent
+    );
+    --color-glass-card-border: color-mix(
+      in srgb,
+      var(--color-border-strong) 70%,
+      transparent
+    );
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    /* Night Mode - Cool & Deep (Mac-like) */
+    --color-bg-base: #0f172a;
+    /* Slate 900 */
+    --color-bg-surface: #1e293b;
+    /* Slate 800 */
+    --color-bg-elevated: #334155;
+    /* Slate 700 */
+    --color-bg-inset: #0b1120;
+    /* Deep Base */
+    --color-border: #1e293b;
+    /* Slate 800 */
+    --color-border-strong: #334155;
+    /* Slate 700 */
+    --color-text-main: #f8fafc;
+    /* Slate 50 */
+    --color-text-muted: #cbd5e1;
+    /* Slate 300 */
+    --color-text-subtle: #94a3b8;
+    /* Slate 400 */
+    --color-text-faint: #64748b;
+    /* Slate 500 */
+    --color-text-inverse: #0f172a;
+    /* Slate 900 */
+    --color-primary-500: #818cf8;
+    /* Indigo 400 */
+    --color-primary-600: #6366f1;
+    /* Indigo 500 */
+
+    /* Semantic Colors - Slate Scale */
+    --color-surface-50: #f8fafc;
+    --color-surface-100: #f1f5f9;
+    --color-surface-200: #e2e8f0;
+    --color-surface-300: #cbd5e1;
+    --color-surface-400: #94a3b8;
+    --color-surface-500: #64748B;
+    --color-surface-600: #475569;
+    --color-surface-700: #334155;
+    --color-surface-800: #1e293b;
+    --color-surface-900: #0f172a;
+    --color-surface-950: #020617;
+
+    --color-glass-bg: color-mix(
+      in srgb,
+      var(--color-bg-surface) 70%,
+      transparent
+    );
+    --color-glass-border: color-mix(
+      in srgb,
+      var(--color-border-strong) 70%,
+      transparent
+    );
+    --color-glass-card-bg: color-mix(
+      in srgb,
+      var(--color-bg-elevated) 80%,
+      transparent
+    );
+    --color-glass-card-border: color-mix(
+      in srgb,
+      var(--color-border-strong) 70%,
+      transparent
+    );
+  }
+
+  body {
+    @apply transition-colors duration-300 min-h-screen;
+    background-color: var(--color-bg-base);
+    color: var(--color-text-main);
+  }
+
+  ::selection {
+    background-color: rgba(99, 102, 241, 0.3);
+    /* Fallback or Primary 500 equivalent */
+    color: #c7d2fe;
+    /* Primary 200 equivalent */
+  }
+
+  /* Form elements - ensure dark mode compatibility */
+  .dark input,
+  .dark select,
+  .dark textarea {
+    background-color: var(--color-bg-elevated);
+    border-color: var(--color-border-strong);
+    color: var(--color-text-main);
+  }
+
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: var(--color-text-faint);
+  }
+
+  .dark select option {
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-main);
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-panel border border-border;
+  }
+
+  .panel-inset {
+    @apply bg-inset border border-border-strong;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 text-white transition-colors hover:bg-primary-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-opacity-50;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg text-fg-muted transition-colors hover:text-fg hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-opacity-40;
+  }
+
+  .input-base {
+    @apply w-full rounded-lg bg-inset border border-border-strong px-3 py-2 text-fg placeholder-fg-faint transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-opacity-50 focus:border-primary-500;
+  }
+}
+
+/* Base styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-family: "Inter", system-ui, sans-serif;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-main);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling - Minimal */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  /* @apply rounded-full transition-colors; */
+  background-color: color-mix(
+    in srgb,
+    var(--color-text-faint) 45%,
+    transparent
+  );
+  border-radius: 9999px;
+  transition-property:
+    color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(
+    in srgb,
+    var(--color-text-subtle) 65%,
+    transparent
+  );
+}
+
+/* Custom utilities */
+@layer utilities {
+  .glass {
+    @apply backdrop-blur-xl border shadow-glass;
+    background-color: var(--color-glass-bg);
+    border-color: var(--color-glass-border);
+  }
+
+  .glass-card {
+    @apply backdrop-blur-md border rounded-xl transition-all duration-300;
+    background-color: var(--color-glass-card-bg);
+    border-color: var(--color-glass-card-border);
+  }
+
+  .glass-card:hover {
+    border-color: color-mix(in srgb, var(--color-primary-500) 30%, transparent);
+  }
+
+  .metal {
+    @apply border;
+    border-color: color-mix(
+      in srgb,
+      var(--color-border-strong) 72%,
+      transparent
+    );
+    background-color: var(--color-bg-surface);
+    background-image:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, white 12%, var(--color-bg-surface)),
+        color-mix(in srgb, black 6%, var(--color-bg-surface))
+      ),
+      radial-gradient(
+        120% 80% at 10% 0%,
+        color-mix(in srgb, white 14%, transparent),
+        transparent 60%
+      );
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.35);
+  }
+
+  .metal-popover {
+    @apply border;
+    border-color: color-mix(
+      in srgb,
+      var(--color-border-strong) 65%,
+      transparent
+    );
+    background-color: var(--color-bg-surface);
+    background-image:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, white 10%, var(--color-bg-surface)),
+        color-mix(in srgb, black 5%, var(--color-bg-surface))
+      ),
+      radial-gradient(
+        120% 80% at 10% 0%,
+        color-mix(in srgb, white 12%, transparent),
+        transparent 65%
+      );
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+  }
+
+  .metal-header {
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--color-border) 75%, transparent);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, white 10%, var(--color-bg-surface)),
+      var(--color-bg-surface)
+    );
+  }
+
+  .text-gradient {
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    background-image: linear-gradient(to right, #818cf8, #f472b6);
+  }
+
+  .glow-text {
+    text-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
+  }
+}
+
+/* Transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-leave-to {
+  transform: translateX(-100%);
+}

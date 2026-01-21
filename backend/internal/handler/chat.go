@@ -1,0 +1,750 @@
+// Package handler provides HTTP handlers for the API.
+//
+// CHAT HANDLER:
+// This file implements the chat API endpoints with real LLM integration.
+// It uses the llm package for OpenAI-compatible API calls.
+//
+// EXTENSION POINTS:
+// - Add new chat endpoints for different modules (e.g., ReaderChat, GuideChat)
+// - Implement tool/function calling by extending the streaming handler
+// - Add custom trace collection for observability
+//
+// MULTI-MODULE PATTERN:
+// To create a new chat module, copy this handler and:
+// 1. Change the Module constant
+// 2. Customize the system prompt
+// 3. Add module-specific logic (e.g., context injection)
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
+	"github.com/liu_y/oneAgent/backend/internal/config"
+	"github.com/liu_y/oneAgent/backend/internal/database"
+	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/middleware"
+	"github.com/liu_y/oneAgent/backend/internal/model"
+)
+
+// ============================================================================
+// CONSTANTS - Customize for your modules
+// ============================================================================
+
+// ChatModule defines the module identifier for this chat handler.
+// EXTENSION: Create new handlers with different module identifiers.
+const ChatModule = "assistant"
+
+// DefaultSystemPrompt is the default system prompt for the assistant.
+// EXTENSION: Customize this for your use case or make it configurable.
+const DefaultSystemPrompt = `You are a helpful AI assistant. Be concise and helpful.`
+
+// ============================================================================
+// REQUEST/RESPONSE TYPES
+// ============================================================================
+
+// ChatRequest represents an incoming chat message.
+// EXTENSION: Add fields for temperature, model override, etc.
+type ChatRequest struct {
+	Message      string `json:"message" binding:"required"`
+	SessionID    string `json:"session_id"`
+	SystemPrompt string `json:"system_prompt,omitempty"` // EXTENSION: Custom system prompt
+	ModelID      string `json:"model_id,omitempty"`
+}
+
+// StreamEvent represents a Server-Sent Event.
+// EXTENSION: Add new event types for tool calls, progress, etc.
+type StreamEvent struct {
+	Type string `json:"type"` // "session", "content", "trace", "done", "error"
+	Data string `json:"data"`
+}
+
+// TruncateSessionRequest represents a request to truncate a session's messages.
+// This is used for "retry/regenerate" flows where we discard messages from a given point.
+type TruncateSessionRequest struct {
+	FromMessageID uint `json:"from_message_id" binding:"required"`
+}
+
+// ============================================================================
+// HANDLER
+// ============================================================================
+
+// ChatHandler handles chat-related API endpoints.
+type ChatHandler struct {
+	cfg           *config.Config
+	streamManager *StreamManager
+}
+
+// NewChatHandler creates a new ChatHandler with LLM client.
+func NewChatHandler(cfg *config.Config) *ChatHandler {
+	return &ChatHandler{
+		cfg:           cfg,
+		streamManager: NewStreamManager(),
+	}
+}
+
+// ============================================================================
+// STREAMING CHAT ENDPOINT
+// ============================================================================
+
+// StreamChat handles streaming chat responses.
+// POST /api/chat
+//
+// EXTENSION POINTS:
+// - Add context injection (RAG, user preferences)
+// - Implement tool/function calling
+// - Add rate limiting per user
+func (h *ChatHandler) StreamChat(c *gin.Context) {
+	var req ChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	db := database.GetDB()
+
+	// Create or get session
+	sessionID := req.SessionID
+	if sessionID == "" {
+		sessionID = uuid.New().String()
+	}
+
+	// Build conversation history
+	var messages []llm.ChatMessage
+
+	// Add system prompt
+	systemPrompt := DefaultSystemPrompt
+	if req.SystemPrompt != "" {
+		systemPrompt = req.SystemPrompt
+	}
+	messages = append(messages, llm.BuildSystemMessage(systemPrompt))
+
+	// Ensure session exists and get history
+	var session model.ChatSession
+	if db != nil {
+		result := db.Where("id = ?", sessionID).First(&session)
+		if result.Error != nil {
+			// Create new session
+			sessionMetadata := model.JSONB{}
+			session = model.ChatSession{
+				ID:       sessionID,
+				UserID:   userID,
+				Title:    truncateString(req.Message, 100),
+				Module:   ChatModule,
+				Metadata: sessionMetadata,
+			}
+			db.Create(&session)
+		}
+
+		// Load message history for context
+		// EXTENSION: Add sliding window or summarization for long conversations
+		var dbMessages []model.ChatMessage
+		db.Where("session_id = ?", sessionID).Order("id ASC").Find(&dbMessages)
+		for _, msg := range dbMessages {
+			messages = append(messages, llm.ChatMessage{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+	}
+
+	// Add current user message
+	messages = append(messages, llm.BuildUserMessage(req.Message))
+
+	selectedModelID := strings.TrimSpace(req.ModelID)
+	if selectedModelID == "" && session.Metadata != nil {
+		if raw, ok := session.Metadata["model_id"]; ok {
+			if modelID, ok := raw.(string); ok {
+				selectedModelID = modelID
+			}
+		}
+	}
+
+	resolvedModel, err := h.resolveModel(db, userID, selectedModelID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if db != nil && resolvedModel.ModelID != "" {
+		shouldUpdate := session.Metadata == nil
+		if !shouldUpdate {
+			if _, ok := session.Metadata["model_id"]; !ok {
+				shouldUpdate = true
+			}
+		}
+		if req.ModelID != "" {
+			shouldUpdate = true
+		}
+		if shouldUpdate {
+			metadata := session.Metadata
+			if metadata == nil {
+				metadata = model.JSONB{}
+			}
+			metadata["model_id"] = resolvedModel.ModelID
+			db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("metadata", metadata)
+		}
+	}
+
+	if db != nil {
+		// Save user message only after model resolution succeeds.
+		userMsg := model.ChatMessage{
+			SessionID: sessionID,
+			Role:      model.MessageRoleUser,
+			Type:      model.MessageTypeText,
+			Content:   req.Message,
+		}
+		db.Create(&userMsg)
+	}
+
+	// Set headers for SSE
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache, no-transform")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Streaming not supported"})
+		return
+	}
+
+	// Ensure headers are sent immediately and push an initial padding comment to reduce proxy buffering.
+	c.Writer.WriteHeaderNow()
+	fmt.Fprintf(c.Writer, ":%s\n\n", strings.Repeat(" ", 2048))
+	flusher.Flush()
+
+	// Send session_id first
+	sendSSE(c.Writer, flusher, StreamEvent{
+		Type: "session",
+		Data: sessionID,
+	})
+
+	// Get or create broadcater for this session
+	broadcaster := h.streamManager.GetOrCreate(sessionID)
+
+	// Subscribe to the stream
+	// The channel size should be large enough to hold history if we implement replay,
+	// but for now we just want a realtime stream.
+	clientChan := broadcaster.Subscribe()
+	defer broadcaster.Unsubscribe(clientChan)
+
+	// If this is the PRIMARY (first) request for this session that triggered creation,
+	// start the generation process in background.
+	// Otherwise, we just listen.
+	if broadcaster.StartGeneration() {
+		go func() {
+			defer broadcaster.Finish()
+
+			// Start trace collection
+			traceStart := time.Now()
+			var traceEntries []model.TraceEntry
+
+			// Trace callback integration
+			traceCallback := &llm.TraceCallback{
+				OnStart: func(ctx context.Context, input []llm.ChatMessage) {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: "Connected to AI...",
+					})
+				},
+				OnFirstToken: func(ctx context.Context) {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: "Generating response...",
+					})
+				},
+				OnComplete: func(ctx context.Context, output string, err error) {
+					if err != nil {
+						broadcaster.Broadcast(StreamEvent{
+							Type: "error",
+							Data: fmt.Sprintf("LLM error: %v", err),
+						})
+					} else {
+						broadcaster.Broadcast(StreamEvent{
+							Type: "trace",
+							Data: "Response complete.",
+						})
+					}
+				},
+			}
+
+			// Trace internal steps (fake ones purely for UI experience if config enabled)
+			if h.cfg.EnableTrace {
+				traceEntry := model.NewTraceEntry(model.TraceTypeLLMCall, "ChatCompletion")
+				traceEntry.Input = messages
+				traceEntry.Model = resolvedModel.ModelName
+				traceEntries = append(traceEntries, traceEntry)
+
+				broadcaster.Broadcast(StreamEvent{
+					Type: "trace",
+					Data: "Preparing conversation context...",
+				})
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			// Call LLM with streaming
+			var fullContent string
+			ctx := context.Background() // Use background context so generation survives request cancellation
+
+			opts := &llm.ChatCompletionOptions{
+				Trace: traceCallback,
+			}
+			if resolvedModel.EnableKVCache {
+				opts.EnablePromptCache = true
+				if llm.SupportsPromptCacheKey(resolvedModel.ProviderType) {
+					opts.PromptCacheKey = sessionID
+				}
+			}
+
+			var llmCallID uint
+			if db != nil {
+				messagesJSON, err := json.Marshal(messages)
+				if err == nil {
+					call := model.LLMCall{
+						SessionID:  sessionID,
+						UserID:     userID,
+						ProviderID: resolvedModel.ProviderID,
+						ModelID:    resolvedModel.ModelID,
+						ModelName:  resolvedModel.ModelName,
+						Messages:   string(messagesJSON),
+						CreatedAt:  time.Now(),
+					}
+					if err := db.Create(&call).Error; err == nil {
+						llmCallID = call.ID
+					}
+				}
+			}
+
+			err := resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+				fullContent += chunk
+				broadcaster.Broadcast(StreamEvent{
+					Type: "content",
+					Data: chunk,
+				})
+				return nil
+			})
+
+			if err != nil {
+				log.Printf("LLM stream error: %v", err)
+				// Error broadcast handled in OnComplete trace or here
+			}
+
+			if db != nil && llmCallID != 0 {
+				update := map[string]any{
+					"response": fullContent,
+				}
+				if err != nil {
+					update["error"] = err.Error()
+				}
+				db.Model(&model.LLMCall{}).Where("id = ?", llmCallID).Updates(update)
+			}
+
+			// Complete trace
+			if h.cfg.EnableTrace && len(traceEntries) > 0 {
+				traceEntries[0].Complete()
+				traceEntries[0].Output = fullContent
+			}
+
+			// Save assistant message to database
+			if db != nil && fullContent != "" {
+				traceData := model.TraceDataJSON{
+					TraceData: model.TraceData{
+						Entries:  traceEntries,
+						Model:    resolvedModel.ModelName,
+						Duration: time.Since(traceStart).Milliseconds(),
+					},
+				}
+
+				assistantMsg := model.ChatMessage{
+					SessionID: sessionID,
+					Role:      model.MessageRoleAssistant,
+					Type:      model.MessageTypeText,
+					Content:   fullContent,
+					Trace:     traceData,
+				}
+				db.Create(&assistantMsg)
+
+				// Update session timestamp
+				db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now())
+			}
+		}()
+	}
+
+	// Listen for events and push to SSE
+	// This blocks until the channel is closed (generation finished) or client disconnects
+	notify := c.Request.Context().Done()
+loop:
+	for {
+		select {
+		case <-notify:
+			// Client disconnected
+			break loop
+		case event, ok := <-clientChan:
+			if !ok {
+				// Broadcast channel closed (generation finished)
+				break loop
+			}
+			sendSSE(c.Writer, flusher, event)
+		}
+	}
+
+	// Send done event if we finished normally
+	sendSSE(c.Writer, flusher, StreamEvent{
+		Type: "done",
+		Data: "",
+	})
+}
+
+// ============================================================================
+// SESSION MANAGEMENT ENDPOINTS
+// ============================================================================
+
+// GetSessions returns all chat sessions for the current user.
+// GET /api/sessions
+// EXTENSION: Add pagination, filtering by module
+func (h *ChatHandler) GetSessions(c *gin.Context) {
+	userID := middleware.GetUserID(c)
+	db := database.GetDB()
+
+	if db == nil {
+		c.JSON(http.StatusOK, []model.ChatSession{})
+		return
+	}
+
+	// Filter by module for multi-module support
+	// EXTENSION: Make module a query parameter
+	var sessions []model.ChatSession
+	db.Where("user_id = ? AND module = ?", userID, ChatModule).
+		Order("updated_at DESC").
+		Find(&sessions)
+
+	c.JSON(http.StatusOK, sessions)
+}
+
+// GetSession returns a specific session with messages.
+// GET /api/sessions/:id
+func (h *ChatHandler) GetSession(c *gin.Context) {
+	sessionID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	db := database.GetDB()
+
+	if db == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	var session model.ChatSession
+	result := db.Where("id = ? AND user_id = ?", sessionID, userID).
+		Preload("Messages", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at ASC")
+		}).
+		First(&session)
+
+	if result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, session)
+}
+
+// DeleteSession deletes a chat session.
+// DELETE /api/sessions/:id
+func (h *ChatHandler) DeleteSession(c *gin.Context) {
+	sessionID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	db := database.GetDB()
+
+	if db == nil {
+		c.Status(http.StatusNoContent)
+		return
+	}
+
+	// Delete messages first
+	db.Where("session_id = ?", sessionID).Delete(&model.ChatMessage{})
+
+	// Delete session
+	result := db.Where("id = ? AND user_id = ?", sessionID, userID).Delete(&model.ChatSession{})
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// TruncateSession deletes messages in a session starting from a specific message ID (inclusive).
+// POST /api/sessions/:id/truncate
+func (h *ChatHandler) TruncateSession(c *gin.Context) {
+	sessionID := c.Param("id")
+	userID := middleware.GetUserID(c)
+	db := database.GetDB()
+
+	if db == nil {
+		c.Status(http.StatusNoContent)
+		return
+	}
+
+	var req TruncateSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tx := db.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		}
+	}()
+
+	// Ensure session belongs to user.
+	var session model.ChatSession
+	if err := tx.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	// Delete messages from the specified message (inclusive).
+	if err := tx.Where("session_id = ? AND id >= ?", sessionID, req.FromMessageID).Delete(&model.ChatMessage{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to truncate messages"})
+		return
+	}
+
+	// Update session timestamp.
+	if err := tx.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now()).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+type resolvedModel struct {
+	Client        llm.Client
+	ProviderType  string
+	ProviderID    string
+	ModelID       string
+	ModelName     string
+	EnableKVCache bool
+}
+
+func (h *ChatHandler) resolveModel(db *gorm.DB, userID, modelID string) (*resolvedModel, error) {
+	if db == nil {
+		if modelID != "" {
+			return nil, fmt.Errorf("database not configured for model lookup")
+		}
+		return nil, fmt.Errorf("no LLM model configured")
+	}
+
+	var llmModel model.LLMModel
+	if modelID != "" {
+		if err := db.Where("id = ? AND user_id = ?", modelID, userID).First(&llmModel).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("model not found")
+			}
+			return nil, err
+		}
+	} else {
+		if err := db.Where("user_id = ? AND is_default = ?", userID, true).
+			Order("updated_at DESC").
+			First(&llmModel).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, err
+			}
+		}
+	}
+
+	if llmModel.ID != "" {
+		var provider model.LLMProvider
+		if err := db.Where("id = ? AND user_id = ?", llmModel.ProviderID, userID).First(&provider).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, fmt.Errorf("provider not found")
+			}
+			return nil, err
+		}
+
+		if provider.BaseURL == "" || provider.APIKey == "" {
+			return nil, fmt.Errorf("provider base_url or api_key is missing")
+		}
+
+		client, err := llm.NewClientForProvider(llm.ProviderConfig{
+			ProviderType: provider.ProviderType,
+			Endpoint:     provider.BaseURL,
+			APIKey:       provider.APIKey,
+			Model:        llmModel.Model,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		return &resolvedModel{
+			Client:        client,
+			ProviderType:  provider.ProviderType,
+			ProviderID:    provider.ID,
+			ModelID:       llmModel.ID,
+			ModelName:     llmModel.Model,
+			EnableKVCache: llmModel.EnableKVCache,
+		}, nil
+	}
+
+	if modelID != "" {
+		return nil, fmt.Errorf("model not found")
+	}
+
+	return nil, fmt.Errorf("no LLM model configured")
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// sendSSE sends a Server-Sent Event.
+func sendSSE(w io.Writer, flusher http.Flusher, event StreamEvent) {
+	data, _ := json.Marshal(event)
+	fmt.Fprintf(w, "data: %s\n\n", data)
+	flusher.Flush()
+}
+
+// truncateString truncates a string to the specified length.
+func truncateString(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
+// ============================================================================
+// STREAM MANAGER
+// ============================================================================
+
+// StreamManager manages active chat streams for SSE recovery.
+type StreamManager struct {
+	streams sync.Map // map[string]*StreamBroadcaster
+}
+
+func NewStreamManager() *StreamManager {
+	return &StreamManager{}
+}
+
+func (sm *StreamManager) GetOrCreate(sessionID string) *StreamBroadcaster {
+	// If exists, return it
+	if val, ok := sm.streams.Load(sessionID); ok {
+		return val.(*StreamBroadcaster)
+	}
+
+	// Create new
+	sb := &StreamBroadcaster{
+		sessionID: sessionID,
+		clients:   make(map[chan StreamEvent]bool),
+		manager:   sm,
+	}
+	// Use LoadOrStore to handle race conditions
+	act, loaded := sm.streams.LoadOrStore(sessionID, sb)
+	if loaded {
+		return act.(*StreamBroadcaster)
+	}
+	return sb
+}
+
+func (sm *StreamManager) Remove(sessionID string) {
+	sm.streams.Delete(sessionID)
+}
+
+// StreamBroadcaster handles broadcasting events to multiple clients (tabs) for the same session.
+type StreamBroadcaster struct {
+	sessionID string
+	clients   map[chan StreamEvent]bool
+	mu        sync.RWMutex
+	manager   *StreamManager
+	started   bool
+	startMu   sync.Mutex
+	history   []StreamEvent // Optional: store recent events for catch-up (not full replay)
+}
+
+// Subscribe adds a new client channel.
+func (sb *StreamBroadcaster) Subscribe() chan StreamEvent {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	ch := make(chan StreamEvent, 50) // Buffered to prevent blocking
+	sb.clients[ch] = true
+	return ch
+}
+
+// Unsubscribe removes a client channel.
+func (sb *StreamBroadcaster) Unsubscribe(ch chan StreamEvent) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	delete(sb.clients, ch)
+	close(ch)
+}
+
+// Broadcast sends an event to all connected clients.
+func (sb *StreamBroadcaster) Broadcast(event StreamEvent) {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+
+	for ch := range sb.clients {
+		select {
+		case ch <- event:
+		default:
+			// If client is blocked, we skip (it's likely disconnected or too slow)
+			// Ideally we should disconnect slow clients.
+		}
+	}
+}
+
+// StartGeneration atomically checks if this broadcaster should start generation.
+// Returns true only for the first caller.
+func (sb *StreamBroadcaster) StartGeneration() bool {
+	sb.startMu.Lock()
+	defer sb.startMu.Unlock()
+
+	if sb.started {
+		return false
+	}
+	sb.started = true
+	return true
+}
+
+// Finish closes the broadcaster and removes it from manager.
+func (sb *StreamBroadcaster) Finish() {
+	sb.manager.Remove(sb.sessionID)
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	for ch := range sb.clients {
+		close(ch)
+	}
+	sb.clients = nil
+}

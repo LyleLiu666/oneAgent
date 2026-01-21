@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS llm_calls;
+DROP TABLE IF EXISTS llm_models;
+DROP TABLE IF EXISTS llm_providers;
