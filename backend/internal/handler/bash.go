@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
 
@@ -39,9 +41,15 @@ func RunBash(c *gin.Context) {
 		return
 	}
 
+	cfg := config.GetConfig()
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	result, err := shell.RunBash(c.Request.Context(), req.Command, timeout)
+	result, err := shell.RunBash(c.Request.Context(), req.Command, timeout, cfg.BashRootDir)
 	if err != nil {
+		var unsafeErr *shell.UnsafeCommandError
+		if errors.As(err, &unsafeErr) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": unsafeErr.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

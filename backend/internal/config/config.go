@@ -27,6 +27,9 @@ type Config struct {
 
 	// Feature flags
 	EnableTrace bool `mapstructure:"ENABLE_TRACE"`
+
+	// Bash sandbox settings
+	BashRootDir string `mapstructure:"BASH_ROOT_DIR"`
 }
 
 var AppConfig *Config
@@ -38,6 +41,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("KEYCLOAK_CLIENT_ID", "base-app")
 	viper.SetDefault("JWT_EXPIRE_DAYS", 7)
 	viper.SetDefault("ENABLE_TRACE", false)
+	viper.SetDefault("BASH_ROOT_DIR", "./bash-root")
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -54,6 +58,7 @@ func Load() (*Config, error) {
 	_ = viper.BindEnv("JWT_SECRET")
 	_ = viper.BindEnv("JWT_EXPIRE_DAYS")
 	_ = viper.BindEnv("ENABLE_TRACE")
+	_ = viper.BindEnv("BASH_ROOT_DIR")
 
 	if err := viper.Unmarshal(config); err != nil {
 		return nil, err

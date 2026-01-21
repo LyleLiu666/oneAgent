@@ -92,6 +92,9 @@ func main() {
 		// Bash command test endpoint
 		api.POST("/bash", handler.RunBash)
 
+		// Smart Edit endpoint
+		api.POST("/sbe/apply", handler.HandleSmartEdit)
+
 		// Bocha search services
 		api.GET("/bocha/settings", bocha.GetSettingsHandler)
 		api.PUT("/bocha/settings", bocha.UpdateSettingsHandler)
