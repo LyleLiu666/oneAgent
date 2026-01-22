@@ -339,6 +339,69 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		data, err := json.Marshal(payload)
 		return data, string(data), err
 
+	case "run_command":
+		action := strings.ToLower(strings.TrimSpace(fields["action"]))
+		command := strings.TrimSpace(fields["command"])
+		jobID := strings.TrimSpace(fields["job_id"])
+
+		if action == "" {
+			if command != "" {
+				action = "start"
+			} else if jobID != "" {
+				action = "poll"
+			}
+		}
+		if action == "" {
+			return nil, "", errors.New("missing action")
+		}
+
+		payload := map[string]any{
+			"action": action,
+		}
+		if command != "" {
+			payload["command"] = command
+		}
+		if jobID != "" {
+			payload["job_id"] = jobID
+		}
+
+		if rawWait := strings.TrimSpace(fields["wait_ms"]); rawWait != "" {
+			if wait, err := strconv.Atoi(rawWait); err == nil && wait >= 0 {
+				payload["wait_ms"] = wait
+			}
+		}
+		if rawMax := strings.TrimSpace(fields["max_runtime_ms"]); rawMax != "" {
+			if maxRuntime, err := strconv.Atoi(rawMax); err == nil && maxRuntime > 0 {
+				payload["max_runtime_ms"] = maxRuntime
+			}
+		}
+		if rawStdout := strings.TrimSpace(fields["stdout_offset"]); rawStdout != "" {
+			if offset, err := strconv.Atoi(rawStdout); err == nil && offset >= 0 {
+				payload["stdout_offset"] = offset
+			}
+		}
+		if rawStderr := strings.TrimSpace(fields["stderr_offset"]); rawStderr != "" {
+			if offset, err := strconv.Atoi(rawStderr); err == nil && offset >= 0 {
+				payload["stderr_offset"] = offset
+			}
+		}
+
+		switch action {
+		case "start":
+			if command == "" {
+				return nil, "", errors.New("missing command")
+			}
+		case "poll", "cancel":
+			if jobID == "" {
+				return nil, "", errors.New("missing job_id")
+			}
+		default:
+			return nil, "", errors.New("unsupported action")
+		}
+
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
 	case "edit":
 		filePath := strings.TrimSpace(fields["filePath"])
 		replaceAll := parseBool(fields["replaceAll"])

@@ -120,6 +120,17 @@ func parseCall(callInner string, raw string) (Call, error) {
 	for _, tag := range []string{
 		"command",
 		"timeout_ms",
+		"action",
+		"job_id",
+		"jobId",
+		"wait_ms",
+		"waitMs",
+		"max_runtime_ms",
+		"maxRuntimeMs",
+		"stdout_offset",
+		"stdoutOffset",
+		"stderr_offset",
+		"stderrOffset",
 		"filePath",
 		"file_path",
 		"oldcontent",
@@ -142,6 +153,31 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["replaceAll"]; !ok {
 		if v, ok := fields["replace_all"]; ok {
 			fields["replaceAll"] = v
+		}
+	}
+	if _, ok := fields["job_id"]; !ok {
+		if v, ok := fields["jobId"]; ok {
+			fields["job_id"] = v
+		}
+	}
+	if _, ok := fields["wait_ms"]; !ok {
+		if v, ok := fields["waitMs"]; ok {
+			fields["wait_ms"] = v
+		}
+	}
+	if _, ok := fields["max_runtime_ms"]; !ok {
+		if v, ok := fields["maxRuntimeMs"]; ok {
+			fields["max_runtime_ms"] = v
+		}
+	}
+	if _, ok := fields["stdout_offset"]; !ok {
+		if v, ok := fields["stdoutOffset"]; ok {
+			fields["stdout_offset"] = v
+		}
+	}
+	if _, ok := fields["stderr_offset"]; !ok {
+		if v, ok := fields["stderrOffset"]; ok {
+			fields["stderr_offset"] = v
 		}
 	}
 
