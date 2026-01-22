@@ -392,11 +392,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 			// Update the callback to use the state
 			traceCallback.OnToken = func(ctx context.Context, token string) {
-				tokenCount++
+				tokenCount += utf8.RuneCountInString(token)
 
-				// Throttle updates: every 5 tokens or 100ms
+				// Throttle updates: every 20 characters or 100ms
 				now := time.Now()
-				if tokenCount%5 == 0 || now.Sub(lastBroadcast) > 100*time.Millisecond {
+				if tokenCount%20 == 0 || now.Sub(lastBroadcast) > 100*time.Millisecond {
 					broadcaster.Broadcast(StreamEvent{
 						Type: "usage",
 						Data: fmt.Sprintf(`{"response_tokens": %d}`, tokenCount),

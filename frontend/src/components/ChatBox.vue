@@ -7,6 +7,8 @@ import { streamChat, getSessions, getSession, truncateSession, getModels, getToo
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
+import ThinkingProcess from './ThinkingProcess.vue'
+import ToolMessage from './ToolMessage.vue'
 
 const chatStore = useChatStore()
 
@@ -78,14 +80,20 @@ const safeJsonParse = <T,>(raw: any): T | undefined => {
   }
 }
 
-const formatMaybeJson = (raw: string): string => {
-  const trimmed = (raw ?? '').trim()
-  if (!trimmed) return ''
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
-  } catch {
-    return raw
+const normalizeTrace = (raw: any): string | undefined => {
+  if (raw == null) return undefined
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    return trimmed ? raw : undefined
   }
+  if (typeof raw === 'object') {
+    const entries = (raw as any)?.entries
+    if (Array.isArray(entries) && entries.length > 0) {
+      return JSON.stringify(raw, null, 2)
+    }
+    return undefined
+  }
+  return String(raw)
 }
 
 // Computed
@@ -205,7 +213,11 @@ const loadTools = async () => {
   }
 }
 
-const loadSessionMessages = async (sessionId: string, showLoading = true) => {
+const loadSessionMessages = async (
+  sessionId: string,
+  showLoading = true,
+  fallbackAssistantTrace?: string
+) => {
   if (!sessionId) return
   if (showLoading) loadingHistory.value = true
   try {
@@ -280,18 +292,25 @@ const loadSessionMessages = async (sessionId: string, showLoading = true) => {
           content,
           tool,
           createdAt: new Date(m.created_at ?? m.createdAt ?? Date.now()),
-          trace:
-            m.trace == null
-              ? undefined
-              : typeof m.trace === 'string'
-                ? m.trace
-                : JSON.stringify(m.trace, null, 2),
+          trace: normalizeTrace(m.trace),
           isStreaming: false,
         }
       })
 
     chatStore.setCurrentSession(sessionId)
-    chatStore.setMessages(insertAssistantPlaceholders(mapped))
+    const withPlaceholders = insertAssistantPlaceholders(mapped)
+    const fallback = (fallbackAssistantTrace ?? '').trim()
+    if (fallback) {
+      for (let i = withPlaceholders.length - 1; i >= 0; i--) {
+        if (withPlaceholders[i].role === 'assistant') {
+          if (!withPlaceholders[i].trace) {
+            withPlaceholders[i].trace = fallbackAssistantTrace
+          }
+          break
+        }
+      }
+    }
+    chatStore.setMessages(withPlaceholders)
     scrollToBottom(false)
   } catch (error) {
     console.error('Failed to load session:', error)
@@ -424,13 +443,20 @@ const sendChat = async (rawMessage: string) => {
           chatStore.appendStreamingContent(suffix)
           chatStore.updateLastMessage(chatStore.streamingContent, false)
         } else if (event.type === 'done') {
+          const fallbackTrace = (() => {
+            for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+              const msg = chatStore.messages[i]
+              if (msg.role === 'assistant') return msg.trace
+            }
+            return undefined
+          })()
           chatStore.updateLastMessage(chatStore.streamingContent, false)
           chatStore.clearStreamingContent()
           // Refresh sessions list to show new session or update time
           loadSessions()
           // Reload session messages to ensure trace and metadata are up to date
           if (chatStore.currentSessionId) {
-            loadSessionMessages(chatStore.currentSessionId, false)
+            loadSessionMessages(chatStore.currentSessionId, false, fallbackTrace)
           }
         }
       },
@@ -504,6 +530,53 @@ const copyMessage = async (message: ChatMessage) => {
 const renderMarkdown = (content: string) => {
   const escaped = content.replace(/</g, '&lt;').replace(/>/g, '&gt;')
   return marked(escaped, { breaks: true, gfm: true })
+}
+
+const parseMessageContent = (content: string) => {
+  if (!content) return []
+  
+  const segments: Array<{ type: 'text' | 'think', content: string, isClosed?: boolean }> = []
+  
+  // Regex to match thinking tags: <think>, <thinking>, <reason>, <reasoning>
+  // We need to capture the tag name to match the closing tag correctly
+  // This regex matches:
+  // 1. Start tag: <(think|thinking|reason|reasoning)>
+  // 2. Content: lazy match until end tag or end of string
+  // 3. End tag (optional for streaming): <\/\1>
+  const regex = /(<(think|thinking|reason|reasoning)>)([\s\S]*?)(<\/\2>|$)/gi
+  
+  let lastIndex = 0
+  let match
+  
+  while ((match = regex.exec(content)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      segments.push({
+        type: 'text',
+        content: content.slice(lastIndex, match.index)
+      })
+    }
+    
+    // Add thinking content
+    // match[1] is start tag, match[2] is tag name, match[3] is content, match[4] is end tag
+    segments.push({
+      type: 'think',
+      content: match[3],
+      isClosed: !!match[4]
+    })
+    
+    lastIndex = regex.lastIndex
+  }
+  
+  // Add remaining text
+  if (lastIndex < content.length) {
+    segments.push({
+      type: 'text',
+      content: content.slice(lastIndex)
+    })
+  }
+  
+  return segments
 }
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -674,29 +747,27 @@ onMounted(async () => {
             <div class="flex-1 space-y-2 min-w-0">
               <div class="glass rounded-2xl rounded-tl-md px-4 py-3">
                 <!-- Thinking indicator -->
-                <div
-                  v-if="message.isStreaming && (!message.content || !message.content.trim())"
-                  class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface-900/40 backdrop-blur border border-surface-700/30"
-                >
-                  <div class="relative">
-                    <Sparkles class="w-4 h-4 text-primary-400 animate-pulse" />
-                    <div class="absolute inset-0 bg-primary-400/20 blur-md rounded-full animate-pulse"></div>
-                  </div>
-                  <div class="flex items-center gap-1 text-sm font-medium text-surface-300">
-                    <span>Thinking <span v-if="message.responseTokens" class="text-surface-400 font-normal text-xs">({{ message.responseTokens }} tokens)</span></span>
-                    <span class="flex gap-0.5 ml-0.5">
-                      <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.3s]"></span>
-                      <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.15s]"></span>
-                      <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce"></span>
-                    </span>
-                  </div>
-                </div>
+
                 <!-- Content -->
-                <div
-                  v-else
-                  class="prose prose-invert prose-sm max-w-none break-words"
-                  v-html="renderMarkdown(message.content)"
-                />
+                <!-- Content -->
+                <div v-if="!message.isStreaming && !message.content">
+                     <!-- empty content placeholder if needed -->
+                </div>
+                <!-- Logic to render thinking process and content -->
+                <div v-else class="w-full">
+                  <template v-for="(segment, sIdx) in parseMessageContent(message.content)" :key="sIdx">
+                    <ThinkingProcess 
+                      v-if="segment.type === 'think'" 
+                      :content="segment.content" 
+                      :is-streaming="message.isStreaming && sIdx === parseMessageContent(message.content).length - 1 && !segment.isClosed"
+                    />
+                    <div
+                      v-else
+                      class="prose prose-invert prose-sm max-w-none break-words"
+                      v-html="renderMarkdown(segment.content)"
+                    />
+                  </template>
+                </div>
                 <!-- Streaming cursor -->
                 <span
                   v-if="message.isStreaming && message.content"
@@ -734,78 +805,11 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- User message -->
           <div
             v-else-if="message.role === 'tool'"
-            class="max-w-3xl flex gap-3"
+            class="max-w-3xl"
           >
-            <div
-              class="w-8 h-8 rounded-lg bg-surface-800 flex items-center justify-center flex-shrink-0 border border-surface-700/40"
-            >
-              <Cpu class="w-4 h-4 text-surface-300" />
-            </div>
-            <div class="flex-1 space-y-2 min-w-0">
-              <div class="glass rounded-2xl rounded-tl-md px-4 py-3">
-                <div class="flex items-center gap-2 text-xs text-surface-300 mb-2">
-                  <span class="font-medium">{{ message.tool?.name || 'tool' }}</span>
-                  <span
-                    v-if="message.tool?.toolCallId"
-                    class="text-surface-500 font-mono text-[11px] truncate"
-                    :title="message.tool.toolCallId"
-                  >
-                    {{ message.tool.toolCallId }}
-                  </span>
-                </div>
-
-                <div v-if="message.tool?.arguments" class="space-y-1 mb-3">
-                  <div class="text-[11px] text-surface-500">arguments</div>
-                  <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.arguments) }}</pre>
-                </div>
-
-                <div
-                  v-if="message.tool?.results && message.tool.results.length"
-                  class="space-y-4"
-                >
-                  <div
-                    v-for="(r, idx) in message.tool.results"
-                    :key="idx"
-                    class="space-y-2"
-                  >
-                    <div class="flex items-center justify-between gap-2 text-[11px] text-surface-500">
-                      <span class="font-medium text-surface-300 truncate" :title="r.tool_name || ''">
-                        {{ r.tool_name || message.tool?.name || 'tool' }}
-                      </span>
-                      <span v-if="r.tool_call_id" class="font-mono truncate" :title="r.tool_call_id">
-                        {{ r.tool_call_id }}
-                      </span>
-                    </div>
-                    <div v-if="r.arguments" class="space-y-1">
-                      <div class="text-[11px] text-surface-500">arguments</div>
-                      <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(String(r.arguments)) }}</pre>
-                    </div>
-                    <div v-if="r.output" class="space-y-1">
-                      <div class="text-[11px] text-surface-500">output</div>
-                      <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(String(r.output)) }}</pre>
-                    </div>
-                    <div v-if="r.error" class="text-xs text-red-400">{{ r.error }}</div>
-                  </div>
-                </div>
-                <div v-else class="space-y-2">
-                  <div v-if="message.tool?.output" class="space-y-1">
-                    <div class="text-[11px] text-surface-500">output</div>
-                    <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.output) }}</pre>
-                  </div>
-                  <div v-else-if="message.content" class="space-y-1">
-                    <div class="text-[11px] text-surface-500">output</div>
-                    <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.content) }}</pre>
-                  </div>
-                  <div v-if="message.tool?.error" class="text-xs text-red-400">{{ message.tool.error }}</div>
-                </div>
-              </div>
-
-              <!-- Trace Log Component -->
-              <TraceLog :content="message.trace" />
-            </div>
+            <ToolMessage :message="message" />
           </div>
 
           <div

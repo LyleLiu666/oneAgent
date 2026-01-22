@@ -125,6 +125,13 @@ type TraceDataJSON struct {
 	TraceData
 }
 
+func (t TraceDataJSON) MarshalJSON() ([]byte, error) {
+	if len(t.Entries) == 0 {
+		return []byte("null"), nil
+	}
+	return json.Marshal(t.TraceData)
+}
+
 // Value implements driver.Valuer.
 func (t TraceDataJSON) Value() (driver.Value, error) {
 	if len(t.Entries) == 0 {
