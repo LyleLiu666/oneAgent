@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	ToolIDBash   = "bash"
-	ToolIDEdit   = "edit"
-	ToolIDSearch = "search"
+	ToolIDBash       = "bash"
+	ToolIDEdit       = "edit"
+	ToolIDSearch     = "search"
+	ToolIDRunCommand = "run_command"
 )
 
 // Context keys for passing user information to tool handlers
@@ -62,9 +63,10 @@ func newDefinition(id string, spec llm.Tool, handler Handler) Definition {
 }
 
 var registry = map[string]Definition{
-	ToolIDBash:   bashDefinition(),
-	ToolIDEdit:   smartEditDefinition(),
-	ToolIDSearch: searchDefinition(),
+	ToolIDBash:       bashDefinition(),
+	ToolIDEdit:       smartEditDefinition(),
+	ToolIDSearch:     searchDefinition(),
+	ToolIDRunCommand: runCommandDefinition(),
 }
 
 // All returns every tool in stable ID order.
