@@ -4,8 +4,11 @@ import { ref, computed } from 'vue'
 export interface ChatMessage {
     id: number
     serverId?: number
-    role: 'user' | 'assistant' | 'tool'
-    type?: 'text' | 'tool_call' | 'tool_result'
+    streamId?: string
+    role: 'user' | 'assistant' | 'tool' | 'system'
+    type: 'text' | 'tool_call' | 'tool_result'
+    rawRole?: string
+    rawType?: string
     content: string
     trace?: string
     createdAt: Date
@@ -13,6 +16,9 @@ export interface ChatMessage {
     responseTokens?: number
     tool?: {
         protocol?: string
+        llmContent?: string
+        toolCalls?: any[]
+        content?: string
         name?: string
         toolCallId?: string
         arguments?: string

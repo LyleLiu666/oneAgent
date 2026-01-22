@@ -44,6 +44,7 @@ func RunLoop(
 	recordFailure FailureRecorder,
 	observeStep StepObserver,
 	observeFinal func(visibleContent, assistantContent string),
+	onStepStart func(step int),
 ) (string, error) {
 	if client == nil {
 		return "", errors.New("missing llm client")
@@ -68,6 +69,9 @@ func RunLoop(
 
 	const maxSteps = 20
 	for step := 0; step < maxSteps; step++ {
+		if onStepStart != nil {
+			onStepStart(step)
+		}
 		var raw strings.Builder
 		var visible strings.Builder
 		filter := &streamFilter{}

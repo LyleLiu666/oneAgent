@@ -76,6 +76,28 @@ type StreamEvent struct {
 	Data string `json:"data"`
 }
 
+type streamMsg struct {
+	Op       string                    `json:"op"` // "start" | "delta" | "final" | "insert"
+	ID       string                    `json:"id"`
+	Role     string                    `json:"role,omitempty"`
+	MsgType  string                    `json:"msg_type,omitempty"` // "text" | "tool_call" | "tool_result"
+	Delta    string                    `json:"delta,omitempty"`
+	Error    string                    `json:"error,omitempty"`
+	ToolCall *persistedToolCallMessage `json:"tool_call,omitempty"`
+	ToolResult *persistedToolResultMessage `json:"tool_result,omitempty"`
+}
+
+func broadcastMsg(b *StreamBroadcaster, msg streamMsg) {
+	if b == nil {
+		return
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	b.Broadcast(StreamEvent{Type: "msg", Data: string(data)})
+}
+
 // TruncateSessionRequest represents a request to truncate a session's messages.
 // This is used for "retry/regenerate" flows where we discard messages from a given point.
 type TruncateSessionRequest struct {
@@ -224,6 +246,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		}
 
 		shouldUpdate := false
+		if _, ok := metadata["system_prompt"]; !ok || req.SystemPrompt != "" {
+			metadata["system_prompt"] = systemPrompt
+			shouldUpdate = true
+		}
 		if _, ok := metadata["model_id"]; !ok || req.ModelID != "" {
 			metadata["model_id"] = resolvedModel.ModelID
 			shouldUpdate = true
@@ -458,6 +484,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			var err error
 			var toolLoopPersisted bool
 			if len(toolDefs) > 0 && toolProtocol == "xml" {
+				var currentStepID string
 				fullContent, err = toolxml.RunLoop(
 					ctx,
 					resolvedModel.Client,
@@ -465,7 +492,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					opts,
 					toolDefs,
 					func(chunk string) error {
-						broadcaster.Broadcast(StreamEvent{Type: "content", Data: chunk})
+						broadcastMsg(broadcaster, streamMsg{
+							Op:    "delta",
+							ID:    currentStepID,
+							Role:  model.MessageRoleAssistant,
+							MsgType: model.MessageTypeText,
+							Delta: chunk,
+						})
 						return nil
 					},
 					func(msg string) {
@@ -487,6 +520,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						if err != nil {
 							return
 						}
+						broadcastMsg(broadcaster, streamMsg{
+							Op:    "final",
+							ID:    currentStepID,
+							Role:  model.MessageRoleAssistant,
+							MsgType: model.MessageTypeToolCall,
+							ToolCall: &persistedToolCallMessage{
+								Protocol:   "xml",
+								Content:    step.VisibleContent,
+								LLMContent: step.AssistantContent,
+								ToolCalls:  step.ToolCalls,
+							},
+						})
 
 						var traceData model.TraceDataJSON
 						if h.cfg.EnableTrace {
@@ -561,6 +606,17 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						if err != nil {
 							return
 						}
+						broadcastMsg(broadcaster, streamMsg{
+							Op:    "insert",
+							ID:    uuid.NewString(),
+							Role:  model.MessageRoleUser,
+							MsgType: model.MessageTypeToolResult,
+							ToolResult: &persistedToolResultMessage{
+								Protocol: "xml",
+								Content:  step.ToolResultMessage,
+								Results:  structured,
+							},
+						})
 						resultMsg := model.ChatMessage{
 							SessionID: sessionID,
 							Role:      model.MessageRoleUser,
@@ -582,6 +638,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						if content == "" {
 							content = visibleContent
 						}
+						broadcastMsg(broadcaster, streamMsg{
+							Op:     "final",
+							ID:     currentStepID,
+							Role:   model.MessageRoleAssistant,
+							MsgType: model.MessageTypeText,
+						})
 						msg := model.ChatMessage{
 							SessionID: sessionID,
 							Role:      model.MessageRoleAssistant,
@@ -591,6 +653,15 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						if err := db.Create(&msg).Error; err == nil {
 							toolLoopPersisted = true
 						}
+					},
+					func(step int) {
+						currentStepID = uuid.NewString()
+						broadcastMsg(broadcaster, streamMsg{
+							Op:     "start",
+							ID:     currentStepID,
+							Role:   model.MessageRoleAssistant,
+							MsgType: model.MessageTypeText,
+						})
 					},
 				)
 			} else if len(toolDefs) > 0 {
@@ -607,6 +678,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					fullContent, toolLoopPersisted, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel, resolvedModel.ModelName, h.cfg.EnableTrace)
 				}
 			} else {
+				assistantStreamID := uuid.NewString()
+				broadcastMsg(broadcaster, streamMsg{
+					Op:     "start",
+					ID:     assistantStreamID,
+					Role:   model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+				})
 				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
 					fullContent += chunk
 
@@ -616,12 +694,22 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					incompleteUTF8 = rest
 
 					if len(valid) > 0 {
-						broadcaster.Broadcast(StreamEvent{
-							Type: "content",
-							Data: string(valid),
+						broadcastMsg(broadcaster, streamMsg{
+							Op:     "delta",
+							ID:     assistantStreamID,
+							Role:   model.MessageRoleAssistant,
+							MsgType: model.MessageTypeText,
+							Delta:  string(valid),
 						})
 					}
 					return nil
+				})
+				broadcastMsg(broadcaster, streamMsg{
+					Op:     "final",
+					ID:     assistantStreamID,
+					Role:   model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+					Error:  func() string { if err != nil { return err.Error() }; return "" }(),
 				})
 			}
 
@@ -774,7 +862,7 @@ func (h *ChatHandler) GetSession(c *gin.Context) {
 	var session model.ChatSession
 	result := db.Where("id = ? AND user_id = ?", sessionID, userID).
 		Preload("Messages", func(db *gorm.DB) *gorm.DB {
-			return db.Order("created_at ASC")
+			return db.Order("created_at ASC, id ASC")
 		}).
 		First(&session)
 
@@ -1003,6 +1091,14 @@ func runToolLoop(
 
 	const maxSteps = 20
 	for step := 0; step < maxSteps; step++ {
+		stepStreamID := uuid.NewString()
+		broadcastMsg(broadcaster, streamMsg{
+			Op:     "start",
+			ID:     stepStreamID,
+			Role:   model.MessageRoleAssistant,
+			MsgType: model.MessageTypeText,
+		})
+
 		var (
 			result llm.ChatCompletionResult
 			err    error
@@ -1020,18 +1116,24 @@ func runToolLoop(
 				stepBuffer = rest
 
 				if len(valid) > 0 {
-					broadcaster.Broadcast(StreamEvent{
-						Type: "content",
-						Data: string(valid),
+					broadcastMsg(broadcaster, streamMsg{
+						Op:     "delta",
+						ID:     stepStreamID,
+						Role:   model.MessageRoleAssistant,
+						MsgType: model.MessageTypeText,
+						Delta:  string(valid),
 					})
 				}
 				return nil
 			})
 			if err == nil && stepContent.Len() == 0 && result.Content != "" {
 				combined.WriteString(result.Content)
-				broadcaster.Broadcast(StreamEvent{
-					Type: "content",
-					Data: result.Content,
+				broadcastMsg(broadcaster, streamMsg{
+					Op:     "delta",
+					ID:     stepStreamID,
+					Role:   model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+					Delta:  result.Content,
 				})
 			}
 			if result.Content == "" {
@@ -1041,13 +1143,23 @@ func runToolLoop(
 			result, err = client.ChatCompletionWithTools(ctx, messages, opts)
 			if err == nil && result.Content != "" {
 				combined.WriteString(result.Content)
-				broadcaster.Broadcast(StreamEvent{
-					Type: "content",
-					Data: result.Content,
+				broadcastMsg(broadcaster, streamMsg{
+					Op:     "delta",
+					ID:     stepStreamID,
+					Role:   model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+					Delta:  result.Content,
 				})
 			}
 		}
 		if err != nil {
+			broadcastMsg(broadcaster, streamMsg{
+				Op:     "final",
+				ID:     stepStreamID,
+				Role:   model.MessageRoleAssistant,
+				MsgType: model.MessageTypeText,
+				Error:  err.Error(),
+			})
 			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
 			if db != nil {
 				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
@@ -1074,6 +1186,12 @@ func runToolLoop(
 		}
 
 		if len(result.ToolCalls) == 0 {
+			broadcastMsg(broadcaster, streamMsg{
+				Op:     "final",
+				ID:     stepStreamID,
+				Role:   model.MessageRoleAssistant,
+				MsgType: model.MessageTypeText,
+			})
 			if db != nil {
 				assistantMsg := model.ChatMessage{
 					SessionID: sessionID,
@@ -1107,6 +1225,18 @@ func runToolLoop(
 				}
 			}
 		}
+		broadcastMsg(broadcaster, streamMsg{
+			Op:     "final",
+			ID:     stepStreamID,
+			Role:   model.MessageRoleAssistant,
+			MsgType: model.MessageTypeToolCall,
+			ToolCall: &persistedToolCallMessage{
+				Protocol:   "json",
+				Content:    result.Content,
+				LLMContent: result.Content,
+				ToolCalls:  result.ToolCalls,
+			},
+		})
 
 		messages = append(messages, llm.ChatMessage{
 			Role:      model.MessageRoleAssistant,
@@ -1207,6 +1337,19 @@ func runToolLoop(
 					}
 				}
 			}
+			broadcastMsg(broadcaster, streamMsg{
+				Op:     "insert",
+				ID:     uuid.NewString(),
+				Role:   model.MessageRoleTool,
+				MsgType: model.MessageTypeToolResult,
+				ToolResult: &persistedToolResultMessage{
+					Protocol:   "json",
+					ToolCallID: call.ID,
+					Name:       call.Function.Name,
+					Arguments:  call.Function.Arguments,
+					Content:    string(response),
+				},
+			})
 
 			if enableTrace {
 				entry := model.NewTraceEntry(model.TraceTypeToolResult, call.Function.Name)

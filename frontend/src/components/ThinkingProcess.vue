@@ -1,18 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Brain, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Brain } from 'lucide-vue-next'
 import { marked } from 'marked'
 
 defineProps<{
   content: string
   isStreaming?: boolean
 }>()
-
-const isExpanded = ref(true)
-
-const toggle = () => {
-  isExpanded.value = !isExpanded.value
-}
 
 const renderMarkdown = (text: string) => {
   if (!text) return ''
@@ -23,34 +16,32 @@ const renderMarkdown = (text: string) => {
 </script>
 
 <template>
-  <div class="my-2 border border-surface-700/50 rounded-xl overflow-hidden bg-surface-900/30">
-    <button
-      @click="toggle"
-      class="w-full flex items-center justify-between px-4 py-2 bg-surface-800/50 hover:bg-surface-800/70 transition-colors text-xs text-surface-400 select-none"
-    >
-      <div class="flex items-center gap-2">
-        <Brain class="w-3.5 h-3.5" />
-        <span class="font-medium">Thinking Process</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <span v-if="isStreaming" class="flex gap-0.5">
-          <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.3s]"></span>
-          <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.15s]"></span>
-          <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce"></span>
-        </span>
-        <ChevronDown v-if="isExpanded" class="w-3.5 h-3.5" />
-        <ChevronRight v-else class="w-3.5 h-3.5" />
-      </div>
-    </button>
-    
-    <div
-      v-show="isExpanded"
-      class="px-4 py-3 text-sm text-surface-300/90 border-t border-surface-700/30 bg-surface-950/20"
-    >
-      <div 
-        class="prose prose-invert prose-sm max-w-none break-words text-surface-300 text-xs leading-relaxed opacity-90"
-        v-html="renderMarkdown(content)"
-      />
+  <div class="rounded-2xl px-4 py-3 bg-surface-900/40 backdrop-blur border border-surface-700/30">
+    <div class="flex items-center gap-2 text-[11px] text-surface-500 mb-2 select-none">
+      <Brain class="w-3.5 h-3.5" />
+      <span class="font-medium">思考</span>
+      <span v-if="isStreaming" class="flex gap-0.5 ml-1">
+        <span class="w-1 h-1 rounded-full bg-surface-500 animate-bounce [animation-delay:-0.3s]"></span>
+        <span class="w-1 h-1 rounded-full bg-surface-500 animate-bounce [animation-delay:-0.15s]"></span>
+        <span class="w-1 h-1 rounded-full bg-surface-500 animate-bounce"></span>
+      </span>
     </div>
+    <div
+      class="thinking-prose prose prose-invert prose-sm max-w-none break-words text-xs leading-relaxed opacity-90"
+      v-html="renderMarkdown(content)"
+    />
   </div>
 </template>
+
+<style scoped>
+.thinking-prose {
+  --tw-prose-body: rgb(var(--color-surface-400));
+  --tw-prose-headings: rgb(var(--color-surface-300));
+  --tw-prose-links: rgb(var(--color-surface-300));
+  --tw-prose-bold: rgb(var(--color-surface-300));
+  --tw-prose-code: rgb(var(--color-surface-300));
+  --tw-prose-pre-code: rgb(var(--color-surface-300));
+  --tw-prose-bullets: rgb(var(--color-surface-500));
+  --tw-prose-counters: rgb(var(--color-surface-500));
+}
+</style>

@@ -239,20 +239,28 @@ const loadSessionMessages = async (
     } else {
       selectedToolProtocol.value = 'json'
     }
+    const sessionSystemPrompt = raw?.metadata?.system_prompt
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
-    const mapped: ChatMessage[] = rawMessages
-      .filter((m: any) => {
-        const type = String(m?.type || 'text')
-        if (!['text', 'tool_call', 'tool_result'].includes(type)) return false
-        return m?.role === 'user' || m?.role === 'assistant' || m?.role === 'tool'
-      })
-      .map((m: any, idx: number) => {
-        const serverId = Number(m.id)
+    const mapped: ChatMessage[] = rawMessages.map((m: any, idx: number) => {
+        const msg = m ?? {}
+        const serverId = Number(msg.id)
         const fallbackId = Date.now() + idx
-        const type = String(m?.type || 'text')
-        const rawContent = String(m.content || '')
+        const rawType = String(msg.type || 'text')
+        const type: ChatMessage['type'] =
+          rawType === 'tool_call' ? 'tool_call' : rawType === 'tool_result' ? 'tool_result' : 'text'
+        const rawContent = String(msg.content || '')
 
-        let role: 'user' | 'assistant' | 'tool' = m.role
+        const rawRole = String(msg.role || '')
+        let role: ChatMessage['role'] =
+          rawRole === 'user'
+            ? 'user'
+            : rawRole === 'assistant'
+              ? 'assistant'
+              : rawRole === 'tool'
+                ? 'tool'
+                : rawRole === 'system'
+                  ? 'system'
+                  : 'system'
         let content = rawContent
         let tool: ChatMessage['tool'] | undefined
 
@@ -260,10 +268,15 @@ const loadSessionMessages = async (
           const payload = safeJsonParse<ToolCallPayload>(rawContent)
           if (payload) {
             content = String(payload.content || '')
+            tool = {
+              protocol: payload.protocol,
+              llmContent: payload.llm_content,
+              toolCalls: Array.isArray(payload.tool_calls) ? payload.tool_calls : undefined,
+              content: payload.content,
+            }
           }
         } else if (type === 'tool_result') {
           const payload = safeJsonParse<ToolResultPayload>(rawContent)
-          role = 'tool'
           if (payload) {
             const output = String(payload.content || '')
             let toolError: string | undefined
@@ -288,21 +301,39 @@ const loadSessionMessages = async (
           id: Number.isFinite(serverId) && serverId > 0 ? serverId : fallbackId,
           serverId: Number.isFinite(serverId) && serverId > 0 ? serverId : undefined,
           role,
-          type: type as ChatMessage['type'],
+          type,
+          rawRole,
+          rawType,
           content,
           tool,
-          createdAt: new Date(m.created_at ?? m.createdAt ?? Date.now()),
-          trace: normalizeTrace(m.trace),
+          createdAt: new Date(msg.created_at ?? msg.createdAt ?? Date.now()),
+          trace: normalizeTrace(msg.trace),
           isStreaming: false,
         }
       })
 
     chatStore.setCurrentSession(sessionId)
-    const withPlaceholders = insertAssistantPlaceholders(mapped)
+    const withSystemPrompt: ChatMessage[] =
+      typeof sessionSystemPrompt === 'string' && sessionSystemPrompt.trim()
+        ? [
+            {
+              id: -1,
+              role: 'system',
+              type: 'text',
+              rawRole: 'system',
+              rawType: 'text',
+              content: sessionSystemPrompt,
+              createdAt: new Date(raw?.created_at ?? raw?.createdAt ?? Date.now()),
+              isStreaming: false,
+            },
+            ...mapped,
+          ]
+        : mapped
+    const withPlaceholders = withSystemPrompt
     const fallback = (fallbackAssistantTrace ?? '').trim()
     if (fallback) {
       for (let i = withPlaceholders.length - 1; i >= 0; i--) {
-        if (withPlaceholders[i].role === 'assistant') {
+        if (withPlaceholders[i].role === 'assistant' && withPlaceholders[i].type === 'text') {
           if (!withPlaceholders[i].trace) {
             withPlaceholders[i].trace = fallbackAssistantTrace
           }
@@ -325,40 +356,6 @@ const loadSessionMessages = async (
   } finally {
     if (showLoading) loadingHistory.value = false
   }
-}
-
-const insertAssistantPlaceholders = (messages: ChatMessage[]) => {
-  if (messages.length === 0) return messages
-
-  const out: ChatMessage[] = []
-  const placeholderBase = Date.now() + 1000000
-  let placeholderIndex = 0
-
-  for (let i = 0; i < messages.length; i++) {
-    const message = messages[i]
-    out.push(message)
-
-    if (message.role !== 'user') {
-      continue
-    }
-
-    const next = messages[i + 1]
-    if (next && next.role === 'assistant') {
-      continue
-    }
-
-    out.push({
-      id: placeholderBase + placeholderIndex,
-      role: 'assistant',
-      type: 'text',
-      content: '',
-      createdAt: message.createdAt,
-      isStreaming: false,
-    })
-    placeholderIndex += 1
-  }
-
-  return out
 }
 
 const selectSession = async (sessionId: string) => {
@@ -396,20 +393,103 @@ const sendChat = async (rawMessage: string) => {
   chatStore.addMessage(userMessage)
   scrollToBottom()
 
-  // Add placeholder for assistant
-  const assistantMessage: ChatMessage = {
-    id: Date.now() + 1,
-    role: 'assistant',
-    type: 'text',
-    content: '',
-    createdAt: new Date(),
-    isStreaming: true,
-  }
-  chatStore.addMessage(assistantMessage)
   chatStore.setLoading(true)
-  chatStore.clearStreamingContent()
 
   try {
+    let sawMsgEvents = false
+    let nextLocalId = Date.now()
+    const streamIndex = new Map<string, number>()
+
+    const normalizeRole = (raw: string | undefined): ChatMessage['role'] => {
+      const role = String(raw || '').toLowerCase()
+      if (role === 'user') return 'user'
+      if (role === 'assistant') return 'assistant'
+      if (role === 'tool') return 'tool'
+      if (role === 'system') return 'system'
+      return 'system'
+    }
+
+    const normalizeType = (raw: string | undefined): ChatMessage['type'] => {
+      const type = String(raw || '').toLowerCase()
+      if (type === 'tool_call') return 'tool_call'
+      if (type === 'tool_result') return 'tool_result'
+      return 'text'
+    }
+
+    type StreamMsgEvent = {
+      op: 'start' | 'delta' | 'final' | 'insert'
+      id: string
+      role?: string
+      msg_type?: string
+      delta?: string
+      error?: string
+      tool_call?: ToolCallPayload
+      tool_result?: ToolResultPayload
+    }
+
+    const findStreamingIndex = () => {
+      for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+        if (chatStore.messages[i]?.isStreaming) return i
+      }
+      return -1
+    }
+
+    const ensureStreamMessage = (streamId: string, roleRaw?: string, typeRaw?: string) => {
+      if (streamIndex.has(streamId)) return streamIndex.get(streamId)!
+
+      nextLocalId += 1
+      const role = normalizeRole(roleRaw)
+      const type = normalizeType(typeRaw)
+      const msg: ChatMessage = {
+        id: nextLocalId,
+        streamId,
+        role,
+        type,
+        rawRole: roleRaw,
+        rawType: typeRaw,
+        content: '',
+        createdAt: new Date(),
+        isStreaming: true,
+      }
+      chatStore.addMessage(msg)
+      const idx = chatStore.messages.length - 1
+      streamIndex.set(streamId, idx)
+      return idx
+    }
+
+    const applyToolCall = (message: ChatMessage, payload?: ToolCallPayload) => {
+      if (!payload) return
+      message.tool = {
+        protocol: payload.protocol,
+        llmContent: payload.llm_content,
+        toolCalls: Array.isArray(payload.tool_calls) ? payload.tool_calls : undefined,
+        content: payload.content,
+      }
+      if (typeof payload.content === 'string') {
+        message.content = payload.content
+      }
+    }
+
+    const applyToolResult = (message: ChatMessage, payload?: ToolResultPayload) => {
+      if (!payload) return
+      const output = String(payload.content || '')
+      let toolError: string | undefined
+      const parsedOutput = safeJsonParse<any>(output)
+      if (parsedOutput && typeof parsedOutput.error === 'string') {
+        toolError = parsedOutput.error
+      }
+      message.tool = {
+        protocol: payload.protocol,
+        name: payload.name,
+        toolCallId: payload.tool_call_id,
+        arguments: payload.arguments,
+        output,
+        error: toolError,
+        results: Array.isArray(payload.results) ? payload.results : undefined,
+      }
+      message.content = output
+    }
+
     await streamChat(
       message,
       chatStore.currentSessionId,
@@ -419,55 +499,137 @@ const sendChat = async (rawMessage: string) => {
       (event) => {
         if (event.type === 'session') {
           chatStore.setCurrentSession(event.data)
-        } else if (event.type === 'content') {
-          chatStore.appendStreamingContent(event.data)
-          chatStore.updateLastMessage(chatStore.streamingContent, true)
-          scrollToBottom(false)
-        } else if (event.type === 'trace') {
-          const lastMsg = chatStore.messages[chatStore.messages.length - 1]
-          if (lastMsg) {
-            lastMsg.trace = (lastMsg.trace || '') + event.data + '\n'
+        } else if (event.type === 'msg') {
+          sawMsgEvents = true
+          const payload = safeJsonParse<StreamMsgEvent>(event.data)
+          if (!payload || !payload.id || !payload.op) return
+
+          if (payload.op === 'start') {
+            ensureStreamMessage(payload.id, payload.role, payload.msg_type)
+            scrollToBottom(false)
+            return
           }
+
+          if (payload.op === 'delta') {
+            const idx = ensureStreamMessage(payload.id, payload.role, payload.msg_type)
+            const msg = chatStore.messages[idx]
+            if (msg && typeof payload.delta === 'string' && payload.delta) {
+              msg.content += payload.delta
+              msg.isStreaming = true
+              scrollToBottom(false)
+            }
+            return
+          }
+
+          if (payload.op === 'final') {
+            const idx = ensureStreamMessage(payload.id, payload.role, payload.msg_type)
+            const msg = chatStore.messages[idx]
+            if (!msg) return
+
+            msg.isStreaming = false
+            const finalType = normalizeType(payload.msg_type)
+            msg.type = finalType
+            msg.rawType = payload.msg_type
+            if (payload.role) {
+              msg.rawRole = payload.role
+              msg.role = normalizeRole(payload.role)
+            }
+
+            if (finalType === 'tool_call') {
+              applyToolCall(msg, payload.tool_call)
+            }
+
+            if (payload.error) {
+              msg.content = (msg.content || '') + `\n\n[Error] ${payload.error}`
+            }
+            return
+          }
+
+          if (payload.op === 'insert') {
+            nextLocalId += 1
+            const role = normalizeRole(payload.role)
+            const type = normalizeType(payload.msg_type)
+            const msg: ChatMessage = {
+              id: nextLocalId,
+              streamId: payload.id,
+              role,
+              type,
+              rawRole: payload.role,
+              rawType: payload.msg_type,
+              content: '',
+              createdAt: new Date(),
+              isStreaming: false,
+            }
+
+            if (type === 'tool_result') {
+              applyToolResult(msg, payload.tool_result)
+            }
+            chatStore.addMessage(msg)
+            scrollToBottom(false)
+            return
+          }
+        } else if (event.type === 'trace') {
+          const idx = findStreamingIndex()
+          const target = idx >= 0 ? chatStore.messages[idx] : chatStore.messages[chatStore.messages.length - 1]
+          if (target) target.trace = (target.trace || '') + event.data + '\n'
         } else if (event.type === 'usage') {
           try {
              // Expecting {"response_tokens": 123}
              const data = JSON.parse(event.data)
              if (typeof data.response_tokens === 'number') {
-               chatStore.updateLastMessage(chatStore.streamingContent, true, data.response_tokens)
+               for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+                 const msg = chatStore.messages[i]
+                 if (msg.role === 'assistant' && msg.isStreaming) {
+                   msg.responseTokens = data.response_tokens
+                   break
+                 }
+               }
              }
           } catch(e) {
              console.warn('Failed to parse usage event:', e)
           }
         } else if (event.type === 'error') {
           const suffix = event.data ? `\n\n[Error] ${event.data}` : '\n\n[Error] Request failed.'
-          chatStore.appendStreamingContent(suffix)
-          chatStore.updateLastMessage(chatStore.streamingContent, false)
+          const idx = findStreamingIndex()
+          if (idx >= 0) {
+            const msg = chatStore.messages[idx]
+            msg.content = (msg.content || '') + suffix
+            msg.isStreaming = false
+          } else if (!sawMsgEvents) {
+            chatStore.addMessage({
+              id: Date.now(),
+              role: 'system',
+              type: 'text',
+              content: suffix,
+              createdAt: new Date(),
+              isStreaming: false,
+            })
+          }
         } else if (event.type === 'done') {
-          const fallbackTrace = (() => {
-            for (let i = chatStore.messages.length - 1; i >= 0; i--) {
-              const msg = chatStore.messages[i]
-              if (msg.role === 'assistant') return msg.trace
-            }
-            return undefined
-          })()
-          chatStore.updateLastMessage(chatStore.streamingContent, false)
-          chatStore.clearStreamingContent()
           // Refresh sessions list to show new session or update time
           loadSessions()
-          // Reload session messages to ensure trace and metadata are up to date
-          if (chatStore.currentSessionId) {
-            loadSessionMessages(chatStore.currentSessionId, false, fallbackTrace)
-          }
         }
       },
       (error) => {
         console.error('Stream error:', error)
-        chatStore.updateLastMessage('An error occurred. Please try again.', false)
+        const idx = findStreamingIndex()
+        if (idx >= 0) {
+          const msg = chatStore.messages[idx]
+          msg.content = (msg.content || '') + '\n\n[Error] Stream failed.'
+          msg.isStreaming = false
+        }
       }
     )
   } catch (error) {
     console.error('Chat error:', error)
-    chatStore.updateLastMessage('Failed to send message. Please try again.', false)
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'system',
+      type: 'text',
+      content: 'Failed to send message. Please try again.',
+      createdAt: new Date(),
+      isStreaming: false,
+    })
   } finally {
     chatStore.setLoading(false)
     if (chatStore.currentSessionId) {
@@ -492,11 +654,19 @@ const retryMessage = async (assistantMessageIndex: number) => {
   const assistantMessage = chatStore.messages[assistantMessageIndex]
   if (!assistantMessage || assistantMessage.role !== 'assistant' || assistantMessage.isStreaming) return
 
-  const userMessageIndex = assistantMessageIndex - 1
+  let userMessageIndex = -1
+  for (let i = assistantMessageIndex - 1; i >= 0; i--) {
+    const candidate = chatStore.messages[i]
+    if (!candidate) continue
+    if (candidate.role !== 'user') continue
+    if (candidate.type !== 'text') continue
+    userMessageIndex = i
+    break
+  }
   if (userMessageIndex < 0) return
 
   const userMessage = chatStore.messages[userMessageIndex]
-  if (!userMessage || userMessage.role !== 'user') return
+  if (!userMessage) return
 
   const messageToRetry = userMessage.content
   const fromMessageId = userMessage.serverId
@@ -731,12 +901,39 @@ onMounted(async () => {
           :key="message.id"
           :class="[
             'flex gap-4 animate-fade-in',
-            message.role === 'user' ? 'justify-end' : 'justify-start',
+            message.role === 'system'
+              ? 'justify-center'
+              : message.role === 'user' && message.type === 'text'
+                ? 'justify-end'
+                : 'justify-start',
           ]"
         >
+          <!-- Tool message -->
+          <div
+            v-if="message.type === 'tool_call' || message.type === 'tool_result'"
+            class="max-w-3xl"
+          >
+            <ToolMessage :message="message" />
+          </div>
+
+          <!-- System message -->
+          <div v-else-if="message.role === 'system'" class="max-w-3xl w-full">
+            <details class="rounded-xl bg-surface-900/30 backdrop-blur border border-surface-700/30">
+              <summary class="cursor-pointer px-4 py-2 text-[11px] text-surface-500 select-none">
+                system prompt
+              </summary>
+              <div class="px-4 pb-3">
+                <div
+                  class="prose prose-invert prose-sm max-w-none break-words text-surface-300"
+                  v-html="renderMarkdown(message.content)"
+                />
+              </div>
+            </details>
+          </div>
+
           <!-- Assistant message -->
           <div
-            v-if="message.role === 'assistant'"
+            v-else-if="message.role === 'assistant'"
             class="max-w-3xl flex gap-3"
           >
             <div
@@ -745,29 +942,57 @@ onMounted(async () => {
               <span class="text-white font-bold text-xs">AI</span>
             </div>
             <div class="flex-1 space-y-2 min-w-0">
-              <div class="glass rounded-2xl rounded-tl-md px-4 py-3">
-                <!-- Thinking indicator -->
-
-                <!-- Content -->
-                <!-- Content -->
-                <div v-if="!message.isStreaming && !message.content">
-                     <!-- empty content placeholder if needed -->
+              <div class="text-[10px] uppercase tracking-[0.2em] text-surface-500 px-1">
+                {{ message.rawRole || message.role }}
+              </div>
+              <div class="space-y-2">
+                <!-- Streaming placeholder -->
+                <div
+                  v-if="message.isStreaming && (!message.content || !message.content.trim())"
+                  class="flex items-center gap-3 px-4 py-3 rounded-2xl bg-surface-900/40 backdrop-blur border border-surface-700/30"
+                >
+                  <div class="relative">
+                    <Sparkles class="w-4 h-4 text-primary-400 animate-pulse" />
+                    <div class="absolute inset-0 bg-primary-400/20 blur-md rounded-full animate-pulse"></div>
+                  </div>
+                  <div class="flex items-center gap-1 text-sm font-medium text-surface-300">
+                    <span>
+                      Thinking
+                      <span
+                        v-if="message.responseTokens"
+                        class="text-surface-400 font-normal text-xs"
+                      >
+                        ({{ message.responseTokens }} tokens)
+                      </span>
+                    </span>
+                    <span class="flex gap-0.5 ml-0.5">
+                      <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.3s]"></span>
+                      <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce [animation-delay:-0.15s]"></span>
+                      <span class="w-1 h-1 rounded-full bg-surface-400 animate-bounce"></span>
+                    </span>
+                  </div>
                 </div>
-                <!-- Logic to render thinking process and content -->
-                <div v-else class="w-full">
+
+                <!-- Render segments as bubbles -->
+                <template v-else>
                   <template v-for="(segment, sIdx) in parseMessageContent(message.content)" :key="sIdx">
-                    <ThinkingProcess 
-                      v-if="segment.type === 'think'" 
-                      :content="segment.content" 
-                      :is-streaming="message.isStreaming && sIdx === parseMessageContent(message.content).length - 1 && !segment.isClosed"
+                    <ThinkingProcess
+                      v-if="segment.type === 'think'"
+                      :content="segment.content"
+                      :is-streaming="message.isStreaming && !segment.isClosed"
                     />
                     <div
-                      v-else
-                      class="prose prose-invert prose-sm max-w-none break-words"
-                      v-html="renderMarkdown(segment.content)"
-                    />
+                      v-else-if="segment.content && segment.content.trim()"
+                      :class="['glass rounded-2xl px-4 py-3', sIdx === 0 ? 'rounded-tl-md' : '']"
+                    >
+                      <div
+                        class="prose prose-invert prose-sm max-w-none break-words"
+                        v-html="renderMarkdown(segment.content)"
+                      />
+                    </div>
                   </template>
-                </div>
+                </template>
+
                 <!-- Streaming cursor -->
                 <span
                   v-if="message.isStreaming && message.content"
@@ -806,16 +1031,12 @@ onMounted(async () => {
           </div>
 
           <div
-            v-else-if="message.role === 'tool'"
-            class="max-w-3xl"
-          >
-            <ToolMessage :message="message" />
-          </div>
-
-          <div
             v-else
             class="max-w-3xl"
           >
+            <div class="text-[10px] uppercase tracking-[0.2em] text-surface-500 px-1 mb-1 text-right">
+              {{ message.rawRole || message.role }}
+            </div>
             <div
               class="bg-primary-600 text-white rounded-2xl rounded-tr-md px-4 py-3"
             >
