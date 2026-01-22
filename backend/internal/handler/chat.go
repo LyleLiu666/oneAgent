@@ -517,6 +517,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					messages,
 					opts,
 					toolDefs,
+					userID,
 					func(chunk string) error {
 						broadcastMsg(broadcaster, streamMsg{
 							Op:      "delta",
@@ -1115,6 +1116,11 @@ func runToolLoop(
 	handlers := make(map[string]tool.Handler)
 	for _, def := range defs {
 		handlers[def.Spec.Function.Name] = def.Handler
+	}
+
+	// Inject userID into context for tool handlers to access user-specific settings
+	if userID != "" {
+		ctx = tool.ContextWithUserID(ctx, userID)
 	}
 
 	var combined strings.Builder

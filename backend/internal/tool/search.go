@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/bocha"
+	"github.com/liu_y/oneAgent/backend/internal/database"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/model"
 )
 
 type searchArgs struct {
@@ -61,10 +62,21 @@ func searchHandler(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("query is required")
 	}
 
-	// Get API key from environment
-	apiKey := os.Getenv("BOCHA_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("BOCHA_API_KEY environment variable is not set. Please configure your Bocha API key in settings.")
+	// Get userID from context
+	userID := UserIDFromContext(ctx)
+	if userID == "" {
+		return nil, fmt.Errorf("user context not available")
+	}
+
+	// Get API key from database settings
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("database not available")
+	}
+
+	apiKey, err := model.GetUserSetting(db, userID, model.SettingKeyBochaAPIKey)
+	if err != nil || apiKey == "" {
+		return nil, fmt.Errorf("Bocha API key not configured. Please set it in Settings.")
 	}
 
 	// Set defaults

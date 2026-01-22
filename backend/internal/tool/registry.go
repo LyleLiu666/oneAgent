@@ -16,6 +16,26 @@ const (
 	ToolIDSearch = "search"
 )
 
+// Context keys for passing user information to tool handlers
+type contextKey string
+
+const (
+	contextKeyUserID contextKey = "userID"
+)
+
+// ContextWithUserID returns a new context with the userID value
+func ContextWithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID, userID)
+}
+
+// UserIDFromContext extracts the userID from context, returns empty string if not found
+func UserIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(contextKeyUserID).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // Handler executes a tool with raw JSON arguments.
 type Handler func(ctx context.Context, raw json.RawMessage) (any, error)
 

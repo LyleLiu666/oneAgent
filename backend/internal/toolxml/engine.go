@@ -38,6 +38,7 @@ func RunLoop(
 	messages []llm.ChatMessage,
 	opts *llm.ChatCompletionOptions,
 	defs []tool.Definition,
+	userID string,
 	onContent llm.StreamCallback,
 	onTrace func(string),
 	onError func(string),
@@ -63,6 +64,11 @@ func RunLoop(
 	}
 	if len(handlers) == 0 {
 		return "", errors.New("no tool handlers registered")
+	}
+
+	// Inject userID into context for tool handlers to access user-specific settings
+	if userID != "" {
+		ctx = tool.ContextWithUserID(ctx, userID)
 	}
 
 	var combined strings.Builder
@@ -374,6 +380,26 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		}
 		data, err := json.Marshal(payload)
 		return data, string(data), err
+
+	case "search":
+		query := strings.TrimSpace(fields["query"])
+		if query == "" {
+			return nil, "", errors.New("missing query")
+		}
+		payload := map[string]any{
+			"query": query,
+		}
+		if rawCount := strings.TrimSpace(fields["count"]); rawCount != "" {
+			if count, err := strconv.Atoi(rawCount); err == nil && count > 0 {
+				payload["count"] = count
+			}
+		}
+		if freshness := strings.TrimSpace(fields["freshness"]); freshness != "" {
+			payload["freshness"] = freshness
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
 	default:
 		return nil, "", fmt.Errorf("unsupported tool: %s", toolName)
 	}
