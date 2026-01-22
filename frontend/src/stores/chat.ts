@@ -4,12 +4,29 @@ import { ref, computed } from 'vue'
 export interface ChatMessage {
     id: number
     serverId?: number
-    role: 'user' | 'assistant'
+    role: 'user' | 'assistant' | 'tool'
+    type?: 'text' | 'tool_call' | 'tool_result'
     content: string
     trace?: string
     createdAt: Date
     isStreaming?: boolean
     responseTokens?: number
+    tool?: {
+        protocol?: string
+        name?: string
+        toolCallId?: string
+        arguments?: string
+        output?: string
+        error?: string
+        results?: Array<{
+            tool_name?: string
+            tool_call_id?: string
+            arguments?: string
+            ok?: boolean
+            output?: string
+            error?: string
+        }>
+    }
 }
 
 export interface ChatSession {

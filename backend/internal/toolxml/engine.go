@@ -14,6 +14,16 @@ import (
 
 type FailureRecorder func(toolName, toolCallID, args string, err error)
 
+type StepRecord struct {
+	VisibleContent    string
+	AssistantContent  string
+	ToolCalls         []llm.ToolCall
+	ToolResults       []ToolResult
+	ToolResultMessage string
+}
+
+type StepObserver func(StepRecord)
+
 type ToolResult struct {
 	ToolName   string
 	ToolCallID string
@@ -32,6 +42,8 @@ func RunLoop(
 	onTrace func(string),
 	onError func(string),
 	recordFailure FailureRecorder,
+	observeStep StepObserver,
+	observeFinal func(visibleContent, assistantContent string),
 ) (string, error) {
 	if client == nil {
 		return "", errors.New("missing llm client")
@@ -90,8 +102,16 @@ func RunLoop(
 			return combined.String(), err
 		}
 
+		assistantForHistory := strings.TrimSpace(StripThinking(raw.String()))
+		if assistantForHistory == "" {
+			assistantForHistory = stepVisible
+		}
+
 		toolBlock, ok := ExtractLatestToolData(raw.String())
 		if !ok {
+			if observeFinal != nil {
+				observeFinal(stepVisible, assistantForHistory)
+			}
 			return combined.String(), nil
 		}
 
@@ -102,20 +122,25 @@ func RunLoop(
 			}
 			return combined.String(), err
 		}
-
-		assistantForHistory := strings.TrimSpace(StripThinking(raw.String()))
-		if assistantForHistory == "" {
-			assistantForHistory = stepVisible
-		}
 		messages = append(messages, llm.ChatMessage{
 			Role:    "assistant",
 			Content: assistantForHistory,
 		})
 
 		results := make([]ToolResult, 0, len(calls))
+		recordedCalls := make([]llm.ToolCall, 0, len(calls))
 		for idx, call := range calls {
 			toolName := strings.TrimSpace(call.ToolName)
 			toolCallID := fmt.Sprintf("xml_%d_%d", step, idx)
+			recordedCalls = append(recordedCalls, llm.ToolCall{
+				ID:   toolCallID,
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      toolName,
+					Arguments: "",
+				},
+			})
+
 			handler, ok := handlers[toolName]
 			if !ok {
 				err := fmt.Errorf("unknown tool: %s", toolName)
@@ -156,6 +181,7 @@ func RunLoop(
 				})
 				continue
 			}
+			recordedCalls[len(recordedCalls)-1].Function.Arguments = argsString
 
 			payload, handlerErr := handler(ctx, args)
 			if handlerErr != nil {
@@ -202,6 +228,15 @@ func RunLoop(
 		}
 
 		toolResultMsg := buildToolResultMessage(results)
+		if observeStep != nil {
+			observeStep(StepRecord{
+				VisibleContent:    stepVisible,
+				AssistantContent:  assistantForHistory,
+				ToolCalls:         recordedCalls,
+				ToolResults:       results,
+				ToolResultMessage: toolResultMsg,
+			})
+		}
 		messages = append(messages, llm.ChatMessage{
 			Role:    "user",
 			Content: toolResultMsg,

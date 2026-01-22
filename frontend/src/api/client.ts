@@ -28,6 +28,60 @@ export interface StreamEvent {
     data: string
 }
 
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+    if (a.length === 0) return b
+    if (b.length === 0) return a
+    const out = new Uint8Array(a.length + b.length)
+    out.set(a, 0)
+    out.set(b, a.length)
+    return out
+}
+
+function utf8ExpectedLength(firstByte: number): number {
+    if ((firstByte & 0x80) === 0) return 1
+    if ((firstByte & 0xe0) === 0xc0) return 2
+    if ((firstByte & 0xf0) === 0xe0) return 3
+    if ((firstByte & 0xf8) === 0xf0) return 4
+    return 0
+}
+
+function splitIncompleteUtf8Tail(bytes: Uint8Array): { complete: Uint8Array; remainder: Uint8Array } {
+    if (bytes.length === 0) {
+        return { complete: bytes, remainder: bytes }
+    }
+
+    const last = bytes[bytes.length - 1]
+    if (last < 0x80) {
+        return { complete: bytes, remainder: new Uint8Array() }
+    }
+
+    const lookback = Math.min(4, bytes.length)
+    for (let i = 1; i <= lookback; i++) {
+        const start = bytes.length - i
+        const b = bytes[start]
+
+        // Continuation bytes are 10xxxxxx; skip them.
+        if ((b & 0xc0) === 0x80) continue
+
+        const expected = utf8ExpectedLength(b)
+        if (expected === 0 || expected === 1) {
+            return { complete: bytes, remainder: new Uint8Array() }
+        }
+
+        const available = bytes.length - start
+        if (available >= expected) {
+            return { complete: bytes, remainder: new Uint8Array() }
+        }
+
+        return {
+            complete: bytes.slice(0, start),
+            remainder: bytes.slice(start),
+        }
+    }
+
+    return { complete: bytes, remainder: new Uint8Array() }
+}
+
 /**
  * Stream chat messages from the API
  */
@@ -69,13 +123,18 @@ export async function streamChat(
         }
 
         const decoder = new TextDecoder()
+        let pendingBytes: Uint8Array<ArrayBufferLike> = new Uint8Array()
         let buffer = ''
 
         while (true) {
             const { done, value } = await reader.read()
             if (done) break
 
-            buffer += decoder.decode(value, { stream: true })
+            const combined = concatBytes(pendingBytes, value)
+            const { complete, remainder } = splitIncompleteUtf8Tail(combined)
+            pendingBytes = remainder
+
+            buffer += decoder.decode(complete)
             // Normalize CRLF -> LF so we can reliably split SSE events.
             buffer = buffer.replace(/\r\n/g, '\n')
 
@@ -102,6 +161,10 @@ export async function streamChat(
 
                 delimiterIndex = buffer.indexOf('\n\n')
             }
+        }
+
+        if (pendingBytes.length > 0) {
+            buffer += decoder.decode(pendingBytes)
         }
 
         // Process any remaining buffer

@@ -220,10 +220,10 @@ var blockedCommands = map[string]struct{}{
 	"pip3":     {},
 	"conda":    {},
 	"mamba":    {},
-	"npm":      {},
-	"pnpm":     {},
-	"yarn":     {},
-	"bun":      {},
+	// "npm":      {},
+	// "pnpm":     {},
+	// "yarn":     {},
+	// "bun":      {},
 	"gem":      {},
 	"cargo":    {},
 	"rustup":   {},
@@ -329,6 +329,7 @@ type Result struct {
 	TimedOut        bool
 	StdoutTruncated bool
 	StderrTruncated bool
+	CWD             string
 }
 
 type tokenKind int
@@ -1134,7 +1135,7 @@ func mergeEnv(base []string, overrides map[string]string) []string {
 }
 
 // RunBash executes a bash command and returns output plus metadata.
-func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir string) (Result, error) {
+func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir string, workDir string) (Result, error) {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return Result{}, errors.New("command is required")
@@ -1147,6 +1148,14 @@ func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir
 
 	if err := GuardCommand(trimmed, root); err != nil {
 		return Result{}, err
+	}
+
+	startDir := root
+	if workDir != "" {
+		if err := ensurePathWithinRoot(root, workDir); err != nil {
+			return Result{}, fmt.Errorf("invalid working directory: %w", err)
+		}
+		startDir = workDir
 	}
 
 	shellPath, err := ResolveBashPath()
@@ -1169,8 +1178,11 @@ func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, shellPath, "--noprofile", "--norc", "-lc", trimmed)
-	cmd.Dir = root
+	const pwdMarker = "ONEAGENT_PWD_MARKER="
+	wrappedCmd := fmt.Sprintf("%s\nRET=$?\necho\necho %s$PWD\nexit $RET", trimmed, pwdMarker)
+
+	cmd := exec.CommandContext(runCtx, shellPath, "--noprofile", "--norc", "-lc", wrappedCmd)
+	cmd.Dir = startDir
 	cmd.Env = mergeEnv(os.Environ(), map[string]string{
 		"HOME":          root,
 		"PWD":           root,
@@ -1222,15 +1234,34 @@ func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir
 		exitCode = -1
 	}
 
+	// Parse CWD from stdout
+	stdoutStr := stdoutBuf.String()
+	cwd := startDir
+	if idx := strings.LastIndex(stdoutStr, pwdMarker); idx >= 0 {
+		// Extract CWD
+		line := stdoutStr[idx+len(pwdMarker):]
+		cwd = strings.TrimSpace(line)
+		// Remove the marker line and the preceding newline from stdout
+		// We added "echo; echo marker", so we should remove the last part
+		// Find where the marker started, maybe backtrack to remove the extra newline we added
+		cutPoint := idx
+		// Check for preceding newline from the first 'echo'
+		if cutPoint > 0 && stdoutStr[cutPoint-1] == '\n' {
+			cutPoint--
+		}
+		stdoutStr = stdoutStr[:cutPoint]
+	}
+
 	return Result{
 		Shell:           shellPath,
-		Stdout:          stdoutBuf.String(),
+		Stdout:          stdoutStr,
 		Stderr:          stderrBuf.String(),
 		ExitCode:        exitCode,
 		Duration:        duration,
 		TimedOut:        timedOut,
 		StdoutTruncated: stdoutBuf.Truncated(),
 		StderrTruncated: stderrBuf.Truncated(),
+		CWD:             cwd,
 	}, nil
 }
 

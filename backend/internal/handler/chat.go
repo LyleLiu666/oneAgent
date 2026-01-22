@@ -127,18 +127,15 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		sessionID = uuid.New().String()
 	}
 
-	// Build conversation history
-	var messages []llm.ChatMessage
-
 	// Add system prompt
 	systemPrompt := DefaultSystemPrompt
 	if req.SystemPrompt != "" {
 		systemPrompt = req.SystemPrompt
 	}
-	messages = append(messages, llm.BuildSystemMessage(systemPrompt))
 
 	// Ensure session exists and get history
 	var session model.ChatSession
+	var dbMessages []model.ChatMessage
 	if db != nil {
 		result := db.Where("id = ?", sessionID).First(&session)
 		if result.Error != nil {
@@ -156,18 +153,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 		// Load message history for context
 		// EXTENSION: Add sliding window or summarization for long conversations
-		var dbMessages []model.ChatMessage
-		db.Where("session_id = ?", sessionID).Order("id ASC").Find(&dbMessages)
-		for _, msg := range dbMessages {
-			messages = append(messages, llm.ChatMessage{
-				Role:    msg.Role,
-				Content: msg.Content,
-			})
-		}
+		db.Where("session_id = ?", sessionID).Order("created_at ASC, id ASC").Find(&dbMessages)
 	}
-
-	// Add current user message
-	messages = append(messages, llm.BuildUserMessage(req.Message))
 
 	selectedModelID := strings.TrimSpace(req.ModelID)
 	if selectedModelID == "" && session.Metadata != nil {
@@ -202,6 +189,16 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tool_protocol"})
 		return
 	}
+
+	// Build conversation history (include persisted tool calls/results for KV cache and correctness).
+	messages := make([]llm.ChatMessage, 0, 1+len(dbMessages)+1)
+	messages = append(messages, llm.BuildSystemMessage(systemPrompt))
+	if len(dbMessages) > 0 {
+		messages = append(messages, buildLLMHistoryFromDB(dbMessages, toolProtocol)...)
+	}
+
+	// Add current user message
+	messages = append(messages, llm.BuildUserMessage(req.Message))
 
 	toolDefs, err := tool.Mount(selectedToolIDs)
 	if err != nil {
@@ -245,19 +242,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		}
 	}
 
-	if db != nil {
-		// Save user message only after model resolution succeeds.
-		userMsg := model.ChatMessage{
-			SessionID: sessionID,
-			Role:      model.MessageRoleUser,
-			Type:      model.MessageTypeText,
-			Content:   req.Message,
-		}
-		db.Create(&userMsg)
-	}
-
 	// Set headers for SSE
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	c.Writer.Header().Set("Cache-Control", "no-cache, no-transform")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
@@ -294,6 +280,64 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	if broadcaster.StartGeneration() {
 		go func() {
 			defer broadcaster.Finish()
+
+			// Compress long sessions before persisting this user turn.
+			// This avoids deleting the freshly-created user message during compression.
+			{
+				ctx := context.Background()
+				before := approximateContextRunes(messages)
+				if before > sessionCompressionMaxContextRunes {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: fmt.Sprintf("Context length %d > %d, compressing history...", before, sessionCompressionMaxContextRunes),
+					})
+				}
+
+				compressed, compressedMessages, err := compressSessionIfNeeded(ctx, db, sessionID, dbMessages, messages, resolvedModel.Client)
+				if err != nil {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: fmt.Sprintf("Context compression failed: %v", err),
+					})
+
+					// Fallback: keep the last two rounds and continue without DB mutation.
+					if before > sessionCompressionMaxContextRunes {
+						_, toKeep := splitForCompression(dbMessages, sessionCompressionKeepTextMsgs)
+						placeholder := fmt.Sprintf("【会话压缩】摘要生成失败（%v），已仅保留最近两轮对话。", err)
+
+						fallback := make([]llm.ChatMessage, 0, 2+len(toKeep)+1)
+						if len(messages) > 0 {
+							fallback = append(fallback, messages[0])
+						}
+						fallback = append(fallback, llm.BuildAssistantMessage(placeholder))
+						for _, msg := range toKeep {
+							fallback = append(fallback, llm.ChatMessage{Role: msg.Role, Content: msg.Content})
+						}
+						if len(messages) > 0 {
+							fallback = append(fallback, messages[len(messages)-1])
+						}
+						messages = fallback
+					}
+				} else if compressed {
+					after := approximateContextRunes(compressedMessages)
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: fmt.Sprintf("Context compressed: %d → %d", before, after),
+					})
+					messages = compressedMessages
+				}
+			}
+
+			if db != nil {
+				// Save user message only after compression succeeds (or is skipped).
+				userMsg := model.ChatMessage{
+					SessionID: sessionID,
+					Role:      model.MessageRoleUser,
+					Type:      model.MessageTypeText,
+					Content:   req.Message,
+				}
+				db.Create(&userMsg)
+			}
 
 			// Start trace collection
 			traceStart := time.Now()
@@ -412,6 +456,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			var err error
+			var toolLoopPersisted bool
 			if len(toolDefs) > 0 && toolProtocol == "xml" {
 				fullContent, err = toolxml.RunLoop(
 					ctx,
@@ -432,6 +477,121 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					func(toolName, toolCallID, args string, toolErr error) {
 						recordToolFailure(sessionID, userID, resolvedModel, toolName, toolCallID, args, toolErr)
 					},
+					func(step toolxml.StepRecord) {
+						if db == nil {
+							return
+						}
+
+						var parentID uint
+						content, err := marshalPersistedToolCall("xml", step.VisibleContent, step.AssistantContent, step.ToolCalls)
+						if err != nil {
+							return
+						}
+
+						var traceData model.TraceDataJSON
+						if h.cfg.EnableTrace {
+							entries := make([]model.TraceEntry, 0, len(step.ToolCalls)*2)
+							resultByID := make(map[string]toolxml.ToolResult, len(step.ToolResults))
+							for _, r := range step.ToolResults {
+								resultByID[r.ToolCallID] = r
+							}
+
+							for _, call := range step.ToolCalls {
+								entry := model.NewTraceEntry(model.TraceTypeToolCall, call.Function.Name)
+								entry.Input = map[string]any{
+									"tool_call_id": call.ID,
+									"arguments":    call.Function.Arguments,
+								}
+								entry.Metadata["tool_call_id"] = call.ID
+								entry.Metadata["protocol"] = "xml"
+								entry.Complete()
+								entries = append(entries, entry)
+
+								if r, ok := resultByID[call.ID]; ok {
+									resEntry := model.NewTraceEntry(model.TraceTypeToolResult, call.Function.Name)
+									resEntry.Output = r.OutputJSON
+									if r.Error != "" {
+										resEntry.Error = r.Error
+									}
+									resEntry.Metadata["tool_call_id"] = r.ToolCallID
+									resEntry.Metadata["protocol"] = "xml"
+									resEntry.Complete()
+									entries = append(entries, resEntry)
+								}
+							}
+
+							traceData = model.TraceDataJSON{
+								TraceData: model.TraceData{
+									Entries: entries,
+									Model:   resolvedModel.ModelName,
+								},
+							}
+						}
+
+						callMsg := model.ChatMessage{
+							SessionID: sessionID,
+							Role:      model.MessageRoleAssistant,
+							Type:      model.MessageTypeToolCall,
+							Content:   content,
+							Trace:     traceData,
+						}
+						if err := db.Create(&callMsg).Error; err == nil {
+							parentID = callMsg.ID
+							toolLoopPersisted = true
+						}
+
+						argsByID := make(map[string]string, len(step.ToolCalls))
+						for _, call := range step.ToolCalls {
+							argsByID[call.ID] = call.Function.Arguments
+						}
+
+						structured := make([]persistedToolResult, 0, len(step.ToolResults))
+						for _, r := range step.ToolResults {
+							structured = append(structured, persistedToolResult{
+								ToolName:   r.ToolName,
+								ToolCallID: r.ToolCallID,
+								Arguments:  argsByID[r.ToolCallID],
+								OK:         r.OK,
+								Output:     r.OutputJSON,
+								Error:      r.Error,
+							})
+						}
+
+						resultContent, err := marshalPersistedToolResult("xml", "", "", "", step.ToolResultMessage, structured)
+						if err != nil {
+							return
+						}
+						resultMsg := model.ChatMessage{
+							SessionID: sessionID,
+							Role:      model.MessageRoleUser,
+							Type:      model.MessageTypeToolResult,
+							Content:   resultContent,
+						}
+						if parentID != 0 {
+							resultMsg.ParentID = &parentID
+						}
+						if err := db.Create(&resultMsg).Error; err == nil {
+							toolLoopPersisted = true
+						}
+					},
+					func(visibleContent, assistantContent string) {
+						if db == nil {
+							return
+						}
+						content := strings.TrimSpace(assistantContent)
+						if content == "" {
+							content = visibleContent
+						}
+						msg := model.ChatMessage{
+							SessionID: sessionID,
+							Role:      model.MessageRoleAssistant,
+							Type:      model.MessageTypeText,
+							Content:   content,
+						}
+						if err := db.Create(&msg).Error; err == nil {
+							toolLoopPersisted = true
+						}
+					},
 				)
 			} else if len(toolDefs) > 0 {
 				toolClient, ok := resolvedModel.Client.(interface {
@@ -444,7 +604,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					})
 					err = fmt.Errorf("tool calling not supported for this provider")
 				} else {
-					fullContent, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel)
+					fullContent, toolLoopPersisted, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel, resolvedModel.ModelName, h.cfg.EnableTrace)
 				}
 			} else {
 				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
@@ -463,6 +623,27 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					}
 					return nil
 				})
+			}
+
+			if toolProtocol == "xml" && err != nil && db != nil && toolLoopPersisted {
+				// Ensure an assistant "air bubble" exists on XML tool failures (history + trace).
+				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+				entry.Error = err.Error()
+				entry.Complete()
+				trace := model.TraceDataJSON{
+					TraceData: model.TraceData{
+						Entries: []model.TraceEntry{entry},
+						Model:   resolvedModel.ModelName,
+					},
+				}
+				msg := model.ChatMessage{
+					SessionID: sessionID,
+					Role:      model.MessageRoleAssistant,
+					Type:      model.MessageTypeText,
+					Content:   "",
+					Trace:     trace,
+				}
+				_ = db.Create(&msg).Error
 			}
 
 			if err != nil {
@@ -490,7 +671,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			// Save assistant message to database (also persist error cases so history shows an "air bubble" + trace).
-			if db != nil && (fullContent != "" || err != nil) {
+			if db != nil && !toolLoopPersisted && (fullContent != "" || err != nil) {
 				entries := traceEntries
 				if err != nil && len(entries) == 0 {
 					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
@@ -517,6 +698,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				db.Create(&assistantMsg)
 
 				// Update session timestamp
+				db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now())
+			}
+
+			if db != nil && toolLoopPersisted {
+				// Tool loop saved multiple messages; still bump session timestamp.
 				db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now())
 			}
 		}()
@@ -799,17 +985,21 @@ func runToolLoop(
 	sessionID string,
 	userID string,
 	resolved *resolvedModel,
-) (string, error) {
+	modelName string,
+	enableTrace bool,
+) (string, bool, error) {
 	if len(defs) == 0 {
-		return "", fmt.Errorf("no tools configured")
+		return "", false, fmt.Errorf("no tools configured")
 	}
 
+	db := database.GetDB()
 	handlers := make(map[string]tool.Handler)
 	for _, def := range defs {
 		handlers[def.Spec.Function.Name] = def.Handler
 	}
 
 	var combined strings.Builder
+	var persisted bool
 
 	const maxSteps = 20
 	for step := 0; step < maxSteps; step++ {
@@ -859,12 +1049,63 @@ func runToolLoop(
 		}
 		if err != nil {
 			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
-			return combined.String(), err
+			if db != nil {
+				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+				entry.Error = err.Error()
+				entry.Complete()
+				trace := model.TraceDataJSON{
+					TraceData: model.TraceData{
+						Entries: []model.TraceEntry{entry},
+						Model:   modelName,
+					},
+				}
+				msg := model.ChatMessage{
+					SessionID: sessionID,
+					Role:      model.MessageRoleAssistant,
+					Type:      model.MessageTypeText,
+					Content:   "",
+					Trace:     trace,
+				}
+				if createErr := db.Create(&msg).Error; createErr == nil {
+					persisted = true
+				}
+			}
+			return combined.String(), persisted, err
 		}
 
 		if len(result.ToolCalls) == 0 {
-			// Return the content already streamed/broadcast across all steps so history matches realtime output.
-			return combined.String(), nil
+			if db != nil {
+				assistantMsg := model.ChatMessage{
+					SessionID: sessionID,
+					Role:      model.MessageRoleAssistant,
+					Type:      model.MessageTypeText,
+					Content:   result.Content,
+				}
+				if createErr := db.Create(&assistantMsg).Error; createErr == nil {
+					persisted = true
+				}
+			}
+
+			// Return the content already streamed/broadcast across all steps so llm_calls response matches realtime output.
+			return combined.String(), persisted, nil
+		}
+
+		var toolCallMsgID uint
+		stepTraceEntries := make([]model.TraceEntry, 0, len(result.ToolCalls)*2)
+		if db != nil {
+			serialized, err := marshalPersistedToolCall("json", result.Content, result.Content, result.ToolCalls)
+			if err == nil {
+				callMsg := model.ChatMessage{
+					SessionID: sessionID,
+					Role:      model.MessageRoleAssistant,
+					Type:      model.MessageTypeToolCall,
+					Content:   serialized,
+				}
+				if err := db.Create(&callMsg).Error; err == nil {
+					toolCallMsgID = callMsg.ID
+					persisted = true
+				}
+			}
 		}
 
 		messages = append(messages, llm.ChatMessage{
@@ -874,14 +1115,48 @@ func runToolLoop(
 		})
 
 		for _, call := range result.ToolCalls {
+			if enableTrace {
+				entry := model.NewTraceEntry(model.TraceTypeToolCall, call.Function.Name)
+				entry.Input = map[string]any{
+					"tool_call_id": call.ID,
+					"arguments":    call.Function.Arguments,
+				}
+				entry.Metadata["tool_call_id"] = call.ID
+				entry.Metadata["protocol"] = "json"
+				entry.Complete()
+				stepTraceEntries = append(stepTraceEntries, entry)
+			}
+
 			handler, ok := handlers[call.Function.Name]
 			if !ok {
 				broadcaster.Broadcast(StreamEvent{
 					Type: "error",
 					Data: fmt.Sprintf("Unknown tool: %s", call.Function.Name),
 				})
-				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, fmt.Errorf("unknown tool"))
-				return combined.String(), fmt.Errorf("unknown tool: %s", call.Function.Name)
+				err := fmt.Errorf("unknown tool: %s", call.Function.Name)
+				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
+				if db != nil {
+					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+					entry.Error = err.Error()
+					entry.Complete()
+					trace := model.TraceDataJSON{
+						TraceData: model.TraceData{
+							Entries: []model.TraceEntry{entry},
+							Model:   modelName,
+						},
+					}
+					msg := model.ChatMessage{
+						SessionID: sessionID,
+						Role:      model.MessageRoleAssistant,
+						Type:      model.MessageTypeText,
+						Content:   "",
+						Trace:     trace,
+					}
+					if createErr := db.Create(&msg).Error; createErr == nil {
+						persisted = true
+					}
+				}
+				return combined.String(), persisted, err
 			}
 
 			broadcaster.Broadcast(StreamEvent{
@@ -915,6 +1190,36 @@ func runToolLoop(
 				response = []byte(fmt.Sprintf(`{"error": "Failed to marshal tool response: %v"}`, err))
 			}
 
+			if db != nil {
+				serialized, err := marshalPersistedToolResult("json", call.ID, call.Function.Name, call.Function.Arguments, string(response), nil)
+				if err == nil {
+					resultMsg := model.ChatMessage{
+						SessionID: sessionID,
+						Role:      model.MessageRoleTool,
+						Type:      model.MessageTypeToolResult,
+						Content:   serialized,
+					}
+					if toolCallMsgID != 0 {
+						resultMsg.ParentID = &toolCallMsgID
+					}
+					if createErr := db.Create(&resultMsg).Error; createErr == nil {
+						persisted = true
+					}
+				}
+			}
+
+			if enableTrace {
+				entry := model.NewTraceEntry(model.TraceTypeToolResult, call.Function.Name)
+				entry.Output = string(response)
+				if err != nil {
+					entry.Error = err.Error()
+				}
+				entry.Metadata["tool_call_id"] = call.ID
+				entry.Metadata["protocol"] = "json"
+				entry.Complete()
+				stepTraceEntries = append(stepTraceEntries, entry)
+			}
+
 			messages = append(messages, llm.ChatMessage{
 				Role:       model.MessageRoleTool,
 				Content:    string(response),
@@ -922,10 +1227,42 @@ func runToolLoop(
 				Name:       call.Function.Name,
 			})
 		}
+
+		if db != nil && enableTrace && toolCallMsgID != 0 && len(stepTraceEntries) > 0 {
+			trace := model.TraceDataJSON{
+				TraceData: model.TraceData{
+					Entries: stepTraceEntries,
+					Model:   modelName,
+				},
+			}
+			_ = db.Model(&model.ChatMessage{}).Where("id = ?", toolCallMsgID).Update("trace", trace).Error
+		}
 	}
 
 	recordToolFailure(sessionID, userID, resolved, "", "", "", fmt.Errorf("tool call limit reached"))
-	return combined.String(), fmt.Errorf("tool call limit reached")
+	err := fmt.Errorf("tool call limit reached")
+	if db != nil {
+		entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+		entry.Error = err.Error()
+		entry.Complete()
+		trace := model.TraceDataJSON{
+			TraceData: model.TraceData{
+				Entries: []model.TraceEntry{entry},
+				Model:   modelName,
+			},
+		}
+		msg := model.ChatMessage{
+			SessionID: sessionID,
+			Role:      model.MessageRoleAssistant,
+			Type:      model.MessageTypeText,
+			Content:   "",
+			Trace:     trace,
+		}
+		if createErr := db.Create(&msg).Error; createErr == nil {
+			persisted = true
+		}
+	}
+	return combined.String(), persisted, err
 }
 
 func recordToolFailure(sessionID, userID string, resolved *resolvedModel, toolName, toolCallID, args string, err error) {

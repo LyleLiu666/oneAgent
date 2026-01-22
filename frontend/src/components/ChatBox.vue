@@ -44,6 +44,50 @@ interface ToolOption {
   description?: string
 }
 
+type ToolCallPayload = {
+  protocol?: string
+  content?: string
+  llm_content?: string
+  tool_calls?: any[]
+}
+
+type ToolResultPayload = {
+  protocol?: string
+  tool_call_id?: string
+  name?: string
+  arguments?: string
+  content?: string
+  results?: Array<{
+    tool_name?: string
+    tool_call_id?: string
+    arguments?: string
+    ok?: boolean
+    output?: string
+    error?: string
+  }>
+}
+
+const safeJsonParse = <T,>(raw: any): T | undefined => {
+  if (typeof raw !== 'string') return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  try {
+    return JSON.parse(trimmed) as T
+  } catch {
+    return undefined
+  }
+}
+
+const formatMaybeJson = (raw: string): string => {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed) return ''
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2)
+  } catch {
+    return raw
+  }
+}
+
 // Computed
 const canSend = computed(
   () => inputMessage.value.trim() && !chatStore.isLoading && !loadingHistory.value
@@ -185,15 +229,56 @@ const loadSessionMessages = async (sessionId: string, showLoading = true) => {
     }
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
     const mapped: ChatMessage[] = rawMessages
-      .filter((m: any) => m?.role === 'user' || m?.role === 'assistant')
+      .filter((m: any) => {
+        const type = String(m?.type || 'text')
+        if (!['text', 'tool_call', 'tool_result'].includes(type)) return false
+        return m?.role === 'user' || m?.role === 'assistant' || m?.role === 'tool'
+      })
       .map((m: any, idx: number) => {
         const serverId = Number(m.id)
         const fallbackId = Date.now() + idx
+        const type = String(m?.type || 'text')
+        const rawContent = String(m.content || '')
+
+        let role: 'user' | 'assistant' | 'tool' = m.role
+        let content = rawContent
+        let tool: ChatMessage['tool'] | undefined
+
+        if (type === 'tool_call') {
+          const payload = safeJsonParse<ToolCallPayload>(rawContent)
+          if (payload) {
+            content = String(payload.content || '')
+          }
+        } else if (type === 'tool_result') {
+          const payload = safeJsonParse<ToolResultPayload>(rawContent)
+          role = 'tool'
+          if (payload) {
+            const output = String(payload.content || '')
+            let toolError: string | undefined
+            const parsedOutput = safeJsonParse<any>(output)
+            if (parsedOutput && typeof parsedOutput.error === 'string') {
+              toolError = parsedOutput.error
+            }
+            tool = {
+              protocol: payload.protocol,
+              name: payload.name,
+              toolCallId: payload.tool_call_id,
+              arguments: payload.arguments,
+              output,
+              error: toolError,
+              results: Array.isArray(payload.results) ? payload.results : undefined,
+            }
+            content = output
+          }
+        }
+
         return {
           id: Number.isFinite(serverId) && serverId > 0 ? serverId : fallbackId,
           serverId: Number.isFinite(serverId) && serverId > 0 ? serverId : undefined,
-          role: m.role,
-          content: String(m.content || ''),
+          role,
+          type: type as ChatMessage['type'],
+          content,
+          tool,
           createdAt: new Date(m.created_at ?? m.createdAt ?? Date.now()),
           trace:
             m.trace == null
@@ -246,6 +331,7 @@ const insertAssistantPlaceholders = (messages: ChatMessage[]) => {
     out.push({
       id: placeholderBase + placeholderIndex,
       role: 'assistant',
+      type: 'text',
       content: '',
       createdAt: message.createdAt,
       isStreaming: false,
@@ -284,6 +370,7 @@ const sendChat = async (rawMessage: string) => {
   const userMessage: ChatMessage = {
     id: Date.now(),
     role: 'user',
+    type: 'text',
     content: message,
     createdAt: new Date(),
   }
@@ -294,6 +381,7 @@ const sendChat = async (rawMessage: string) => {
   const assistantMessage: ChatMessage = {
     id: Date.now() + 1,
     role: 'assistant',
+    type: 'text',
     content: '',
     createdAt: new Date(),
     isStreaming: true,
@@ -301,7 +389,6 @@ const sendChat = async (rawMessage: string) => {
   chatStore.addMessage(assistantMessage)
   chatStore.setLoading(true)
   chatStore.clearStreamingContent()
-  let streamHadError = false
 
   try {
     await streamChat(
@@ -333,7 +420,6 @@ const sendChat = async (rawMessage: string) => {
              console.warn('Failed to parse usage event:', e)
           }
         } else if (event.type === 'error') {
-          streamHadError = true
           const suffix = event.data ? `\n\n[Error] ${event.data}` : '\n\n[Error] Request failed.'
           chatStore.appendStreamingContent(suffix)
           chatStore.updateLastMessage(chatStore.streamingContent, false)
@@ -343,7 +429,7 @@ const sendChat = async (rawMessage: string) => {
           // Refresh sessions list to show new session or update time
           loadSessions()
           // Reload session messages to ensure trace and metadata are up to date
-          if (chatStore.currentSessionId && !streamHadError) {
+          if (chatStore.currentSessionId) {
             loadSessionMessages(chatStore.currentSessionId, false)
           }
         }
@@ -416,7 +502,8 @@ const copyMessage = async (message: ChatMessage) => {
 }
 
 const renderMarkdown = (content: string) => {
-  return marked(content, { breaks: true, gfm: true })
+  const escaped = content.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return marked(escaped, { breaks: true, gfm: true })
 }
 
 const handleKeydown = (event: KeyboardEvent) => {
@@ -649,6 +736,79 @@ onMounted(async () => {
 
           <!-- User message -->
           <div
+            v-else-if="message.role === 'tool'"
+            class="max-w-3xl flex gap-3"
+          >
+            <div
+              class="w-8 h-8 rounded-lg bg-surface-800 flex items-center justify-center flex-shrink-0 border border-surface-700/40"
+            >
+              <Cpu class="w-4 h-4 text-surface-300" />
+            </div>
+            <div class="flex-1 space-y-2 min-w-0">
+              <div class="glass rounded-2xl rounded-tl-md px-4 py-3">
+                <div class="flex items-center gap-2 text-xs text-surface-300 mb-2">
+                  <span class="font-medium">{{ message.tool?.name || 'tool' }}</span>
+                  <span
+                    v-if="message.tool?.toolCallId"
+                    class="text-surface-500 font-mono text-[11px] truncate"
+                    :title="message.tool.toolCallId"
+                  >
+                    {{ message.tool.toolCallId }}
+                  </span>
+                </div>
+
+                <div v-if="message.tool?.arguments" class="space-y-1 mb-3">
+                  <div class="text-[11px] text-surface-500">arguments</div>
+                  <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.arguments) }}</pre>
+                </div>
+
+                <div
+                  v-if="message.tool?.results && message.tool.results.length"
+                  class="space-y-4"
+                >
+                  <div
+                    v-for="(r, idx) in message.tool.results"
+                    :key="idx"
+                    class="space-y-2"
+                  >
+                    <div class="flex items-center justify-between gap-2 text-[11px] text-surface-500">
+                      <span class="font-medium text-surface-300 truncate" :title="r.tool_name || ''">
+                        {{ r.tool_name || message.tool?.name || 'tool' }}
+                      </span>
+                      <span v-if="r.tool_call_id" class="font-mono truncate" :title="r.tool_call_id">
+                        {{ r.tool_call_id }}
+                      </span>
+                    </div>
+                    <div v-if="r.arguments" class="space-y-1">
+                      <div class="text-[11px] text-surface-500">arguments</div>
+                      <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(String(r.arguments)) }}</pre>
+                    </div>
+                    <div v-if="r.output" class="space-y-1">
+                      <div class="text-[11px] text-surface-500">output</div>
+                      <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(String(r.output)) }}</pre>
+                    </div>
+                    <div v-if="r.error" class="text-xs text-red-400">{{ r.error }}</div>
+                  </div>
+                </div>
+                <div v-else class="space-y-2">
+                  <div v-if="message.tool?.output" class="space-y-1">
+                    <div class="text-[11px] text-surface-500">output</div>
+                    <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.output) }}</pre>
+                  </div>
+                  <div v-else-if="message.content" class="space-y-1">
+                    <div class="text-[11px] text-surface-500">output</div>
+                    <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.content) }}</pre>
+                  </div>
+                  <div v-if="message.tool?.error" class="text-xs text-red-400">{{ message.tool.error }}</div>
+                </div>
+              </div>
+
+              <!-- Trace Log Component -->
+              <TraceLog :content="message.trace" />
+            </div>
+          </div>
+
+          <div
             v-else
             class="max-w-3xl"
           >
@@ -759,5 +919,23 @@ textarea {
     rgba(99, 102, 241, 0.25) 85%,
     transparent 100%
   );
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-surface-700);
+  border-radius: 2px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-600);
 }
 </style>

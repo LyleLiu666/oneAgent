@@ -68,7 +68,7 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 
 	cfg := config.GetConfig()
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	result, err := shell.RunBash(ctx, req.Command, timeout, cfg.BashRootDir)
+	result, err := shell.RunBash(ctx, req.Command, timeout, cfg.BashRootDir, "")
 	if err != nil {
 		return nil, err
 	}

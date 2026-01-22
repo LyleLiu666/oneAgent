@@ -15,6 +15,7 @@ import (
 type bashRunRequest struct {
 	Command   string `json:"command" binding:"required"`
 	TimeoutMs int    `json:"timeout_ms"`
+	WorkDir   string `json:"work_dir"`
 }
 
 type bashRunResponse struct {
@@ -26,6 +27,7 @@ type bashRunResponse struct {
 	TimedOut        bool   `json:"timed_out"`
 	StdoutTruncated bool   `json:"stdout_truncated"`
 	StderrTruncated bool   `json:"stderr_truncated"`
+	CWD             string `json:"cwd"`
 }
 
 // RunBash executes a bash command for the current user.
@@ -43,7 +45,7 @@ func RunBash(c *gin.Context) {
 
 	cfg := config.GetConfig()
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	result, err := shell.RunBash(c.Request.Context(), req.Command, timeout, cfg.BashRootDir)
+	result, err := shell.RunBash(c.Request.Context(), req.Command, timeout, cfg.BashRootDir, req.WorkDir)
 	if err != nil {
 		var unsafeErr *shell.UnsafeCommandError
 		if errors.As(err, &unsafeErr) {
@@ -63,5 +65,6 @@ func RunBash(c *gin.Context) {
 		TimedOut:        result.TimedOut,
 		StdoutTruncated: result.StdoutTruncated,
 		StderrTruncated: result.StderrTruncated,
+		CWD:             result.CWD,
 	})
 }
