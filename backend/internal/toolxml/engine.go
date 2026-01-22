@@ -333,7 +333,7 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		data, err := json.Marshal(payload)
 		return data, string(data), err
 
-	case "smart_edit":
+	case "edit":
 		filePath := strings.TrimSpace(fields["filePath"])
 		replaceAll := parseBool(fields["replaceAll"])
 
@@ -363,7 +363,7 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		oldContent := fields["oldcontent"]
 		newContent := fields["newcontent"]
 		if filePath == "" || oldContent == "" {
-			return nil, "", errors.New("smart_edit requires filePath + oldcontent/newcontent, or filePath + content, or command")
+			return nil, "", errors.New("edit requires filePath + oldcontent/newcontent, or filePath + content, or command")
 		}
 
 		payload := map[string]any{

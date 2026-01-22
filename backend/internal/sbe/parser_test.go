@@ -3,7 +3,7 @@ package sbe
 import "testing"
 
 func TestParseSmartEditCommand_TrimsDirectives_AndAppendsFinalBlock(t *testing.T) {
-	raw := "apply_smart_edit <<'EOF'\n file: foo.txt\n <<<< SEARCH\nhello\n ==== REPLACE\nworld\nEOF\n"
+	raw := "apply_edit <<'EOF'\n file: foo.txt\n <<<< SEARCH\nhello\n ==== REPLACE\nworld\nEOF\n"
 
 	blocks, err := ParseSmartEditCommand(raw)
 	if err != nil {

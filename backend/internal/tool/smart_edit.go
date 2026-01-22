@@ -47,13 +47,13 @@ func smartEditDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
-			Name:        "smart_edit",
-			Description: "Apply edits via a shell-style script. Supports apply_smart_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Prefer {filePath, content} for full-file writes when possible. Legacy {filePath, oldString, newString} is also supported.",
+			Name:        "edit",
+			Description: "Apply edits via a shell-style script. Supports apply_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Prefer {filePath, content} for full-file writes when possible. Legacy {filePath, oldString, newString} is also supported.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{
-						"description": "Smart-edit script, as an array of lines or a single multi-line string. Example: [\"apply_smart_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
+						"description": "Smart-edit script, as an array of lines or a single multi-line string. Example: [\"apply_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
 						"oneOf": []any{
 							map[string]any{
 								"type": "array",
@@ -77,7 +77,7 @@ func smartEditDefinition() Definition {
 		},
 	}
 
-	return newDefinition(ToolIDSmartEdit, spec, runSmartEditTool)
+	return newDefinition(ToolIDEdit, spec, runSmartEditTool)
 }
 
 func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
