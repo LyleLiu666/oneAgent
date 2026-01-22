@@ -1,0 +1,26 @@
+package toolxml
+
+import "testing"
+
+func TestParseToolData_UnclosedCDATA_StripsPrefix(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>bash</tool_name>
+    <command><![CDATA[ls -la</command>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "bash" {
+		t.Fatalf("expected tool 'bash', got %q", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["command"]; got != "ls -la" {
+		t.Fatalf("expected command %q, got %q", "ls -la", got)
+	}
+}

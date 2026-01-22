@@ -179,6 +179,10 @@ func tagValue(input, tag string) (string, bool) {
 	if strings.HasPrefix(value, "<![CDATA[") {
 		if end := strings.Index(value, "]]>"); end != -1 {
 			value = value[len("<![CDATA["):end]
+		} else {
+			// Be tolerant of malformed CDATA blocks so tool calls don't
+			// accidentally pass a leading "<" into downstream tools.
+			value = value[len("<![CDATA["):]
 		}
 	}
 

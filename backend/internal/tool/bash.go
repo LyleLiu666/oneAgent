@@ -33,7 +33,7 @@ func bashDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "bash",
-			Description: "Execute a bash command inside the configured sandbox.",
+			Description: "Execute a bash command inside the sandbox rooted at $BASH_ROOT_DIR. Restrictions: no heredoc redirection (<<), no $/` expansions, and file paths must stay within $BASH_ROOT_DIR (except /dev/null). Prefer smart_edit for file writes/edits.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

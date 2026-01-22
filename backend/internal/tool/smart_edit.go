@@ -48,15 +48,22 @@ func smartEditDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "smart_edit",
-			Description: "Apply edits via a shell-style script. Supports apply_smart_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Legacy {filePath, oldString, newString} is also supported.",
+			Description: "Apply edits via a shell-style script. Supports apply_smart_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Prefer {filePath, content} for full-file writes when possible. Legacy {filePath, oldString, newString} is also supported.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{
-						"type":        "array",
-						"description": "Smart-edit script lines. Example: [\"apply_smart_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
-						"items": map[string]any{
-							"type": "string",
+						"description": "Smart-edit script, as an array of lines or a single multi-line string. Example: [\"apply_smart_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
+						"oneOf": []any{
+							map[string]any{
+								"type": "array",
+								"items": map[string]any{
+									"type": "string",
+								},
+							},
+							map[string]any{
+								"type": "string",
+							},
 						},
 					},
 					"replaceAll": map[string]any{
@@ -242,6 +249,24 @@ func parseSmartEditInput(raw json.RawMessage) ([]sbe.EditBlock, bool, []smartEdi
 		if command == "" {
 			return nil, false, nil, errors.New("command is required")
 		}
+
+		trimmed := strings.TrimSpace(command)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && json.Valid([]byte(trimmed)) {
+			var decoded []string
+			if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil && len(decoded) > 0 {
+				joined := strings.Join(decoded, "\n")
+				blocks, parseErr := sbe.ParseSmartEditCommand(joined)
+				if parseErr == nil {
+					return blocks, false, nil, nil
+				}
+				fileWrites, writeErr := parseCatHeredocWrites(decoded)
+				if writeErr == nil {
+					return nil, false, fileWrites, nil
+				}
+				return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w (cat heredoc parse: %v)", parseErr, writeErr)
+			}
+		}
+
 		lines := strings.Split(command, "\n")
 		blocks, parseErr := sbe.ParseSmartEditCommand(command)
 		if parseErr == nil {
@@ -280,6 +305,13 @@ func decodeCommandLines(raw json.RawMessage) ([]string, error) {
 	var command string
 	if err := json.Unmarshal(raw, &command); err == nil && strings.TrimSpace(command) != "" {
 		command = strings.TrimRight(command, "\n")
+		trimmed := strings.TrimSpace(command)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && json.Valid([]byte(trimmed)) {
+			var decoded []string
+			if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil && len(decoded) > 0 {
+				return decoded, nil
+			}
+		}
 		return strings.Split(command, "\n"), nil
 	}
 

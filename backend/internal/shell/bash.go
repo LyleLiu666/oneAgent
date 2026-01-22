@@ -270,7 +270,6 @@ var blockedCommands = map[string]struct{}{
 	"perl":       {},
 	"ruby":       {},
 	"php":        {},
-	"node":       {},
 	"deno":       {},
 	"lua":        {},
 	"luajit":     {},
@@ -284,7 +283,6 @@ var blockedCommands = map[string]struct{}{
 	"ed":         {},
 	"ex":         {},
 	"xargs":      {},
-	"find":       {},
 	"parallel":   {},
 
 	// Editors / interactive shells.
@@ -308,7 +306,6 @@ var blockedCommands = map[string]struct{}{
 	"cp":       {},
 	"ln":       {},
 	"install":  {},
-	"touch":    {},
 	"truncate": {},
 	"chmod":    {},
 	"chown":    {},
@@ -922,6 +919,10 @@ func isRedirectionOperator(token string) bool {
 }
 
 func validatePathWithinRoot(root, token string) error {
+	if strings.TrimSpace(token) == "/dev/null" {
+		return nil
+	}
+
 	normalized, err := normalizePathToken(token, root)
 	if err != nil {
 		return err

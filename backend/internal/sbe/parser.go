@@ -36,27 +36,28 @@ func ParseSmartEditCommand(rawInput string) ([]EditBlock, error) {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		directive := strings.TrimSpace(line)
 
 		// 2. State Machine
-		if strings.HasPrefix(line, "file: ") {
-			currentFile = strings.TrimSpace(strings.TrimPrefix(line, "file: "))
+		if strings.HasPrefix(directive, "file:") {
+			currentFile = strings.TrimSpace(strings.TrimPrefix(directive, "file:"))
 			continue
 		}
 
-		if line == "<<<< SEARCH" {
+		if directive == "<<<< SEARCH" {
 			// Start new block
 			currentBlock = &EditBlock{FilePath: currentFile}
 			currentSection = "SEARCH"
 			continue
 		}
 
-		if line == "==== REPLACE" {
+		if directive == "==== REPLACE" {
 			currentSection = "REPLACE"
 			continue
 		}
 
-		if line == ">>>>" {
+		if directive == ">>>>" {
 			// End block
 			if currentBlock != nil {
 				blocks = append(blocks, *currentBlock)
@@ -74,6 +75,10 @@ func ParseSmartEditCommand(rawInput string) ([]EditBlock, error) {
 				currentBlock.Replace = append(currentBlock.Replace, line)
 			}
 		}
+	}
+
+	if currentBlock != nil && strings.TrimSpace(currentBlock.FilePath) != "" {
+		blocks = append(blocks, *currentBlock)
 	}
 
 	if len(blocks) == 0 {
