@@ -12,7 +12,6 @@ import {
   User,
   Sun,
   Moon,
-  Terminal,
   Bot,
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
