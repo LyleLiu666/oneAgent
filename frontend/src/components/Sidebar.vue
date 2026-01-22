@@ -32,8 +32,7 @@ const navItems = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Chat', path: '/chat', icon: MessageSquare },
   { name: 'Settings', path: '/settings', icon: Settings },
-  { name: 'Bash', path: '/bash', icon: Terminal },
-  { name: 'Smart Edit', path: '/smart-edit', icon: Terminal },
+
 ]
 
 const isActive = (path: string) => route.path === path
