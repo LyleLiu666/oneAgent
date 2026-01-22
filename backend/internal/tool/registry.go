@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	ToolIDBash = "bash"
-	ToolIDEdit = "edit"
+	ToolIDBash   = "bash"
+	ToolIDEdit   = "edit"
+	ToolIDSearch = "search"
 )
 
 // Handler executes a tool with raw JSON arguments.
@@ -41,8 +42,9 @@ func newDefinition(id string, spec llm.Tool, handler Handler) Definition {
 }
 
 var registry = map[string]Definition{
-	ToolIDBash: bashDefinition(),
-	ToolIDEdit: smartEditDefinition(),
+	ToolIDBash:   bashDefinition(),
+	ToolIDEdit:   smartEditDefinition(),
+	ToolIDSearch: searchDefinition(),
 }
 
 // All returns every tool in stable ID order.

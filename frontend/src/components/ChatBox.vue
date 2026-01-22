@@ -198,7 +198,11 @@ const loadTools = async () => {
     }))
     tools.value = mapped
 
-    if (selectedToolIds.value.length > 0) {
+    // If no tools are currently selected (first time user), select all tools by default
+    if (selectedToolIds.value.length === 0 && mapped.length > 0) {
+      selectedToolIds.value = mapped.map((t: ToolOption) => t.id)
+    } else if (selectedToolIds.value.length > 0) {
+      // Filter out any tools that no longer exist
       const known = new Set(mapped.map((t: ToolOption) => t.id))
       const filtered = selectedToolIds.value.filter((id: string) => known.has(id))
       if (filtered.length !== selectedToolIds.value.length) {
