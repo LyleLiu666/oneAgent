@@ -293,28 +293,7 @@ export async function deleteModel(modelId: string) {
     return api(`/api/llm/models/${modelId}`, { method: 'DELETE' })
 }
 
-// ============================================================================
-// Bash Command Runner
-// ============================================================================
 
-export interface BashRunResponse {
-    shell: string
-    stdout: string
-    stderr: string
-    exit_code: number
-    duration_ms: number
-    timed_out: boolean
-    stdout_truncated: boolean
-    stderr_truncated: boolean
-}
-
-export async function runBashCommand(command: string, timeoutMs?: number): Promise<BashRunResponse> {
-    const body: Record<string, any> = { command }
-    if (typeof timeoutMs === 'number' && timeoutMs > 0) {
-        body.timeout_ms = timeoutMs
-    }
-    return api('/api/bash', { method: 'POST', body })
-}
 
 // ============================================================================
 // Bocha Search Services

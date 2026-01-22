@@ -22,18 +22,7 @@ const routes = [
     component: () => import("@/views/Settings.vue"),
     meta: { requiresAuth: true },
   },
-  {
-    path: "/bash",
-    name: "Bash",
-    component: () => import("@/views/Bash.vue"),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: "/smart-edit",
-    name: "SmartEdit",
-    component: () => import("@/views/SmartEdit.vue"),
-    meta: { requiresAuth: true },
-  },
+
   {
     path: "/:pathMatch(.*)*",
     name: "NotFound",

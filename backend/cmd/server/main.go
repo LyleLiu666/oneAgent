@@ -89,12 +89,6 @@ func main() {
 		api.PUT("/llm/models/:id", handler.UpdateModel)
 		api.DELETE("/llm/models/:id", handler.DeleteModel)
 
-		// Bash command test endpoint
-		api.POST("/bash", handler.RunBash)
-
-		// Smart Edit endpoint
-		api.POST("/sbe/apply", handler.HandleSmartEdit)
-
 		// Tool metadata
 		api.GET("/tools", handler.ListTools)
 
