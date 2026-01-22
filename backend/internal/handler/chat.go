@@ -52,7 +52,8 @@ const ChatModule = "assistant"
 
 // DefaultSystemPrompt is the default system prompt for the assistant.
 // EXTENSION: Customize this for your use case or make it configurable.
-const DefaultSystemPrompt = `You are a helpful AI assistant. Be concise and helpful.`
+const DefaultSystemPrompt = `- 总是以TDD的思想完成任务，主动验证任务的效果，再给到用户汇报；以干完就走为耻，以保证结果为荣
+- 碰到关键问题多询问，多反思，多换位思考，多运用通识，多深入用户思考；以想当然为耻，以理解任务背景信息为荣`
 
 // ============================================================================
 // REQUEST/RESPONSE TYPES
@@ -77,13 +78,13 @@ type StreamEvent struct {
 }
 
 type streamMsg struct {
-	Op       string                    `json:"op"` // "start" | "delta" | "final" | "insert"
-	ID       string                    `json:"id"`
-	Role     string                    `json:"role,omitempty"`
-	MsgType  string                    `json:"msg_type,omitempty"` // "text" | "tool_call" | "tool_result"
-	Delta    string                    `json:"delta,omitempty"`
-	Error    string                    `json:"error,omitempty"`
-	ToolCall *persistedToolCallMessage `json:"tool_call,omitempty"`
+	Op         string                      `json:"op"` // "start" | "delta" | "final" | "insert"
+	ID         string                      `json:"id"`
+	Role       string                      `json:"role,omitempty"`
+	MsgType    string                      `json:"msg_type,omitempty"` // "text" | "tool_call" | "tool_result"
+	Delta      string                      `json:"delta,omitempty"`
+	Error      string                      `json:"error,omitempty"`
+	ToolCall   *persistedToolCallMessage   `json:"tool_call,omitempty"`
 	ToolResult *persistedToolResultMessage `json:"tool_result,omitempty"`
 }
 
@@ -493,11 +494,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					toolDefs,
 					func(chunk string) error {
 						broadcastMsg(broadcaster, streamMsg{
-							Op:    "delta",
-							ID:    currentStepID,
-							Role:  model.MessageRoleAssistant,
+							Op:      "delta",
+							ID:      currentStepID,
+							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
-							Delta: chunk,
+							Delta:   chunk,
 						})
 						return nil
 					},
@@ -521,9 +522,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 							return
 						}
 						broadcastMsg(broadcaster, streamMsg{
-							Op:    "final",
-							ID:    currentStepID,
-							Role:  model.MessageRoleAssistant,
+							Op:      "final",
+							ID:      currentStepID,
+							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeToolCall,
 							ToolCall: &persistedToolCallMessage{
 								Protocol:   "xml",
@@ -607,9 +608,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 							return
 						}
 						broadcastMsg(broadcaster, streamMsg{
-							Op:    "insert",
-							ID:    uuid.NewString(),
-							Role:  model.MessageRoleUser,
+							Op:      "insert",
+							ID:      uuid.NewString(),
+							Role:    model.MessageRoleUser,
 							MsgType: model.MessageTypeToolResult,
 							ToolResult: &persistedToolResultMessage{
 								Protocol: "xml",
@@ -639,9 +640,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 							content = visibleContent
 						}
 						broadcastMsg(broadcaster, streamMsg{
-							Op:     "final",
-							ID:     currentStepID,
-							Role:   model.MessageRoleAssistant,
+							Op:      "final",
+							ID:      currentStepID,
+							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 						})
 						msg := model.ChatMessage{
@@ -657,9 +658,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					func(step int) {
 						currentStepID = uuid.NewString()
 						broadcastMsg(broadcaster, streamMsg{
-							Op:     "start",
-							ID:     currentStepID,
-							Role:   model.MessageRoleAssistant,
+							Op:      "start",
+							ID:      currentStepID,
+							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 						})
 					},
@@ -680,9 +681,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			} else {
 				assistantStreamID := uuid.NewString()
 				broadcastMsg(broadcaster, streamMsg{
-					Op:     "start",
-					ID:     assistantStreamID,
-					Role:   model.MessageRoleAssistant,
+					Op:      "start",
+					ID:      assistantStreamID,
+					Role:    model.MessageRoleAssistant,
 					MsgType: model.MessageTypeText,
 				})
 				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
@@ -695,21 +696,26 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 					if len(valid) > 0 {
 						broadcastMsg(broadcaster, streamMsg{
-							Op:     "delta",
-							ID:     assistantStreamID,
-							Role:   model.MessageRoleAssistant,
+							Op:      "delta",
+							ID:      assistantStreamID,
+							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
-							Delta:  string(valid),
+							Delta:   string(valid),
 						})
 					}
 					return nil
 				})
 				broadcastMsg(broadcaster, streamMsg{
-					Op:     "final",
-					ID:     assistantStreamID,
-					Role:   model.MessageRoleAssistant,
+					Op:      "final",
+					ID:      assistantStreamID,
+					Role:    model.MessageRoleAssistant,
 					MsgType: model.MessageTypeText,
-					Error:  func() string { if err != nil { return err.Error() }; return "" }(),
+					Error: func() string {
+						if err != nil {
+							return err.Error()
+						}
+						return ""
+					}(),
 				})
 			}
 
@@ -1093,9 +1099,9 @@ func runToolLoop(
 	for step := 0; step < maxSteps; step++ {
 		stepStreamID := uuid.NewString()
 		broadcastMsg(broadcaster, streamMsg{
-			Op:     "start",
-			ID:     stepStreamID,
-			Role:   model.MessageRoleAssistant,
+			Op:      "start",
+			ID:      stepStreamID,
+			Role:    model.MessageRoleAssistant,
 			MsgType: model.MessageTypeText,
 		})
 
@@ -1117,11 +1123,11 @@ func runToolLoop(
 
 				if len(valid) > 0 {
 					broadcastMsg(broadcaster, streamMsg{
-						Op:     "delta",
-						ID:     stepStreamID,
-						Role:   model.MessageRoleAssistant,
+						Op:      "delta",
+						ID:      stepStreamID,
+						Role:    model.MessageRoleAssistant,
 						MsgType: model.MessageTypeText,
-						Delta:  string(valid),
+						Delta:   string(valid),
 					})
 				}
 				return nil
@@ -1129,11 +1135,11 @@ func runToolLoop(
 			if err == nil && stepContent.Len() == 0 && result.Content != "" {
 				combined.WriteString(result.Content)
 				broadcastMsg(broadcaster, streamMsg{
-					Op:     "delta",
-					ID:     stepStreamID,
-					Role:   model.MessageRoleAssistant,
+					Op:      "delta",
+					ID:      stepStreamID,
+					Role:    model.MessageRoleAssistant,
 					MsgType: model.MessageTypeText,
-					Delta:  result.Content,
+					Delta:   result.Content,
 				})
 			}
 			if result.Content == "" {
@@ -1144,21 +1150,21 @@ func runToolLoop(
 			if err == nil && result.Content != "" {
 				combined.WriteString(result.Content)
 				broadcastMsg(broadcaster, streamMsg{
-					Op:     "delta",
-					ID:     stepStreamID,
-					Role:   model.MessageRoleAssistant,
+					Op:      "delta",
+					ID:      stepStreamID,
+					Role:    model.MessageRoleAssistant,
 					MsgType: model.MessageTypeText,
-					Delta:  result.Content,
+					Delta:   result.Content,
 				})
 			}
 		}
 		if err != nil {
 			broadcastMsg(broadcaster, streamMsg{
-				Op:     "final",
-				ID:     stepStreamID,
-				Role:   model.MessageRoleAssistant,
+				Op:      "final",
+				ID:      stepStreamID,
+				Role:    model.MessageRoleAssistant,
 				MsgType: model.MessageTypeText,
-				Error:  err.Error(),
+				Error:   err.Error(),
 			})
 			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
 			if db != nil {
@@ -1187,9 +1193,9 @@ func runToolLoop(
 
 		if len(result.ToolCalls) == 0 {
 			broadcastMsg(broadcaster, streamMsg{
-				Op:     "final",
-				ID:     stepStreamID,
-				Role:   model.MessageRoleAssistant,
+				Op:      "final",
+				ID:      stepStreamID,
+				Role:    model.MessageRoleAssistant,
 				MsgType: model.MessageTypeText,
 			})
 			if db != nil {
@@ -1226,9 +1232,9 @@ func runToolLoop(
 			}
 		}
 		broadcastMsg(broadcaster, streamMsg{
-			Op:     "final",
-			ID:     stepStreamID,
-			Role:   model.MessageRoleAssistant,
+			Op:      "final",
+			ID:      stepStreamID,
+			Role:    model.MessageRoleAssistant,
 			MsgType: model.MessageTypeToolCall,
 			ToolCall: &persistedToolCallMessage{
 				Protocol:   "json",
@@ -1338,9 +1344,9 @@ func runToolLoop(
 				}
 			}
 			broadcastMsg(broadcaster, streamMsg{
-				Op:     "insert",
-				ID:     uuid.NewString(),
-				Role:   model.MessageRoleTool,
+				Op:      "insert",
+				ID:      uuid.NewString(),
+				Role:    model.MessageRoleTool,
 				MsgType: model.MessageTypeToolResult,
 				ToolResult: &persistedToolResultMessage{
 					Protocol:   "json",
