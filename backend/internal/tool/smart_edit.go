@@ -48,12 +48,12 @@ func smartEditDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "edit",
-			Description: "Apply edits via a shell-style script. Supports apply_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Prefer {filePath, content} for full-file writes when possible. Legacy {filePath, oldString, newString} is also supported.",
+			Description: "Apply edits via a shell-style script. Supports apply_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Prefer {filePath, content} for full-file writes when possible. Legacy {filePath, oldString, newString} is also supported. 一次新增或替换的字符串长度不可超过3000字，小步迭代，分批提交，禁止一次性提交过多字数。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{
-						"description": "Smart-edit script, as an array of lines or a single multi-line string. Example: [\"apply_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
+						"description": "edit script, as an array of lines or a single multi-line string. Example: [\"apply_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
 						"oneOf": []any{
 							map[string]any{
 								"type": "array",
@@ -153,6 +153,16 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		block.FilePath = target
+
+		// Check if file exists, if not create it
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+				return nil, fmt.Errorf("failed to create directories: %w", err)
+			}
+			if err := os.WriteFile(target, []byte{}, 0644); err != nil {
+				return nil, fmt.Errorf("failed to create new file: %w", err)
+			}
+		}
 
 		replacements, err := sbe.ApplyEditBlocks([]sbe.EditBlock{block})
 		if err != nil {
