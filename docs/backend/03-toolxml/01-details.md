@@ -1,8 +1,8 @@
-# ToolXML 模块技术规格
+# ToolXML 模块：细节
 
-> `backend/internal/toolxml` - XML 格式工具调用解析引擎，支持流式处理和 thinking 过滤。
+> `backend/internal/toolxml`
 
-**代码规模**: ~1590 行 | **核心文件**: `engine.go` (537), `parser.go` (271), `stream_filter.go` (177), `prompt.go` (110)
+> 本文档包含原技术规格的第 1/2/4/5 章；第 3 章（流程与可视化）见 [设计](02-design.md)。
 
 ---
 
@@ -102,63 +102,6 @@ type Call struct {
 
 ---
 
-## 3. Logic Flow & Visualization
-
-### 3.1 RunLoop 执行流程
-
-```mermaid
-graph TD
-    A[Start] --> B[获取 LLM 响应]
-    B --> C[streamFilter + 回调]
-    C --> D[StripThinking]
-    D --> E{ExtractLatestToolData?}
-    E -->|No| F[observeFinal + 返回]
-    E -->|Yes| G[ParseToolData]
-    G --> H{每个 Call}
-    H --> I[buildToolArgs]
-    I --> J[执行 Handler]
-    J --> K[收集 ToolResult]
-    K --> L[buildToolResultMessage]
-    L --> M[observeStep]
-    M --> N[追加到 messages]
-    N --> O{step < 20?}
-    O -->|Yes| B
-    O -->|No| P[返回 limit 错误]
-```
-
-### 3.2 StreamFilter 状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> Normal
-    Normal --> InToolData: <tool_data>
-    Normal --> InThinking: <thinking> 或 <think>
-    InToolData --> Normal: </tool_data>
-    InThinking --> Normal: </thinking> 或 </think>
-    
-    note right of InToolData
-        抑制输出到用户
-        保留尾部 64 字符
-    end note
-```
-
-### 3.3 Parser 流程
-
-```go
-// 1. 提取最后一个 <tool_data>
-block, ok := ExtractLatestToolData(rawResponse)
-
-// 2. 解析所有 <call> 块
-calls, err := ParseToolData(block)
-
-// 3. 每个 Call 包含:
-//    - ToolName (从 tool_name/tool/name 提取)
-//    - Fields (支持 CDATA, HTML unescape)
-//    - Raw (原始 XML 用于调试)
-```
-
----
-
 ## 4. Sad Path Matrix
 
 | 场景 | 错误类型 | 处理策略 | 客户端表现 |
@@ -211,3 +154,4 @@ type ToolResult struct {
 | `maxSteps` | 20 | 最大循环次数 |
 | `maxSuppressedTail` | 64 | 抑制态保留尾部字符 |
 | `maxSearchTail` | 16 | 搜索态保留尾部字符 |
+

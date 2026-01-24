@@ -68,13 +68,13 @@ graph TB
 
 | 模块 | 路径 | 职责 |
 |------|------|------|
-| [LLM](backend/01-llm-module.md) | `internal/llm` | OpenAI/Anthropic API 客户端，流式响应处理 |
-| [Tool](backend/02-tool-module.md) | `internal/tool` | 工具注册表，bash/edit/search 实现 |
-| [ToolXML](backend/03-toolxml-module.md) | `internal/toolxml` | XML 格式工具调用解析引擎 |
-| [Handler](backend/04-handler-module.md) | `internal/handler` | HTTP API 端点 (chat/session/oauth) |
-| [Model](backend/05-model-module.md) | `internal/model` | 数据模型定义 |
-| [SBE](backend/06-sbe-module.md) | `internal/sbe` | 智能编辑模糊匹配 |
-| [Bocha](backend/07-bocha-module.md) | `internal/bocha` | Web 搜索集成 |
+| [LLM](backend/01-llm/00-overview.md) | `internal/llm` | OpenAI/Anthropic API 客户端，流式响应处理 |
+| [Tool](backend/02-tool/00-overview.md) | `internal/tool` | 工具注册表，bash/edit/search 实现 |
+| [ToolXML](backend/03-toolxml/00-overview.md) | `internal/toolxml` | XML 格式工具调用解析引擎 |
+| [Handler](backend/04-handler/00-overview.md) | `internal/handler` | HTTP API 端点 (chat/session/oauth) |
+| [Model](backend/05-model/00-overview.md) | `internal/model` | 数据模型定义 |
+| [SBE](backend/06-sbe/00-overview.md) | `internal/sbe` | 智能编辑模糊匹配 |
+| [Bocha](backend/07-bocha/00-overview.md) | `internal/bocha` | Web 搜索集成 |
 
 ### Frontend 模块
 

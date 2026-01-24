@@ -1,6 +1,8 @@
-# Model 模块技术规格
+# Model 模块：细节
 
-> `backend/internal/model` - 数据模型定义，包含用户、会话、消息、LLM 配置和追踪数据结构。
+> `backend/internal/model`
+
+> 本文档包含原技术规格的第 1/3/4 章；第 2 章（可视化）见 [设计](02-design.md)。
 
 ---
 
@@ -92,72 +94,6 @@ type LLMModel struct {
     UpdatedAt     time.Time
     DeletedAt     gorm.DeletedAt
 }
-```
-
----
-
-## 2. Logic Flow & Visualization
-
-### 实体关系图
-
-```mermaid
-erDiagram
-    User ||--o{ ChatSession : "owns"
-    User ||--o{ UserSettings : "has"
-    User ||--o{ LLMProvider : "configures"
-    
-    ChatSession ||--o{ ChatMessage : "contains"
-    ChatMessage ||--o{ ChatMessage : "parent_id"
-    
-    LLMProvider ||--o{ LLMModel : "has"
-    LLMModel ||--o{ LLMCall : "used_by"
-    
-    User {
-        string id PK
-        string email UK
-        string username
-    }
-    
-    ChatSession {
-        string id PK
-        string user_id FK
-        string module
-        jsonb metadata
-    }
-    
-    ChatMessage {
-        uint id PK
-        string session_id FK
-        uint parent_id FK
-        string role
-        string type
-        jsonb trace
-    }
-    
-    LLMProvider {
-        string id PK
-        string user_id FK
-        string provider_type
-        string api_key
-    }
-    
-    LLMModel {
-        string id PK
-        string provider_id FK
-        bool is_default
-    }
-```
-
-### 消息层级关系
-
-```mermaid
-flowchart TD
-    A[User Message] --> B[Assistant Response]
-    B --> C[Tool Call Message]
-    C --> D[Tool Result Message]
-    D --> E[Assistant Final Response]
-    
-    C -- parent_id --> D
 ```
 
 ---
@@ -285,3 +221,4 @@ CREATE TABLE user_settings (
 | `GetUserSetting` | `(db, userID, key) → string` | 读取单个设置 |
 | `SetUserSetting` | `(db, userID, key, value) → error` | 创建或更新设置 |
 | `GetUserSettingsMap` | `(db, userID) → map[string]any` | 读取所有设置 (隐藏敏感值) |
+

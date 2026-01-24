@@ -1,6 +1,8 @@
-# Bocha 搜索模块技术规格
+# Bocha 模块：细节
 
-> `backend/internal/bocha` - Web 搜索集成模块，对接 Bocha AI Search API
+> `backend/internal/bocha`
+
+> 本文档包含原技术规格的第 1/3/4 章；第 2 章（流程与可视化）见 [设计](02-design.md)。
 
 ---
 
@@ -65,37 +67,6 @@ Response: SearchResponse
 
 ---
 
-## 2. Logic Flow & Visualization
-
-### 搜索流程
-
-```mermaid
-sequenceDiagram
-    participant T as Tool Handler
-    participant H as Bocha Handler
-    participant DB as Database
-    participant API as Bocha API
-
-    T->>H: Search(query)
-    H->>DB: GetUserSetting(userID, "bocha_api_key")
-    DB-->>H: apiKey
-    H->>API: POST /web-search
-    API-->>H: SearchResponse
-    H-->>T: 格式化结果
-```
-
-### 新鲜度选项
-
-| 值 | 含义 |
-|---|------|
-| `noLimit` | 不限时间 |
-| `oneDay` | 过去 24 小时 |
-| `oneWeek` | 过去一周 |
-| `oneMonth` | 过去一月 |
-| `oneYear` | 过去一年 |
-
----
-
 ## 3. Sad Path Matrix
 
 | 场景 | 异常类型 | 处理策略 | 客户端表现 |
@@ -129,3 +100,4 @@ type searchToolRequest struct {
     Freshness string `json:"freshness,omitempty"`
 }
 ```
+
