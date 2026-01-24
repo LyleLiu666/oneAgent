@@ -6,17 +6,6 @@ import (
 	"strings"
 )
 
-// ApplyEdits parses command and applies changes to files.
-func ApplyEdits(rawCommand string) error {
-	blocks, err := ParseSmartEditCommand(rawCommand)
-	if err != nil {
-		return err
-	}
-
-	_, err = ApplyEditBlocks(blocks)
-	return err
-}
-
 // ApplyEditBlocks applies a list of edit blocks and returns total replacements.
 func ApplyEditBlocks(blocks []EditBlock) (int, error) {
 	total := 0

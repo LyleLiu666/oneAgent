@@ -415,7 +415,7 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		replaceAll := parseBool(fields["replaceAll"])
 
 		if command := fields["command"]; strings.TrimSpace(command) != "" {
-			return nil, "", errors.New("edit 不再支持 command；请使用 filePath + oldcontent/newcontent，并分段小步多次调用")
+			return nil, "", errors.New("edit 不再支持 command/apply_edit heredoc；请使用 filePath + oldcontent/newcontent，并分段小步多次调用")
 		}
 		if filePath != "" && strings.TrimSpace(fields["content"]) != "" {
 			return nil, "", errors.New("整文件写入/新建请使用 write_file（必要时可 append=true 分段写入）")
@@ -526,16 +526,4 @@ func parseBool(value string) bool {
 	}
 	b, err := strconv.ParseBool(trimmed)
 	return err == nil && b
-}
-
-func quoteHeredocPath(path string) string {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return ""
-	}
-	if strings.ContainsAny(trimmed, " \t\r\n\"'") {
-		escaped := strings.ReplaceAll(trimmed, "'", `'\''`)
-		return "'" + escaped + "'"
-	}
-	return trimmed
 }

@@ -31,7 +31,7 @@
 - **写文件/新建文件：优先用** `write_file`（`filePath + content`）。
 - 超大文件：用 `write_file` 的 `append=true` 分段追加写入（建议每段 ≤3000 字；必要时先 `append=false` 写入空串以清空/创建）。
 - **小范围替换：用** `edit`（`filePath + oldcontent/newcontent`）。
-- 避免 `edit.command` / `apply_edit` 脚本模式（容易被输出格式污染导致失败）。
+- `edit` 已禁用 `command`/`apply_edit` 脚本模式（历史遗留，容易被输出格式污染导致失败）。
 
 工程侧缓解（已做）：
 - 统一改为结构化参数：`edit` 仅处理 fuzzy replace；`write_file` 负责整文件写入。
@@ -78,5 +78,5 @@
 - 强制 XML 工具调用时 CDATA 必须闭合：`<![CDATA[` 与 `]]>` 成对出现。
 - 明确“写文件用 write_file、改文件用 edit；不要在 bash 里用 heredoc/echo 重定向写文件”。
 - 明确 bash 沙箱禁用命令清单（至少列出最常见踩坑：`node/npm/find/touch/sudo/apt-get/pip`）。
-- 强制写文件用 `write_file`（`filePath+content`），改文件用 `edit`（`filePath+oldcontent/newcontent`），避免 `edit.command` / `apply_edit`。
+- 强制写文件用 `write_file`（`filePath+content`），改文件用 `edit`（`filePath+oldcontent/newcontent`）；`edit` 不支持 `command`/`apply_edit`。
 - 遇到工具报错时：先读错误信息并调整调用参数，不要重复同一个失败调用（减少 tool-call loop）。

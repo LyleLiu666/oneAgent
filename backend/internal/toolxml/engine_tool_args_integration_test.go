@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
@@ -145,5 +146,17 @@ func TestBuildToolArgs_EditWithContent_IsRejected(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestBuildToolArgs_EditWithCommand_IsRejected(t *testing.T) {
+	_, _, err := buildToolArgs("edit", map[string]string{
+		"command": "apply_edit <<'EOF'\nfile: a.txt\n<<<< SEARCH\nhello\n==== REPLACE\nhi\n>>>>\nEOF\n",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), "apply_edit") || !strings.Contains(err.Error(), "command") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
