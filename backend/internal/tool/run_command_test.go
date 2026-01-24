@@ -71,26 +71,57 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 	if pollRes.JobID != startRes.JobID {
 		t.Fatalf("poll: expected job_id=%q, got %q", startRes.JobID, pollRes.JobID)
 	}
-	if pollRes.Status != RunCommandStatusCompleted {
-		t.Fatalf("poll: expected status=%q, got %q", RunCommandStatusCompleted, pollRes.Status)
+	if pollRes.Status != RunCommandStatusRunning && pollRes.Status != RunCommandStatusCompleted {
+		t.Fatalf("poll: expected status running|completed, got %q", pollRes.Status)
 	}
-	if pollRes.ExitCode != 0 {
-		t.Fatalf("poll: expected exit_code=0, got %d", pollRes.ExitCode)
+	if pollRes.StdoutOffset < startRes.StdoutOffset {
+		t.Fatalf("poll: expected stdout_offset >= %d, got %d", startRes.StdoutOffset, pollRes.StdoutOffset)
 	}
-	if pollRes.TimedOut {
+
+	seenB := strings.Contains(pollRes.StdoutDelta, "B")
+	final := pollRes
+	for i := 0; i < 5 && final.Status == RunCommandStatusRunning; i++ {
+		nextRaw, _ := json.Marshal(map[string]any{
+			"action":        "poll",
+			"job_id":        startRes.JobID,
+			"wait_seconds":  2,
+			"stdout_offset": final.StdoutOffset,
+			"stderr_offset": final.StderrOffset,
+		})
+		nextAny, err := runCommandTool(context.Background(), nextRaw)
+		if err != nil {
+			t.Fatalf("poll again: expected no error, got %v", err)
+		}
+		nextRes, ok := nextAny.(RunCommandResult)
+		if !ok {
+			t.Fatalf("poll again: expected RunCommandResult, got %T", nextAny)
+		}
+		final = nextRes
+		if strings.Contains(final.StdoutDelta, "B") {
+			seenB = true
+		}
+	}
+
+	if !seenB {
+		t.Fatalf("poll: expected stdout_delta to contain %q at least once", "B")
+	}
+	if final.StdoutOffset <= startRes.StdoutOffset {
+		t.Fatalf("poll: expected stdout_offset to advance from %d, got %d", startRes.StdoutOffset, final.StdoutOffset)
+	}
+	if final.Status != RunCommandStatusCompleted {
+		t.Fatalf("poll: expected status=%q, got %q", RunCommandStatusCompleted, final.Status)
+	}
+	if final.ExitCode != 0 {
+		t.Fatalf("poll: expected exit_code=0, got %d", final.ExitCode)
+	}
+	if final.TimedOut {
 		t.Fatalf("poll: expected timed_out=false")
 	}
-	if !strings.Contains(pollRes.StdoutDelta, "B") {
-		t.Fatalf("poll: expected stdout_delta to contain %q, got %q", "B", pollRes.StdoutDelta)
+	if final.DurationMs <= 0 {
+		t.Fatalf("poll: expected duration_ms > 0, got %d", final.DurationMs)
 	}
-	if pollRes.StdoutOffset <= startRes.StdoutOffset {
-		t.Fatalf("poll: expected stdout_offset to advance from %d, got %d", startRes.StdoutOffset, pollRes.StdoutOffset)
-	}
-	if pollRes.DurationMs <= 0 {
-		t.Fatalf("poll: expected duration_ms > 0, got %d", pollRes.DurationMs)
-	}
-	if pollRes.ElapsedMs < pollRes.DurationMs {
-		t.Fatalf("poll: expected elapsed_ms >= duration_ms, got elapsed=%d duration=%d", pollRes.ElapsedMs, pollRes.DurationMs)
+	if final.ElapsedMs < final.DurationMs {
+		t.Fatalf("poll: expected elapsed_ms >= duration_ms, got elapsed=%d duration=%d", final.ElapsedMs, final.DurationMs)
 	}
 }
 

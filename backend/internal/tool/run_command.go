@@ -20,12 +20,14 @@ type runCommandToolRequest struct {
 	MaxRuntimeSeconds int    `json:"max_runtime_seconds,omitempty"`
 	StdoutOffset      int    `json:"stdout_offset,omitempty"`
 	StderrOffset      int    `json:"stderr_offset,omitempty"`
+	MaxDeltaBytes     int    `json:"max_delta_bytes,omitempty"`
 }
 
 type RunCommandStatus string
 
 const (
 	RunCommandStatusRunning   RunCommandStatus = "running"
+	RunCommandStatusCanceling RunCommandStatus = "canceling"
 	RunCommandStatusCompleted RunCommandStatus = "completed"
 	RunCommandStatusFailed    RunCommandStatus = "failed"
 	RunCommandStatusCanceled  RunCommandStatus = "canceled"
@@ -33,19 +35,21 @@ const (
 )
 
 type RunCommandResult struct {
-	JobID           string           `json:"job_id"`
-	Status          RunCommandStatus `json:"status"`
-	StdoutDelta     string           `json:"stdout_delta,omitempty"`
-	StderrDelta     string           `json:"stderr_delta,omitempty"`
-	StdoutOffset    int              `json:"stdout_offset"`
-	StderrOffset    int              `json:"stderr_offset"`
-	ExitCode        int              `json:"exit_code,omitempty"`
-	TimedOut        bool             `json:"timed_out,omitempty"`
-	Canceled        bool             `json:"canceled,omitempty"`
-	DurationMs      int64            `json:"duration_ms,omitempty"`
-	ElapsedMs       int64            `json:"elapsed_ms"`
-	StdoutTruncated bool             `json:"stdout_truncated"`
-	StderrTruncated bool             `json:"stderr_truncated"`
+	JobID            string           `json:"job_id"`
+	Status           RunCommandStatus `json:"status"`
+	StdoutDelta      string           `json:"stdout_delta,omitempty"`
+	StderrDelta      string           `json:"stderr_delta,omitempty"`
+	StdoutBaseOffset int              `json:"stdout_base_offset"`
+	StderrBaseOffset int              `json:"stderr_base_offset"`
+	StdoutOffset     int              `json:"stdout_offset"`
+	StderrOffset     int              `json:"stderr_offset"`
+	ExitCode         int              `json:"exit_code,omitempty"`
+	TimedOut         bool             `json:"timed_out,omitempty"`
+	Canceled         bool             `json:"canceled,omitempty"`
+	DurationMs       int64            `json:"duration_ms,omitempty"`
+	ElapsedMs        int64            `json:"elapsed_ms"`
+	StdoutTruncated  bool             `json:"stdout_truncated"`
+	StderrTruncated  bool             `json:"stderr_truncated"`
 }
 
 func runCommandDefinition() Definition {
@@ -53,7 +57,7 @@ func runCommandDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "run_command",
-			Description: "异步执行 bash 命令（用于长任务，避免超时）。用 action=start 启动，返回 job_id；再用 action=poll 分段拉取 stdout/stderr（通过 stdout_offset/stderr_offset），避免一次输出过大。注意同 bash 沙箱限制：不要写文件；写文件用 write_file，改文件用 edit。",
+			Description: "异步执行 bash 命令（用于长任务，避免超时）。用 action=start 启动，返回 job_id；再用 action=poll 分段拉取 stdout/stderr（通过 stdout_offset/stderr_offset + max_delta_bytes），避免一次输出过大。stdout/stderr 会被工具内部写入沙箱内临时文件并保留最近一段（超出会截断旧输出并标记 stdout_truncated/stderr_truncated）。注意同 bash 沙箱限制：不要在 command 里用重定向写文件；写文件用 write_file，改文件用 edit。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -91,6 +95,12 @@ func runCommandDefinition() Definition {
 						"type":        "integer",
 						"description": "（可选）stderr 的字节偏移；返回从该偏移之后的 stderr_delta 以及新的 stderr_offset。",
 						"minimum":     0,
+					},
+					"max_delta_bytes": map[string]any{
+						"type":        "integer",
+						"description": "（可选）本次 poll 最多返回多少字节的 stdout/stderr 增量（用于严格控输出大小），默认 16384，最大 65536。",
+						"minimum":     1,
+						"maximum":     65536,
 					},
 				},
 				"additionalProperties": false,
@@ -139,7 +149,7 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		poll, err := shell.PollBashAsync(ctx, jobID, wait, req.StdoutOffset, req.StderrOffset)
+		poll, err := shell.PollBashAsync(ctx, jobID, wait, req.StdoutOffset, req.StderrOffset, req.MaxDeltaBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +158,7 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if jobID == "" {
 			return nil, errors.New("job_id is required")
 		}
-		poll, err := shell.PollBashAsync(ctx, jobID, wait, req.StdoutOffset, req.StderrOffset)
+		poll, err := shell.PollBashAsync(ctx, jobID, wait, req.StdoutOffset, req.StderrOffset, req.MaxDeltaBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -160,7 +170,7 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if err := shell.CancelBashAsync(jobID); err != nil {
 			return nil, err
 		}
-		poll, err := shell.PollBashAsync(ctx, jobID, 0, req.StdoutOffset, req.StderrOffset)
+		poll, err := shell.PollBashAsync(ctx, jobID, 0, req.StdoutOffset, req.StderrOffset, req.MaxDeltaBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -172,18 +182,20 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 
 func toRunCommandResult(poll shell.AsyncBashPollResult) RunCommandResult {
 	return RunCommandResult{
-		JobID:           poll.JobID,
-		Status:          RunCommandStatus(poll.Status),
-		StdoutDelta:     poll.StdoutDelta,
-		StderrDelta:     poll.StderrDelta,
-		StdoutOffset:    poll.StdoutOffset,
-		StderrOffset:    poll.StderrOffset,
-		ExitCode:        poll.ExitCode,
-		TimedOut:        poll.TimedOut,
-		Canceled:        poll.Canceled,
-		DurationMs:      poll.DurationMs,
-		ElapsedMs:       poll.ElapsedMs,
-		StdoutTruncated: poll.StdoutTruncated,
-		StderrTruncated: poll.StderrTruncated,
+		JobID:            poll.JobID,
+		Status:           RunCommandStatus(poll.Status),
+		StdoutDelta:      poll.StdoutDelta,
+		StderrDelta:      poll.StderrDelta,
+		StdoutBaseOffset: poll.StdoutBaseOffset,
+		StderrBaseOffset: poll.StderrBaseOffset,
+		StdoutOffset:     poll.StdoutOffset,
+		StderrOffset:     poll.StderrOffset,
+		ExitCode:         poll.ExitCode,
+		TimedOut:         poll.TimedOut,
+		Canceled:         poll.Canceled,
+		DurationMs:       poll.DurationMs,
+		ElapsedMs:        poll.ElapsedMs,
+		StdoutTruncated:  poll.StdoutTruncated,
+		StderrTruncated:  poll.StderrTruncated,
 	}
 }

@@ -393,6 +393,14 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 				payload["stderr_offset"] = offset
 			}
 		}
+		if rawMax := strings.TrimSpace(fields["max_delta_bytes"]); rawMax != "" {
+			if maxDeltaBytes, err := strconv.Atoi(rawMax); err == nil && maxDeltaBytes > 0 {
+				if maxDeltaBytes > 65536 {
+					maxDeltaBytes = 65536
+				}
+				payload["max_delta_bytes"] = maxDeltaBytes
+			}
+		}
 
 		switch action {
 		case "start":

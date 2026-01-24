@@ -135,6 +135,8 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"stdoutOffset",
 		"stderr_offset",
 		"stderrOffset",
+		"max_delta_bytes",
+		"maxDeltaBytes",
 		"filePath",
 		"file_path",
 		"oldcontent",
@@ -196,6 +198,11 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["stderr_offset"]; !ok {
 		if v, ok := fields["stderrOffset"]; ok {
 			fields["stderr_offset"] = v
+		}
+	}
+	if _, ok := fields["max_delta_bytes"]; !ok {
+		if v, ok := fields["maxDeltaBytes"]; ok {
+			fields["max_delta_bytes"] = v
 		}
 	}
 

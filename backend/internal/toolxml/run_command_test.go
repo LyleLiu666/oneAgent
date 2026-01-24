@@ -49,6 +49,7 @@ func TestBuildToolArgs_RunCommand_XMLFields(t *testing.T) {
     <command>echo hi</command>
     <wait_seconds>2</wait_seconds>
     <max_runtime_seconds>600</max_runtime_seconds>
+    <max_delta_bytes>1024</max_delta_bytes>
     <stdout_offset>0</stdout_offset>
     <stderr_offset>0</stderr_offset>
   </call>
@@ -82,6 +83,9 @@ func TestBuildToolArgs_RunCommand_XMLFields(t *testing.T) {
 	}
 	if decoded["max_runtime_seconds"] != float64(600) {
 		t.Fatalf("expected max_runtime_seconds=600, got %v", decoded["max_runtime_seconds"])
+	}
+	if decoded["max_delta_bytes"] != float64(1024) {
+		t.Fatalf("expected max_delta_bytes=1024, got %v", decoded["max_delta_bytes"])
 	}
 }
 

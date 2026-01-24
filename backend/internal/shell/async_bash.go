@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -20,13 +19,18 @@ const (
 	defaultAsyncMaxRuntime = 10 * time.Minute
 	maxAsyncMaxRuntime     = 30 * time.Minute
 	maxAsyncPollWait       = 30 * time.Second
-	asyncJobRetention      = 5 * time.Minute
+	asyncJobRetention      = 30 * time.Minute
+	asyncLogCapacityBytes  = 2 * 1024 * 1024
+
+	defaultAsyncMaxDeltaBytes = 16 * 1024
+	maxAsyncMaxDeltaBytes     = 64 * 1024
 )
 
 type AsyncBashStatus string
 
 const (
 	AsyncBashStatusRunning   AsyncBashStatus = "running"
+	AsyncBashStatusCanceling AsyncBashStatus = "canceling"
 	AsyncBashStatusCompleted AsyncBashStatus = "completed"
 	AsyncBashStatusFailed    AsyncBashStatus = "failed"
 	AsyncBashStatusCanceled  AsyncBashStatus = "canceled"
@@ -34,57 +38,199 @@ const (
 )
 
 type AsyncBashPollResult struct {
-	JobID           string         `json:"job_id"`
-	Status          AsyncBashStatus `json:"status"`
-	Command         string         `json:"command"`
-	Shell           string         `json:"shell"`
-	StdoutDelta     string         `json:"stdout_delta,omitempty"`
-	StderrDelta     string         `json:"stderr_delta,omitempty"`
-	StdoutOffset    int            `json:"stdout_offset"`
-	StderrOffset    int            `json:"stderr_offset"`
-	ExitCode        int            `json:"exit_code,omitempty"`
-	TimedOut        bool           `json:"timed_out,omitempty"`
-	Canceled        bool           `json:"canceled,omitempty"`
-	DurationMs      int64          `json:"duration_ms,omitempty"`
-	ElapsedMs       int64          `json:"elapsed_ms"`
-	StdoutTruncated bool           `json:"stdout_truncated"`
-	StderrTruncated bool           `json:"stderr_truncated"`
+	JobID            string          `json:"job_id"`
+	Status           AsyncBashStatus `json:"status"`
+	Command          string          `json:"command"`
+	Shell            string          `json:"shell"`
+	StdoutDelta      string          `json:"stdout_delta,omitempty"`
+	StderrDelta      string          `json:"stderr_delta,omitempty"`
+	StdoutBaseOffset int             `json:"stdout_base_offset"`
+	StderrBaseOffset int             `json:"stderr_base_offset"`
+	StdoutOffset     int             `json:"stdout_offset"`
+	StderrOffset     int             `json:"stderr_offset"`
+	ExitCode         int             `json:"exit_code,omitempty"`
+	TimedOut         bool            `json:"timed_out,omitempty"`
+	Canceled         bool            `json:"canceled,omitempty"`
+	DurationMs       int64           `json:"duration_ms,omitempty"`
+	ElapsedMs        int64           `json:"elapsed_ms"`
+	StdoutTruncated  bool            `json:"stdout_truncated"`
+	StderrTruncated  bool            `json:"stderr_truncated"`
 }
 
-type asyncLimitedBuffer struct {
-	mu        sync.Mutex
-	buf       bytes.Buffer
-	limit     int
-	truncated bool
+type ringLog struct {
+	mu          sync.Mutex
+	path        string
+	f           *os.File
+	capacity    int
+	size        int
+	writePos    int
+	totalOffset int64
+	notifyCh    chan struct{}
 }
 
-func (l *asyncLimitedBuffer) Write(p []byte) (int, error) {
+func newRingLog(path string, capacity int, notifyCh chan struct{}) (*ringLog, error) {
+	if capacity <= 0 {
+		return nil, fmt.Errorf("invalid ring log capacity: %d", capacity)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Truncate(int64(capacity)); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	return &ringLog{
+		path:     path,
+		f:        f,
+		capacity: capacity,
+		notifyCh: notifyCh,
+	}, nil
+}
+
+func (l *ringLog) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.f == nil {
+		return nil
+	}
+	err := l.f.Close()
+	l.f = nil
+	return err
+}
+
+func (l *ringLog) notifyLocked() {
+	if l.notifyCh == nil {
+		return
+	}
+	select {
+	case l.notifyCh <- struct{}{}:
+	default:
+	}
+}
+
+func (l *ringLog) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.limit <= 0 {
-		l.truncated = true
-		return len(p), nil
+	if l.f == nil {
+		return 0, errors.New("log is closed")
 	}
 
-	if l.buf.Len()+len(p) <= l.limit {
-		return l.buf.Write(p)
+	n := len(p)
+	if n == 0 {
+		return 0, nil
 	}
 
-	remaining := l.limit - l.buf.Len()
-	if remaining > 0 {
-		_, _ = l.buf.Write(p[:remaining])
+	if n >= l.capacity {
+		tail := p[n-l.capacity:]
+		if _, err := l.f.WriteAt(tail, 0); err != nil {
+			return 0, err
+		}
+		l.size = l.capacity
+		l.writePos = 0
+		l.totalOffset += int64(n)
+		l.notifyLocked()
+		return n, nil
 	}
-	l.truncated = true
-	return len(p), nil
+
+	remaining := n
+	cursor := 0
+	for remaining > 0 {
+		chunk := remaining
+		space := l.capacity - l.writePos
+		if chunk > space {
+			chunk = space
+		}
+		if _, err := l.f.WriteAt(p[cursor:cursor+chunk], int64(l.writePos)); err != nil {
+			return 0, err
+		}
+		l.writePos = (l.writePos + chunk) % l.capacity
+		cursor += chunk
+		remaining -= chunk
+	}
+
+	if l.size < l.capacity {
+		l.size += n
+		if l.size > l.capacity {
+			l.size = l.capacity
+		}
+	}
+	l.totalOffset += int64(n)
+	l.notifyLocked()
+	return n, nil
 }
 
-func (l *asyncLimitedBuffer) snapshot() ([]byte, bool) {
+func (l *ringLog) readSince(offset, maxBytes int) ([]byte, int, int, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	data := make([]byte, l.buf.Len())
-	copy(data, l.buf.Bytes())
-	return data, l.truncated
+
+	var readFile *os.File
+	if l.f != nil {
+		readFile = l.f
+	} else if l.path != "" {
+		f, err := os.Open(l.path)
+		if err != nil {
+			return nil, 0, 0, false, err
+		}
+		defer f.Close()
+		readFile = f
+	} else {
+		return nil, 0, 0, false, errors.New("log file is unavailable")
+	}
+
+	baseOffset := int(l.totalOffset) - l.size
+	if baseOffset < 0 {
+		baseOffset = 0
+	}
+
+	if offset < baseOffset {
+		offset = baseOffset
+	}
+	if offset > int(l.totalOffset) {
+		offset = int(l.totalOffset)
+	}
+
+	available := int(l.totalOffset) - offset
+	if available <= 0 {
+		return nil, offset, baseOffset, baseOffset > 0, nil
+	}
+
+	if maxBytes <= 0 {
+		maxBytes = defaultAsyncMaxDeltaBytes
+	}
+	if maxBytes > maxAsyncMaxDeltaBytes {
+		maxBytes = maxAsyncMaxDeltaBytes
+	}
+
+	toRead := available
+	if toRead > maxBytes {
+		toRead = maxBytes
+	}
+
+	startRel := offset - baseOffset
+	startPos := startRel
+	if l.size == l.capacity {
+		startPos = (l.writePos + startRel) % l.capacity
+	}
+
+	delta := make([]byte, toRead)
+	first := toRead
+	space := l.capacity - startPos
+	if first > space {
+		first = space
+	}
+	if _, err := readFile.ReadAt(delta[:first], int64(startPos)); err != nil {
+		return nil, offset, baseOffset, baseOffset > 0, err
+	}
+	if first < toRead {
+		if _, err := readFile.ReadAt(delta[first:], 0); err != nil {
+			return nil, offset, baseOffset, baseOffset > 0, err
+		}
+	}
+
+	newOffset := offset + toRead
+	return delta, newOffset, baseOffset, baseOffset > 0, nil
 }
 
 type asyncBashJob struct {
@@ -94,8 +240,10 @@ type asyncBashJob struct {
 	startedAt  time.Time
 	maxRuntime time.Duration
 	cmd        *exec.Cmd
-	stdout     *asyncLimitedBuffer
-	stderr     *asyncLimitedBuffer
+	stdout     *ringLog
+	stderr     *ringLog
+	notifyCh   chan struct{}
+	jobDir     string
 
 	doneCh chan struct{}
 
@@ -124,8 +272,8 @@ func StartBashAsync(command string, maxRuntime time.Duration, rootDir string) (s
 	return defaultAsyncBashManager.start(command, maxRuntime, rootDir)
 }
 
-func PollBashAsync(ctx context.Context, jobID string, wait time.Duration, stdoutOffset, stderrOffset int) (AsyncBashPollResult, error) {
-	return defaultAsyncBashManager.poll(ctx, jobID, wait, stdoutOffset, stderrOffset)
+func PollBashAsync(ctx context.Context, jobID string, wait time.Duration, stdoutOffset, stderrOffset, maxDeltaBytes int) (AsyncBashPollResult, error) {
+	return defaultAsyncBashManager.poll(ctx, jobID, wait, stdoutOffset, stderrOffset, maxDeltaBytes)
 }
 
 func CancelBashAsync(jobID string) error {
@@ -141,8 +289,22 @@ func (m *asyncBashManager) get(jobID string) (*asyncBashJob, bool) {
 
 func (m *asyncBashManager) delete(jobID string) {
 	m.mu.Lock()
+	job := m.jobs[jobID]
 	delete(m.jobs, jobID)
 	m.mu.Unlock()
+
+	if job == nil {
+		return
+	}
+	if job.stdout != nil {
+		_ = job.stdout.Close()
+	}
+	if job.stderr != nil {
+		_ = job.stderr.Close()
+	}
+	if job.jobDir != "" {
+		_ = os.RemoveAll(job.jobDir)
+	}
 }
 
 func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootDir string) (string, error) {
@@ -177,8 +339,11 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		return "", fmt.Errorf("failed to prepare bash temp dir: %w", err)
 	}
 
-	stdoutBuf := &asyncLimitedBuffer{limit: maxOutputBytes}
-	stderrBuf := &asyncLimitedBuffer{limit: maxOutputBytes}
+	jobID := uuid.NewString()
+	jobDir := filepath.Join(tmpDir, "run_command", jobID)
+	if err := os.MkdirAll(jobDir, 0o700); err != nil {
+		return "", fmt.Errorf("failed to prepare run_command dir: %w", err)
+	}
 
 	cmd := exec.Command(shellPath, "--noprofile", "--norc", "-lc", trimmed)
 	cmd.Dir = root
@@ -192,14 +357,30 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		"BASH_ENV":      "",
 	})
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = stdoutBuf
-	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	notifyCh := make(chan struct{}, 1)
+	stdoutLog, err := newRingLog(filepath.Join(jobDir, "stdout.log"), asyncLogCapacityBytes, notifyCh)
+	if err != nil {
+		_ = os.RemoveAll(jobDir)
+		return "", err
+	}
+	stderrLog, err := newRingLog(filepath.Join(jobDir, "stderr.log"), asyncLogCapacityBytes, notifyCh)
+	if err != nil {
+		_ = stdoutLog.Close()
+		_ = os.RemoveAll(jobDir)
 		return "", err
 	}
 
-	jobID := uuid.NewString()
+	cmd.Stdout = stdoutLog
+	cmd.Stderr = stderrLog
+
+	if err := cmd.Start(); err != nil {
+		_ = stdoutLog.Close()
+		_ = stderrLog.Close()
+		_ = os.RemoveAll(jobDir)
+		return "", err
+	}
+
 	job := &asyncBashJob{
 		id:         jobID,
 		command:    trimmed,
@@ -207,8 +388,10 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		startedAt:  time.Now(),
 		maxRuntime: maxRuntime,
 		cmd:        cmd,
-		stdout:     stdoutBuf,
-		stderr:     stderrBuf,
+		stdout:     stdoutLog,
+		stderr:     stderrLog,
+		notifyCh:   notifyCh,
+		jobDir:     jobDir,
 		doneCh:     make(chan struct{}),
 	}
 
@@ -266,13 +449,20 @@ func (job *asyncBashJob) wait(m *asyncBashManager) {
 	job.duration = time.Since(job.startedAt)
 	job.mu.Unlock()
 
+	if job.stdout != nil {
+		_ = job.stdout.Close()
+	}
+	if job.stderr != nil {
+		_ = job.stderr.Close()
+	}
+
 	close(job.doneCh)
 }
 
 func (m *asyncBashManager) cancel(jobID string) error {
 	job, ok := m.get(jobID)
 	if !ok {
-		return fmt.Errorf("unknown job_id: %s", jobID)
+		return fmt.Errorf("unknown job_id: %s（可能已过期或服务已重启）", jobID)
 	}
 
 	job.mu.Lock()
@@ -285,94 +475,115 @@ func (m *asyncBashManager) cancel(jobID string) error {
 	job.mu.Unlock()
 
 	killProcessGroup(proc)
+	select {
+	case job.notifyCh <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
-func (m *asyncBashManager) poll(ctx context.Context, jobID string, wait time.Duration, stdoutOffset, stderrOffset int) (AsyncBashPollResult, error) {
+func (m *asyncBashManager) poll(ctx context.Context, jobID string, wait time.Duration, stdoutOffset, stderrOffset, maxDeltaBytes int) (AsyncBashPollResult, error) {
 	job, ok := m.get(jobID)
 	if !ok {
-		return AsyncBashPollResult{}, fmt.Errorf("unknown job_id: %s", jobID)
+		return AsyncBashPollResult{}, fmt.Errorf("unknown job_id: %s（可能已过期或服务已重启）", jobID)
 	}
 
 	if wait > 0 {
 		if wait > maxAsyncPollWait {
 			wait = maxAsyncPollWait
 		}
-		timer := time.NewTimer(wait)
+	}
+
+	if maxDeltaBytes <= 0 {
+		maxDeltaBytes = defaultAsyncMaxDeltaBytes
+	}
+	if maxDeltaBytes > maxAsyncMaxDeltaBytes {
+		maxDeltaBytes = maxAsyncMaxDeltaBytes
+	}
+
+	deadline := time.Now().Add(wait)
+	for {
+		job.mu.Lock()
+		done := job.done
+		timedOut := job.timedOut
+		canceled := job.canceled
+		exitCode := job.exitCode
+		duration := job.duration
+		startedAt := job.startedAt
+		command := job.command
+		shellPath := job.shell
+		notifyCh := job.notifyCh
+		job.mu.Unlock()
+
+		stdoutBytes, newStdoutOffset, stdoutBaseOffset, stdoutTruncated, err := job.stdout.readSince(stdoutOffset, maxDeltaBytes)
+		if err != nil {
+			return AsyncBashPollResult{}, err
+		}
+		stderrBytes, newStderrOffset, stderrBaseOffset, stderrTruncated, err := job.stderr.readSince(stderrOffset, maxDeltaBytes)
+		if err != nil {
+			return AsyncBashPollResult{}, err
+		}
+
+		elapsed := time.Since(startedAt)
+
+		status := AsyncBashStatusRunning
+		if done {
+			switch {
+			case timedOut:
+				status = AsyncBashStatusTimedOut
+			case canceled:
+				status = AsyncBashStatusCanceled
+			case exitCode == 0:
+				status = AsyncBashStatusCompleted
+			default:
+				status = AsyncBashStatusFailed
+			}
+		} else if canceled {
+			status = AsyncBashStatusCanceling
+		}
+
+		result := AsyncBashPollResult{
+			JobID:            job.id,
+			Status:           status,
+			Command:          command,
+			Shell:            shellPath,
+			StdoutDelta:      string(stdoutBytes),
+			StderrDelta:      string(stderrBytes),
+			StdoutBaseOffset: stdoutBaseOffset,
+			StderrBaseOffset: stderrBaseOffset,
+			StdoutOffset:     newStdoutOffset,
+			StderrOffset:     newStderrOffset,
+			ExitCode:         exitCode,
+			TimedOut:         timedOut,
+			Canceled:         canceled,
+			ElapsedMs:        elapsed.Milliseconds(),
+			StdoutTruncated:  stdoutTruncated,
+			StderrTruncated:  stderrTruncated,
+		}
+
+		if done {
+			result.DurationMs = duration.Milliseconds()
+		}
+
+		if wait <= 0 || done || len(stdoutBytes) > 0 || len(stderrBytes) > 0 {
+			return result, nil
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return result, nil
+		}
+
+		timer := time.NewTimer(remaining)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return AsyncBashPollResult{}, ctx.Err()
 		case <-job.doneCh:
 			timer.Stop()
+		case <-notifyCh:
+			timer.Stop()
 		case <-timer.C:
 		}
 	}
-
-	stdoutBytes, stdoutTruncated := job.stdout.snapshot()
-	stderrBytes, stderrTruncated := job.stderr.snapshot()
-
-	if stdoutOffset < 0 {
-		stdoutOffset = 0
-	}
-	if stderrOffset < 0 {
-		stderrOffset = 0
-	}
-	if stdoutOffset > len(stdoutBytes) {
-		stdoutOffset = len(stdoutBytes)
-	}
-	if stderrOffset > len(stderrBytes) {
-		stderrOffset = len(stderrBytes)
-	}
-
-	job.mu.Lock()
-	done := job.done
-	timedOut := job.timedOut
-	canceled := job.canceled
-	exitCode := job.exitCode
-	duration := job.duration
-	startedAt := job.startedAt
-	command := job.command
-	shellPath := job.shell
-	job.mu.Unlock()
-
-	elapsed := time.Since(startedAt)
-
-	status := AsyncBashStatusRunning
-	if done {
-		switch {
-		case timedOut:
-			status = AsyncBashStatusTimedOut
-		case canceled:
-			status = AsyncBashStatusCanceled
-		case exitCode == 0:
-			status = AsyncBashStatusCompleted
-		default:
-			status = AsyncBashStatusFailed
-		}
-	}
-
-	result := AsyncBashPollResult{
-		JobID:           job.id,
-		Status:          status,
-		Command:         command,
-		Shell:           shellPath,
-		StdoutDelta:     string(stdoutBytes[stdoutOffset:]),
-		StderrDelta:     string(stderrBytes[stderrOffset:]),
-		StdoutOffset:    len(stdoutBytes),
-		StderrOffset:    len(stderrBytes),
-		ExitCode:        exitCode,
-		TimedOut:        timedOut,
-		Canceled:        canceled,
-		ElapsedMs:       elapsed.Milliseconds(),
-		StdoutTruncated: stdoutTruncated,
-		StderrTruncated: stderrTruncated,
-	}
-
-	if done {
-		result.DurationMs = duration.Milliseconds()
-	}
-
-	return result, nil
 }
-
