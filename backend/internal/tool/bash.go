@@ -33,17 +33,17 @@ func bashDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "bash",
-			Description: "Execute a bash command inside the sandbox rooted at $BASH_ROOT_DIR. Restrictions: no heredoc redirection (<<), no $/` expansions, and file paths must stay within $BASH_ROOT_DIR (except /dev/null). Prefer edit for file writes/edits.",
+			Description: "在沙箱内执行 bash 命令（根目录为 $BASH_ROOT_DIR）。限制：不允许 heredoc(<<)；不允许 $/` 展开；文件路径必须在 $BASH_ROOT_DIR 内（/dev/null 例外）。不要用 bash 写文件：写文件用 write_file，改文件用 edit。命令尽量短小、分步执行，避免一次输出过长被截断。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"command": map[string]any{
 						"type":        "string",
-						"description": "Bash command to run inside the sandbox.",
+						"description": "要执行的 bash 命令（在沙箱内运行）。",
 					},
 					"timeout_ms": map[string]any{
 						"type":        "integer",
-						"description": "Optional timeout in milliseconds.",
+						"description": "（可选）超时时间（毫秒）。",
 						"minimum":     1,
 					},
 				},

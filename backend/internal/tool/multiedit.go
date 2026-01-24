@@ -1,49 +1,39 @@
 package tool
 
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
+import "github.com/liu_y/oneAgent/backend/internal/llm"
 
-	"github.com/liu_y/oneAgent/backend/internal/llm"
-	"github.com/liu_y/oneAgent/backend/internal/sbe"
-)
-
-type multiEditToolRequest struct {
-	Edits      []smartEditToolRequest `json:"edits"`
-	ReplaceAll bool                   `json:"replaceAll,omitempty"`
-}
-
+// multiedit is kept as an alias for edit, to reduce model confusion and preserve compatibility.
+// It shares the same handler as edit and accepts the same payload shape: {edits: [...], replaceAll?: bool}.
 func multiEditDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "multiedit",
-			Description: "Apply multiple fuzzy edits across files. Provide edits as an array of {filePath, oldString, newString, replaceAll?}.",
+			Description: "批量对已有文件做“模糊替换”(fuzzy patch)，等同于 edit 的 edits 参数（别名工具，用于兼容/降低心智负担）。强烈建议分段、小步、多次调用：单次 oldString/newString 建议 ≤3000 字、单次 edits ≤10、总字数建议 ≤12000。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"edits": map[string]any{
-						"type": "array",
+						"type":        "array",
+						"description": "要应用的编辑列表（建议每次只改 1-3 处，小步迭代）。",
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
 								"filePath": map[string]any{
-									"type": "string",
+									"type":        "string",
+									"description": "要编辑的文件路径（相对沙箱根目录，或沙箱根目录内的绝对路径）。",
 								},
 								"oldString": map[string]any{
-									"type": "string",
+									"type":        "string",
+									"description": "要搜索/匹配的原始片段（需要足够独特以定位；建议长度适中）。",
 								},
 								"newString": map[string]any{
-									"type": "string",
+									"type":        "string",
+									"description": "替换后的片段（建议分段提交）。",
 								},
 								"replaceAll": map[string]any{
-									"type": "boolean",
+									"type":        "boolean",
+									"description": "是否替换所有匹配（true=全部替换；false=仅替换第一个/最佳匹配）。",
 								},
 							},
 							"required":             []string{"filePath", "oldString", "newString"},
@@ -52,7 +42,7 @@ func multiEditDefinition() Definition {
 					},
 					"replaceAll": map[string]any{
 						"type":        "boolean",
-						"description": "If true, replace all matches for each edit block.",
+						"description": "（可选）对本次 edits 全局生效的 replaceAll；true 时会覆盖每个 edit 的 replaceAll。",
 					},
 				},
 				"required":             []string{"edits"},
@@ -61,95 +51,5 @@ func multiEditDefinition() Definition {
 		},
 	}
 
-	return newDefinition(ToolIDMultiEdit, spec, runMultiEditTool)
-}
-
-func runMultiEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
-	_ = ctx
-
-	var req multiEditToolRequest
-	if err := json.Unmarshal(raw, &req); err != nil {
-		return nil, err
-	}
-
-	if len(req.Edits) == 0 {
-		return nil, errors.New("edits is required")
-	}
-
-	root, err := resolveSmartEditRoot()
-	if err != nil {
-		return nil, err
-	}
-
-	blocks := make([]sbe.EditBlock, 0, len(req.Edits))
-	for i, edit := range req.Edits {
-		if strings.TrimSpace(edit.FilePath) == "" {
-			return nil, fmt.Errorf("edits[%d].filePath is required", i)
-		}
-		if edit.OldString == "" {
-			return nil, fmt.Errorf("edits[%d].oldString is required", i)
-		}
-		block := sbe.EditBlock{
-			FilePath:   edit.FilePath,
-			Search:     splitLines(edit.OldString),
-			Replace:    splitLines(edit.NewString),
-			ReplaceAll: edit.ReplaceAll,
-		}
-		if req.ReplaceAll {
-			block.ReplaceAll = true
-		}
-		blocks = append(blocks, block)
-	}
-
-	replacementsByFile := make(map[string]int)
-	total := 0
-	for _, block := range blocks {
-		target, err := resolvePathWithinRoot(root, block.FilePath)
-		if err != nil {
-			return nil, err
-		}
-		block.FilePath = target
-
-		if _, err := os.Stat(target); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return nil, fmt.Errorf("failed to create directories: %w", err)
-			}
-			if err := os.WriteFile(target, []byte{}, 0o644); err != nil {
-				return nil, fmt.Errorf("failed to create new file: %w", err)
-			}
-		}
-
-		replacements, err := sbe.ApplyEditBlocks([]sbe.EditBlock{block})
-		if err != nil {
-			return nil, err
-		}
-		total += replacements
-		replacementsByFile[block.FilePath] += replacements
-	}
-
-	files := make([]SmartEditFileResult, 0, len(replacementsByFile))
-	paths := make([]string, 0, len(replacementsByFile))
-	for path := range replacementsByFile {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		files = append(files, SmartEditFileResult{
-			FilePath:     path,
-			Replacements: replacementsByFile[path],
-		})
-	}
-
-	if len(files) == 1 {
-		return SmartEditResult{
-			FilePath:     files[0].FilePath,
-			Replacements: files[0].Replacements,
-			Files:        files,
-		}, nil
-	}
-
-	return SmartEditResult{
-		Replacements: total,
-		Files:        files,
-	}, nil
+	return newDefinition(ToolIDMultiEdit, spec, runSmartEditTool)
 }

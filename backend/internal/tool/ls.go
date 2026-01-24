@@ -33,13 +33,13 @@ func lsDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "ls",
-			Description: "List directory entries within the sandbox root (defaults to '.').",
+			Description: "列出沙箱根目录内的目录/文件信息（默认 path='.'）。路径相对 $BASH_ROOT_DIR，或为其内部的绝对路径。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]any{
 						"type":        "string",
-						"description": "Directory or file path (relative to $BASH_ROOT_DIR unless absolute within it).",
+						"description": "目录或文件路径（相对 $BASH_ROOT_DIR，或为其内部的绝对路径）。",
 					},
 				},
 				"additionalProperties": false,

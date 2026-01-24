@@ -123,8 +123,12 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"action",
 		"job_id",
 		"jobId",
+		"wait_seconds",
+		"waitSeconds",
 		"wait_ms",
 		"waitMs",
+		"max_runtime_seconds",
+		"maxRuntimeSeconds",
 		"max_runtime_ms",
 		"maxRuntimeMs",
 		"stdout_offset",
@@ -138,6 +142,7 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"replaceAll",
 		"replace_all",
 		"content",
+		"append",
 		"pattern",
 		"path",
 		"edits",
@@ -168,9 +173,19 @@ func parseCall(callInner string, raw string) (Call, error) {
 			fields["wait_ms"] = v
 		}
 	}
+	if _, ok := fields["wait_seconds"]; !ok {
+		if v, ok := fields["waitSeconds"]; ok {
+			fields["wait_seconds"] = v
+		}
+	}
 	if _, ok := fields["max_runtime_ms"]; !ok {
 		if v, ok := fields["maxRuntimeMs"]; ok {
 			fields["max_runtime_ms"] = v
+		}
+	}
+	if _, ok := fields["max_runtime_seconds"]; !ok {
+		if v, ok := fields["maxRuntimeSeconds"]; ok {
+			fields["max_runtime_seconds"] = v
 		}
 	}
 	if _, ok := fields["stdout_offset"]; !ok {

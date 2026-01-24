@@ -18,6 +18,7 @@ const (
 	ToolIDMultiEdit  = "multiedit"
 	ToolIDSearch     = "search"
 	ToolIDRunCommand = "run_command"
+	ToolIDWriteFile  = "write_file"
 )
 
 // Context keys for passing user information to tool handlers
@@ -73,6 +74,7 @@ var registry = map[string]Definition{
 	ToolIDMultiEdit:  multiEditDefinition(),
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
+	ToolIDWriteFile:  writeFileDefinition(),
 }
 
 // All returns every tool in stable ID order.

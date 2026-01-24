@@ -365,14 +365,22 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 			payload["job_id"] = jobID
 		}
 
-		if rawWait := strings.TrimSpace(fields["wait_ms"]); rawWait != "" {
+		if rawWait := strings.TrimSpace(fields["wait_seconds"]); rawWait != "" {
 			if wait, err := strconv.Atoi(rawWait); err == nil && wait >= 0 {
-				payload["wait_ms"] = wait
+				payload["wait_seconds"] = wait
+			}
+		} else if rawWait := strings.TrimSpace(fields["wait_ms"]); rawWait != "" {
+			if waitMs, err := strconv.Atoi(rawWait); err == nil && waitMs >= 0 {
+				payload["wait_seconds"] = (waitMs + 999) / 1000
 			}
 		}
-		if rawMax := strings.TrimSpace(fields["max_runtime_ms"]); rawMax != "" {
+		if rawMax := strings.TrimSpace(fields["max_runtime_seconds"]); rawMax != "" {
 			if maxRuntime, err := strconv.Atoi(rawMax); err == nil && maxRuntime > 0 {
-				payload["max_runtime_ms"] = maxRuntime
+				payload["max_runtime_seconds"] = maxRuntime
+			}
+		} else if rawMax := strings.TrimSpace(fields["max_runtime_ms"]); rawMax != "" {
+			if maxRuntimeMs, err := strconv.Atoi(rawMax); err == nil && maxRuntimeMs > 0 {
+				payload["max_runtime_seconds"] = (maxRuntimeMs + 999) / 1000
 			}
 		}
 		if rawStdout := strings.TrimSpace(fields["stdout_offset"]); rawStdout != "" {
@@ -407,42 +415,47 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		replaceAll := parseBool(fields["replaceAll"])
 
 		if command := fields["command"]; strings.TrimSpace(command) != "" {
-			payload := map[string]any{
-				"command":    command,
-				"replaceAll": replaceAll,
-			}
-			data, err := json.Marshal(payload)
-			return data, string(data), err
+			return nil, "", errors.New("edit 不再支持 command；请使用 filePath + oldcontent/newcontent，并分段小步多次调用")
 		}
-
 		if filePath != "" && strings.TrimSpace(fields["content"]) != "" {
-			content := fields["content"]
-			lines := make([]string, 0, 4+strings.Count(content, "\n"))
-			lines = append(lines, fmt.Sprintf("cat >%s <<'EOF'", quoteHeredocPath(filePath)))
-			lines = append(lines, strings.Split(content, "\n")...)
-			lines = append(lines, "EOF")
-
-			payload := map[string]any{
-				"command": lines,
-			}
-			data, err := json.Marshal(payload)
-			return data, string(data), err
+			return nil, "", errors.New("整文件写入/新建请使用 write_file（必要时可 append=true 分段写入）")
 		}
 
 		oldContent := fields["oldcontent"]
 		newContent := fields["newcontent"]
 		if filePath == "" || oldContent == "" {
-			return nil, "", errors.New("edit requires filePath + oldcontent/newcontent, or filePath + content, or command")
+			return nil, "", errors.New("edit 需要 filePath + oldcontent/newcontent")
 		}
 
 		payload := map[string]any{
-			"filePath":   filePath,
-			"oldString":  oldContent,
-			"newString":  newContent,
-			"replaceAll": replaceAll,
+			"edits": []map[string]any{
+				{
+					"filePath":   filePath,
+					"oldString":  oldContent,
+					"newString":  newContent,
+					"replaceAll": replaceAll,
+				},
+			},
 		}
 		data, err := json.Marshal(payload)
 		return data, string(data), err
+
+	case "write_file":
+		filePath := strings.TrimSpace(fields["filePath"])
+		if filePath == "" {
+			return nil, "", errors.New("write_file 缺少 filePath")
+		}
+		appendMode := parseBool(fields["append"])
+		payload := map[string]any{
+			"filePath": filePath,
+			"content":  fields["content"],
+		}
+		if appendMode {
+			payload["append"] = true
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
 	case "glob":
 		pattern := strings.TrimSpace(fields["pattern"])
 		if pattern == "" {

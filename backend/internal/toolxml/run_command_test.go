@@ -47,8 +47,8 @@ func TestBuildToolArgs_RunCommand_XMLFields(t *testing.T) {
     <tool_name>run_command</tool_name>
     <action>start</action>
     <command>echo hi</command>
-    <wait_ms>2000</wait_ms>
-    <max_runtime_ms>600000</max_runtime_ms>
+    <wait_seconds>2</wait_seconds>
+    <max_runtime_seconds>600</max_runtime_seconds>
     <stdout_offset>0</stdout_offset>
     <stderr_offset>0</stderr_offset>
   </call>
@@ -77,11 +77,11 @@ func TestBuildToolArgs_RunCommand_XMLFields(t *testing.T) {
 	if decoded["command"] != "echo hi" {
 		t.Fatalf("expected command=echo hi, got %v", decoded["command"])
 	}
-	if decoded["wait_ms"] != float64(2000) {
-		t.Fatalf("expected wait_ms=2000, got %v", decoded["wait_ms"])
+	if decoded["wait_seconds"] != float64(2) {
+		t.Fatalf("expected wait_seconds=2, got %v", decoded["wait_seconds"])
 	}
-	if decoded["max_runtime_ms"] != float64(600000) {
-		t.Fatalf("expected max_runtime_ms=600000, got %v", decoded["max_runtime_ms"])
+	if decoded["max_runtime_seconds"] != float64(600) {
+		t.Fatalf("expected max_runtime_seconds=600, got %v", decoded["max_runtime_seconds"])
 	}
 }
 
@@ -103,7 +103,7 @@ func TestRunLoop_XMLRunCommand_Executes(t *testing.T) {
     <tool_name>run_command</tool_name>
     <action>start</action>
     <command>echo hi</command>
-    <wait_ms>2000</wait_ms>
+    <wait_seconds>2</wait_seconds>
   </call>
 </tool_data>`,
 			`done`,
@@ -151,4 +151,3 @@ func TestRunLoop_XMLRunCommand_Executes(t *testing.T) {
 		t.Fatalf("expected stdout_delta to contain %q, got %q", "hi", stdout)
 	}
 }
-

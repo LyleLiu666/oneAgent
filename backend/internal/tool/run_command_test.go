@@ -17,10 +17,10 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	startArgs := map[string]any{
-		"action":         "start",
-		"command":        "echo A; sleep 0.2; echo B",
-		"wait_ms":        150,
-		"max_runtime_ms": 5_000,
+		"action":              "start",
+		"command":             "echo A; sleep 2; echo B",
+		"wait_seconds":        1,
+		"max_runtime_seconds": 5,
 	}
 	startRaw, _ := json.Marshal(startArgs)
 
@@ -54,7 +54,7 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 	pollArgs := map[string]any{
 		"action":        "poll",
 		"job_id":        startRes.JobID,
-		"wait_ms":       2_000,
+		"wait_seconds":  2,
 		"stdout_offset": startRes.StdoutOffset,
 		"stderr_offset": startRes.StderrOffset,
 	}
@@ -101,9 +101,9 @@ func TestRunCommandTool_PollUnknownJob_ReturnsError(t *testing.T) {
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	raw, _ := json.Marshal(map[string]any{
-		"action":  "poll",
-		"job_id":  "missing",
-		"wait_ms": 10,
+		"action":       "poll",
+		"job_id":       "missing",
+		"wait_seconds": 1,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -113,4 +113,3 @@ func TestRunCommandTool_PollUnknownJob_ReturnsError(t *testing.T) {
 		t.Fatalf("expected error for missing job")
 	}
 }
-

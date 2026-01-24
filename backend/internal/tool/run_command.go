@@ -13,13 +13,13 @@ import (
 )
 
 type runCommandToolRequest struct {
-	Action       string `json:"action,omitempty"`
-	Command      string `json:"command,omitempty"`
-	JobID        string `json:"job_id,omitempty"`
-	WaitMs       int    `json:"wait_ms,omitempty"`
-	MaxRuntimeMs int    `json:"max_runtime_ms,omitempty"`
-	StdoutOffset int    `json:"stdout_offset,omitempty"`
-	StderrOffset int    `json:"stderr_offset,omitempty"`
+	Action            string `json:"action,omitempty"`
+	Command           string `json:"command,omitempty"`
+	JobID             string `json:"job_id,omitempty"`
+	WaitSeconds       int    `json:"wait_seconds,omitempty"`
+	MaxRuntimeSeconds int    `json:"max_runtime_seconds,omitempty"`
+	StdoutOffset      int    `json:"stdout_offset,omitempty"`
+	StderrOffset      int    `json:"stderr_offset,omitempty"`
 }
 
 type RunCommandStatus string
@@ -53,43 +53,43 @@ func runCommandDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "run_command",
-			Description: "Run a bash command asynchronously to avoid timeouts. Use action=start with {command, wait_ms?, max_runtime_ms?}; it returns {job_id, status, stdout_delta/stderr_delta, stdout_offset/stderr_offset}. Then call action=poll with {job_id, wait_ms?, stdout_offset?, stderr_offset?} to fetch new output until status becomes completed/failed/timed_out/canceled.",
+			Description: "异步执行 bash 命令（用于长任务，避免超时）。用 action=start 启动，返回 job_id；再用 action=poll 分段拉取 stdout/stderr（通过 stdout_offset/stderr_offset），避免一次输出过大。注意同 bash 沙箱限制：不要写文件；写文件用 write_file，改文件用 edit。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "start|poll|cancel. If omitted, defaults to start when command is provided, otherwise poll when job_id is provided.",
+						"description": "start|poll|cancel。可省略：有 command 默认 start；有 job_id 默认 poll。",
 						"enum":        []string{"start", "poll", "cancel"},
 					},
 					"command": map[string]any{
 						"type":        "string",
-						"description": "Bash command to run (required for action=start).",
+						"description": "要运行的 bash 命令（action=start 必填）。",
 					},
 					"job_id": map[string]any{
 						"type":        "string",
-						"description": "Job ID returned from action=start (required for action=poll|cancel).",
+						"description": "action=start 返回的任务 ID（action=poll/cancel 必填）。",
 					},
-					"wait_ms": map[string]any{
+					"wait_seconds": map[string]any{
 						"type":        "integer",
-						"description": "Optional: wait up to this many milliseconds for completion before returning. Max 30000ms.",
+						"description": "（可选）等待任务完成的最长时间（秒），最多 30s。",
 						"minimum":     0,
-						"maximum":     30000,
+						"maximum":     30,
 					},
-					"max_runtime_ms": map[string]any{
+					"max_runtime_seconds": map[string]any{
 						"type":        "integer",
-						"description": "Optional: maximum runtime for the started job (milliseconds). Default 600000ms; max 1800000ms.",
+						"description": "（可选）任务最长运行时间（秒），默认 600s，最大 1800s。",
 						"minimum":     1,
-						"maximum":     1800000,
+						"maximum":     1800,
 					},
 					"stdout_offset": map[string]any{
 						"type":        "integer",
-						"description": "Optional: byte offset into stdout; tool returns stdout_delta since this offset, plus updated stdout_offset.",
+						"description": "（可选）stdout 的字节偏移；返回从该偏移之后的 stdout_delta 以及新的 stdout_offset。",
 						"minimum":     0,
 					},
 					"stderr_offset": map[string]any{
 						"type":        "integer",
-						"description": "Optional: byte offset into stderr; tool returns stderr_delta since this offset, plus updated stderr_offset.",
+						"description": "（可选）stderr 的字节偏移；返回从该偏移之后的 stderr_delta 以及新的 stderr_offset。",
 						"minimum":     0,
 					},
 				},
@@ -119,7 +119,7 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 	}
 
-	wait := time.Duration(req.WaitMs) * time.Millisecond
+	wait := time.Duration(req.WaitSeconds) * time.Second
 	if wait < 0 {
 		wait = 0
 	}
@@ -134,7 +134,7 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if command == "" {
 			return nil, errors.New("command is required")
 		}
-		maxRuntime := time.Duration(req.MaxRuntimeMs) * time.Millisecond
+		maxRuntime := time.Duration(req.MaxRuntimeSeconds) * time.Second
 		jobID, err := shell.StartBashAsync(command, maxRuntime, cfg.BashRootDir)
 		if err != nil {
 			return nil, err
@@ -187,4 +187,3 @@ func toRunCommandResult(poll shell.AsyncBashPollResult) RunCommandResult {
 		StderrTruncated: poll.StderrTruncated,
 	}
 }
-

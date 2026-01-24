@@ -1,14 +1,12 @@
 package tool
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -17,18 +15,6 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/sbe"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
-
-type smartEditToolRequest struct {
-	FilePath   string `json:"filePath"`
-	OldString  string `json:"oldString"`
-	NewString  string `json:"newString"`
-	ReplaceAll bool   `json:"replaceAll,omitempty"`
-}
-
-type smartEditCommandRequest struct {
-	Command    json.RawMessage `json:"command"`
-	ReplaceAll bool            `json:"replaceAll,omitempty"`
-}
 
 type SmartEditFileResult struct {
 	FilePath     string `json:"file_path"`
@@ -43,35 +29,60 @@ type SmartEditResult struct {
 	Files        []SmartEditFileResult `json:"files,omitempty"`
 }
 
+type editOperation struct {
+	FilePath   string `json:"filePath"`
+	OldString  string `json:"oldString"`
+	NewString  string `json:"newString"`
+	ReplaceAll bool   `json:"replaceAll,omitempty"`
+}
+
+type editToolRequest struct {
+	Edits      []editOperation `json:"edits,omitempty"`
+	ReplaceAll bool            `json:"replaceAll,omitempty"`
+}
+
 func smartEditDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "edit",
-			Description: "Apply edits via a shell-style script. Supports apply_edit blocks for fuzzy replace, or `cat >path <<'EOF' ... EOF` blocks to write a full file. Prefer {filePath, content} for full-file writes when possible. Legacy {filePath, oldString, newString} is also supported. 一次新增或替换的字符串长度不可超过3000字，小步迭代，分批提交，禁止一次性提交过多字数。",
+			Description: "对已有文件做“模糊替换”(fuzzy patch)。整文件写入/新建请用 write_file。强烈建议分段、小步、多次调用：单次 oldString/newString 建议 ≤3000 字、单次 edits ≤10、总字数建议 ≤12000，避免超出 LLM 最大 token 导致工具调用失败。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"command": map[string]any{
-						"description": "edit script, as an array of lines or a single multi-line string. Example: [\"apply_edit <<'EOF'\", \"file: path\", \"<<<< SEARCH\", \"...\", \"==== REPLACE\", \"...\", \">>>>\", \"EOF\"].",
-						"oneOf": []any{
-							map[string]any{
-								"type": "array",
-								"items": map[string]any{
-									"type": "string",
+					"edits": map[string]any{
+						"type":        "array",
+						"description": "要应用的编辑列表（建议每次只改 1-3 处，小步迭代）。",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"filePath": map[string]any{
+									"type":        "string",
+									"description": "要编辑的文件路径（相对沙箱根目录，或沙箱根目录内的绝对路径）。",
+								},
+								"oldString": map[string]any{
+									"type":        "string",
+									"description": "要搜索/匹配的原始片段（需要足够独特以定位；建议长度适中，过大会导致工具调用失败）。",
+								},
+								"newString": map[string]any{
+									"type":        "string",
+									"description": "替换后的片段（建议分段提交，避免一次性写入大段内容）。",
+								},
+								"replaceAll": map[string]any{
+									"type":        "boolean",
+									"description": "是否替换所有匹配（true=全部替换；false=仅替换第一个/最佳匹配）。",
 								},
 							},
-							map[string]any{
-								"type": "string",
-							},
+							"required":             []string{"filePath", "oldString", "newString"},
+							"additionalProperties": false,
 						},
 					},
 					"replaceAll": map[string]any{
 						"type":        "boolean",
-						"description": "If true, replace all matches for each edit block.",
+						"description": "（可选）对本次 edits 全局生效的 replaceAll；true 时会覆盖每个 edit 的 replaceAll。",
 					},
 				},
-				"required":             []string{"command"},
+				"required":             []string{"edits"},
 				"additionalProperties": false,
 			},
 		},
@@ -83,9 +94,23 @@ func smartEditDefinition() Definition {
 func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	_ = ctx
 
-	blocks, replaceAll, fileWrites, err := parseSmartEditInput(raw)
-	if err != nil {
+	var req editToolRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
+	}
+
+	edits := req.Edits
+	if len(edits) == 0 {
+		var single editOperation
+		if err := json.Unmarshal(raw, &single); err == nil && strings.TrimSpace(single.FilePath) != "" {
+			edits = []editOperation{single}
+		}
+	}
+	if len(edits) == 0 {
+		return nil, errors.New("edits 不能为空")
+	}
+	if len(edits) > maxEditOpsPerCall {
+		return nil, fmt.Errorf("edits 数量过多（%d），请分段调用（每次最多 %d 条）", len(edits), maxEditOpsPerCall)
 	}
 
 	root, err := resolveSmartEditRoot()
@@ -93,82 +118,56 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	if len(fileWrites) > 0 {
-		writtenByFile := make(map[string]int)
-		totalBytes := 0
-		for _, write := range fileWrites {
-			target, err := resolvePathWithinRoot(root, write.FilePath)
-			if err != nil {
-				return nil, err
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return nil, fmt.Errorf("failed to create directories: %w", err)
-			}
-			contentBytes := []byte(write.Content)
-			if err := os.WriteFile(target, contentBytes, 0644); err != nil {
-				return nil, fmt.Errorf("write file error: %w", err)
-			}
-			writtenByFile[target] = len(contentBytes)
-			totalBytes += len(contentBytes)
+	totalRunes := 0
+	blocks := make([]sbe.EditBlock, 0, len(edits))
+	for i, op := range edits {
+		if strings.TrimSpace(op.FilePath) == "" {
+			return nil, fmt.Errorf("edits[%d].filePath 不能为空", i)
+		}
+		if op.OldString == "" {
+			return nil, fmt.Errorf("edits[%d].oldString 不能为空", i)
 		}
 
-		files := make([]SmartEditFileResult, 0, len(writtenByFile))
-		paths := make([]string, 0, len(writtenByFile))
-		for path := range writtenByFile {
-			paths = append(paths, path)
-		}
-		sort.Strings(paths)
-		for _, path := range paths {
-			files = append(files, SmartEditFileResult{
-				FilePath: path,
-				Bytes:    writtenByFile[path],
-			})
+		target, err := resolvePathWithinRoot(root, op.FilePath)
+		if err != nil {
+			return nil, fmt.Errorf("edits[%d]: %w", i, err)
 		}
 
-		if len(files) == 1 {
-			return SmartEditResult{
-				FilePath:     files[0].FilePath,
-				WrittenBytes: files[0].Bytes,
-				Files:        files,
-			}, nil
+		// Ensure file exists
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			return nil, fmt.Errorf("文件不存在：%q。请先用 write_file 创建（或确认路径在沙箱根目录内）", op.FilePath)
 		}
 
-		return SmartEditResult{
-			WrittenBytes: totalBytes,
-			Files:        files,
-		}, nil
+		oldRunes := runeCount(op.OldString)
+		if oldRunes > maxEditSnippetRunes {
+			return nil, fmt.Errorf("edits[%d].oldString 过长（%d 字），请分段（每段建议 <= %d 字）", i, oldRunes, maxEditSnippetRunes)
+		}
+		newRunes := runeCount(op.NewString)
+		if newRunes > maxEditSnippetRunes {
+			return nil, fmt.Errorf("edits[%d].newString 过长（%d 字），请分段（每段建议 <= %d 字）", i, newRunes, maxEditSnippetRunes)
+		}
+		totalRunes += oldRunes + newRunes
+
+		replaceAll := op.ReplaceAll || req.ReplaceAll
+		blocks = append(blocks, sbe.EditBlock{
+			FilePath:   target,
+			Search:     splitLines(op.OldString),
+			Replace:    splitLines(op.NewString),
+			ReplaceAll: replaceAll,
+		})
 	}
-
-	if replaceAll {
-		for i := range blocks {
-			blocks[i].ReplaceAll = true
-		}
+	if totalRunes > maxEditTotalRunesPerCall {
+		return nil, fmt.Errorf("本次 edit 内容过长（%d 字），请分段多次调用（建议每次 <= %d 字）", totalRunes, maxEditTotalRunesPerCall)
 	}
 
 	replacementsByFile := make(map[string]int)
-	total := 0
+	totalReplacements := 0
 	for _, block := range blocks {
-		target, err := resolvePathWithinRoot(root, block.FilePath)
-		if err != nil {
-			return nil, err
-		}
-		block.FilePath = target
-
-		// Check if file exists, if not create it
-		if _, err := os.Stat(target); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-				return nil, fmt.Errorf("failed to create directories: %w", err)
-			}
-			if err := os.WriteFile(target, []byte{}, 0644); err != nil {
-				return nil, fmt.Errorf("failed to create new file: %w", err)
-			}
-		}
-
 		replacements, err := sbe.ApplyEditBlocks([]sbe.EditBlock{block})
 		if err != nil {
 			return nil, err
 		}
-		total += replacements
+		totalReplacements += replacements
 		replacementsByFile[block.FilePath] += replacements
 	}
 
@@ -194,228 +193,14 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 
 	return SmartEditResult{
-		Replacements: total,
+		Replacements: totalReplacements,
 		Files:        files,
 	}, nil
 }
 
+// Helper to keep splitting consistent
 func splitLines(value string) []string {
 	return strings.Split(value, "\n")
-}
-
-type smartEditFileWrite struct {
-	FilePath string
-	Content  string
-}
-
-func parseSmartEditInput(raw json.RawMessage) ([]sbe.EditBlock, bool, []smartEditFileWrite, error) {
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return nil, false, nil, errors.New("missing tool arguments")
-	}
-
-	raw = normalizeConcatenatedJSON(raw)
-
-	var commandReq smartEditCommandRequest
-	if err := json.Unmarshal(raw, &commandReq); err == nil && len(commandReq.Command) > 0 {
-		lines, err := decodeCommandLines(commandReq.Command)
-		if err != nil {
-			return nil, false, nil, err
-		}
-
-		joined := strings.Join(lines, "\n")
-		blocks, parseErr := sbe.ParseSmartEditCommand(joined)
-		if parseErr == nil {
-			return blocks, commandReq.ReplaceAll, nil, nil
-		}
-
-		fileWrites, writeErr := parseCatHeredocWrites(lines)
-		if writeErr == nil {
-			return nil, commandReq.ReplaceAll, fileWrites, nil
-		}
-
-		return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w (cat heredoc parse: %v)", parseErr, writeErr)
-	}
-
-	var legacy smartEditToolRequest
-	if err := json.Unmarshal(raw, &legacy); err == nil {
-		if strings.TrimSpace(legacy.FilePath) == "" {
-			return nil, false, nil, errors.New("filePath is required")
-		}
-		if legacy.OldString == "" {
-			return nil, false, nil, errors.New("oldString is required")
-		}
-		block := sbe.EditBlock{
-			FilePath:   legacy.FilePath,
-			Search:     splitLines(legacy.OldString),
-			Replace:    splitLines(legacy.NewString),
-			ReplaceAll: legacy.ReplaceAll,
-		}
-		return []sbe.EditBlock{block}, false, nil, nil
-	}
-
-	var command string
-	if err := json.Unmarshal(raw, &command); err == nil {
-		command = strings.TrimSpace(command)
-		if command == "" {
-			return nil, false, nil, errors.New("command is required")
-		}
-
-		trimmed := strings.TrimSpace(command)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && json.Valid([]byte(trimmed)) {
-			var decoded []string
-			if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil && len(decoded) > 0 {
-				joined := strings.Join(decoded, "\n")
-				blocks, parseErr := sbe.ParseSmartEditCommand(joined)
-				if parseErr == nil {
-					return blocks, false, nil, nil
-				}
-				fileWrites, writeErr := parseCatHeredocWrites(decoded)
-				if writeErr == nil {
-					return nil, false, fileWrites, nil
-				}
-				return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w (cat heredoc parse: %v)", parseErr, writeErr)
-			}
-		}
-
-		lines := strings.Split(command, "\n")
-		blocks, parseErr := sbe.ParseSmartEditCommand(command)
-		if parseErr == nil {
-			return blocks, false, nil, nil
-		}
-		fileWrites, writeErr := parseCatHeredocWrites(lines)
-		if writeErr == nil {
-			return nil, false, fileWrites, nil
-		}
-		return nil, false, nil, fmt.Errorf("invalid smart_edit command: %w (cat heredoc parse: %v)", parseErr, writeErr)
-	}
-
-	// Last resort: treat the raw bytes as a plain script (lenient input).
-	script := strings.TrimSpace(string(raw))
-	if script == "" {
-		return nil, false, nil, errors.New("command is required")
-	}
-	lines := strings.Split(script, "\n")
-	blocks, parseErr := sbe.ParseSmartEditCommand(script)
-	if parseErr == nil {
-		return blocks, false, nil, nil
-	}
-	fileWrites, writeErr := parseCatHeredocWrites(lines)
-	if writeErr == nil {
-		return nil, false, fileWrites, nil
-	}
-	return nil, false, nil, fmt.Errorf("invalid smart_edit arguments: %w (cat heredoc parse: %v)", parseErr, writeErr)
-}
-
-func decodeCommandLines(raw json.RawMessage) ([]string, error) {
-	var lines []string
-	if err := json.Unmarshal(raw, &lines); err == nil && len(lines) > 0 {
-		return lines, nil
-	}
-
-	var command string
-	if err := json.Unmarshal(raw, &command); err == nil && strings.TrimSpace(command) != "" {
-		command = strings.TrimRight(command, "\n")
-		trimmed := strings.TrimSpace(command)
-		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && json.Valid([]byte(trimmed)) {
-			var decoded []string
-			if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil && len(decoded) > 0 {
-				return decoded, nil
-			}
-		}
-		return strings.Split(command, "\n"), nil
-	}
-
-	return nil, errors.New("command must be a non-empty string or string array")
-}
-
-func normalizeConcatenatedJSON(raw json.RawMessage) json.RawMessage {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || json.Valid(trimmed) {
-		return trimmed
-	}
-
-	for i := len(trimmed) - 1; i >= 0; i-- {
-		if trimmed[i] != '}' {
-			continue
-		}
-		j := i + 1
-		for j < len(trimmed) && (trimmed[j] == ' ' || trimmed[j] == '\n' || trimmed[j] == '\r' || trimmed[j] == '\t') {
-			j++
-		}
-		if j >= len(trimmed) || trimmed[j] != '{' {
-			continue
-		}
-		candidate := bytes.TrimSpace(trimmed[j:])
-		if json.Valid(candidate) {
-			return candidate
-		}
-	}
-
-	return trimmed
-}
-
-var catHeredocHeader = regexp.MustCompile(`^cat\s*>\s*(?P<path>(?:'[^']+'|"[^"]+"|[^\s]+))\s*<<\s*(?P<marker>(?:'[^']+'|"[^"]+"|[^\s]+))\s*$`)
-
-func parseCatHeredocWrites(lines []string) ([]smartEditFileWrite, error) {
-	var writes []smartEditFileWrite
-
-	for i := 0; i < len(lines); {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			i++
-			continue
-		}
-
-		matches := catHeredocHeader.FindStringSubmatch(line)
-		if matches == nil {
-			return nil, fmt.Errorf("unsupported command: %s", line)
-		}
-
-		path := stripOptionalQuotes(matches[catHeredocHeader.SubexpIndex("path")])
-		marker := stripOptionalQuotes(matches[catHeredocHeader.SubexpIndex("marker")])
-		if strings.TrimSpace(path) == "" {
-			return nil, errors.New("cat heredoc missing file path")
-		}
-		if strings.TrimSpace(marker) == "" {
-			return nil, errors.New("cat heredoc missing EOF marker")
-		}
-
-		i++
-		var contentLines []string
-		for i < len(lines) {
-			rawLine := lines[i]
-			trimmedLine := strings.TrimSpace(rawLine)
-			if trimmedLine == marker || stripOptionalQuotes(trimmedLine) == marker {
-				break
-			}
-			contentLines = append(contentLines, rawLine)
-			i++
-		}
-		if i < len(lines) {
-			i++ // consume marker line
-		} // else: leniently accept EOF as end-of-input
-
-		writes = append(writes, smartEditFileWrite{
-			FilePath: path,
-			Content:  strings.Join(contentLines, "\n"),
-		})
-	}
-
-	if len(writes) == 0 {
-		return nil, errors.New("no write blocks found")
-	}
-
-	return writes, nil
-}
-
-func stripOptionalQuotes(value string) string {
-	if len(value) < 2 {
-		return value
-	}
-	if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
-		return value[1 : len(value)-1]
-	}
-	return value
 }
 
 func resolveSmartEditRoot() (string, error) {

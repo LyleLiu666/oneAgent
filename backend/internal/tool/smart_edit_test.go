@@ -1,30 +1,143 @@
 package tool
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/liu_y/oneAgent/backend/internal/config"
 )
 
-func TestSmartEdit_ParseCommand_StringEncodedJSONArray(t *testing.T) {
-	raw := json.RawMessage(`{"command":"[\"cat > foo.txt <<'EOF'\",\"hello\",\"EOF\"]"}`)
+func TestSmartEditTool_AppliesEdits(t *testing.T) {
+	root := t.TempDir()
+	prevCfg := config.AppConfig
+	config.AppConfig = &config.Config{BashRootDir: root}
+	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	blocks, replaceAll, writes, err := parseSmartEditInput(raw)
+	resolvedRoot, err := resolveSmartEditRoot()
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+
+	fileA := filepath.Join(resolvedRoot, "a.txt")
+	fileB := filepath.Join(resolvedRoot, "b.txt")
+	if err := os.WriteFile(fileA, []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := os.WriteFile(fileB, []byte("target\nx\ntarget\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{
+		"edits": []map[string]any{
+			{
+				"filePath":  "a.txt",
+				"oldString": "hello",
+				"newString": "hi",
+			},
+			{
+				"filePath":   "b.txt",
+				"oldString":  "target",
+				"newString":  "done",
+				"replaceAll": true,
+			},
+		},
+	})
+
+	gotAny, err := runSmartEditTool(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if replaceAll {
-		t.Fatalf("expected replaceAll=false")
+	got, ok := gotAny.(SmartEditResult)
+	if !ok {
+		t.Fatalf("expected SmartEditResult, got %T", gotAny)
 	}
-	if len(blocks) != 0 {
-		t.Fatalf("expected no edit blocks, got %d", len(blocks))
+	if got.Replacements != 3 {
+		t.Fatalf("expected replacements=3, got %d", got.Replacements)
 	}
-	if len(writes) != 1 {
-		t.Fatalf("expected 1 write, got %d", len(writes))
+	if len(got.Files) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(got.Files))
 	}
-	if writes[0].FilePath != "foo.txt" {
-		t.Fatalf("expected filePath %q, got %q", "foo.txt", writes[0].FilePath)
+
+	contentA, err := os.ReadFile(fileA)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
 	}
-	if writes[0].Content != "hello" {
-		t.Fatalf("expected content %q, got %q", "hello", writes[0].Content)
+	if string(contentA) != "hi\nworld\n" {
+		t.Fatalf("unexpected content for a.txt: %q", string(contentA))
+	}
+	contentB, err := os.ReadFile(fileB)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(contentB) != "done\nx\ndone\n" {
+		t.Fatalf("unexpected content for b.txt: %q", string(contentB))
+	}
+}
+
+func TestSmartEdit_Run_Validation(t *testing.T) {
+	ctx := context.Background()
+
+	// Empty edits
+	emptyRaw := json.RawMessage(`{"edits": []}`)
+	if _, err := runSmartEditTool(ctx, emptyRaw); err == nil {
+		t.Fatal("expected error for empty edits")
+	}
+
+	// Missing filePath
+	missingPathRaw := json.RawMessage(`{"edits": [{"oldString": "a", "newString": "b"}]}`)
+	if _, err := runSmartEditTool(ctx, missingPathRaw); err == nil {
+		t.Fatal("expected error for missing filePath")
+	}
+}
+
+func TestSmartEditTool_RejectsTooManyEdits(t *testing.T) {
+	edits := make([]map[string]any, 0, maxEditOpsPerCall+1)
+	for i := 0; i < maxEditOpsPerCall+1; i++ {
+		edits = append(edits, map[string]any{
+			"filePath":  "a.txt",
+			"oldString": "hello",
+			"newString": "hi",
+		})
+	}
+
+	raw, _ := json.Marshal(map[string]any{
+		"edits": edits,
+	})
+
+	if _, err := runSmartEditTool(context.Background(), raw); err == nil {
+		t.Fatalf("expected error")
+	}
+}
+
+func TestSmartEditTool_RejectsLargeOldString(t *testing.T) {
+	root := t.TempDir()
+	prevCfg := config.AppConfig
+	config.AppConfig = &config.Config{BashRootDir: root}
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
+	resolvedRoot, err := resolveSmartEditRoot()
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(resolvedRoot, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	raw, _ := json.Marshal(map[string]any{
+		"edits": []map[string]any{
+			{
+				"filePath":  "a.txt",
+				"oldString": strings.Repeat("a", maxEditSnippetRunes+1),
+				"newString": "hi",
+			},
+		},
+	})
+
+	if _, err := runSmartEditTool(context.Background(), raw); err == nil {
+		t.Fatalf("expected error")
 	}
 }

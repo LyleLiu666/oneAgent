@@ -13,7 +13,7 @@
 根因：
 - 模型输出了 `<command><![CDATA[...` 但漏了 `]]>`，导致解析后参数里残留 `<![CDATA[` 前缀；
 - 对 `bash` 来说，命令开头的 `<` 会被当作重定向符号触发解析错误；
-- 对 `edit` 来说，脚本第一行被污染后无法识别 `apply_edit` / `cat >...<<...` 结构。
+- 对 `edit` / `write_file` 来说，字段被污染后会导致参数校验失败或路径解析失败。
 
 建议（提示词侧）：
 - 只要使用 `<![CDATA[`，必须闭合为 `]]>`；不要把 `<![CDATA[` 当作普通文本写进字段值里。
@@ -24,23 +24,17 @@
 ### 2) edit：命令格式不规范（“格式不稳/易偏航”）
 
 现象：
-- `edit requires filePath + oldcontent/newcontent, or filePath + content, or command`
-- `invalid edit command: no valid edit blocks found ...`
-- `command` 被“双重 JSON 编码”（把 `["line1","line2"]` 当成字符串传入），导致 heredoc 写文件解析失败。
+- `edit requires filePath + oldcontent/newcontent`
+- `use write_file for full file writes/creates`
 
 建议（提示词侧）：
-- **优先用** `filePath + content`（整文件写入）或 `filePath + oldcontent/newcontent`（小范围替换），少用 `apply_edit` 脚本模式。
-- 如果用 `apply_edit`，务必包含：
-  - `<<<< SEARCH`
-  - `==== REPLACE`
-  - `>>>>`
-  - 以及 heredoc 结束行（例如 `EOF`）
-- JSON 工具调用时，`command` 传数组（或多行字符串），不要把数组序列化成字符串再传。
+- **写文件/新建文件：优先用** `write_file`（`filePath + content`）。
+- 超大文件：用 `write_file` 的 `append=true` 分段追加写入（建议每段 ≤3000 字；必要时先 `append=false` 写入空串以清空/创建）。
+- **小范围替换：用** `edit`（`filePath + oldcontent/newcontent`）。
+- 避免 `edit.command` / `apply_edit` 脚本模式（容易被输出格式污染导致失败）。
 
 工程侧缓解（已做）：
-- `edit.command` 的工具 schema 允许 **数组或多行字符串**（减少模型类型选错）。
-- 解析器支持 `command` 为“字符串里包着 JSON 数组”的情况（自动再解一次）。
-- `apply_edit` 解析支持缩进指令行，并允许缺失最终 `>>>>` 时在 EOF 处收尾（更宽容）。
+- 统一改为结构化参数：`edit` 仅处理 fuzzy replace；`write_file` 负责整文件写入。
 
 ### 3) bash 沙箱策略：命令/路径被禁止（“必然失败”）
 
@@ -55,7 +49,7 @@
 
 建议（提示词侧）：
 - 避免使用被禁命令（尤其是 `sudo/apt-get/pip/node/npm/find/touch` 等）。
-- 不要在 `bash` 里用 heredoc 写文件；写文件/改文件统一走 `edit`。
+- 不要在 `bash` 里用重定向/ heredoc 写文件；写文件用 `write_file`，改文件用 `edit`。
 - 路径使用相对路径（相对 `$BASH_ROOT_DIR`），不要写 `/tmp/...`、`/data/...`、`/dev/...`（除非明确允许）。
 
 工程侧缓解（已做）：
@@ -82,8 +76,7 @@
 ## 二、你可以怎么改提示词（最有效的几条）
 
 - 强制 XML 工具调用时 CDATA 必须闭合：`<![CDATA[` 与 `]]>` 成对出现。
-- 明确“写文件/改文件只用 edit，不用 bash heredoc/echo 重定向”。
+- 明确“写文件用 write_file、改文件用 edit；不要在 bash 里用 heredoc/echo 重定向写文件”。
 - 明确 bash 沙箱禁用命令清单（至少列出最常见踩坑：`node/npm/find/touch/sudo/apt-get/pip`）。
-- 强制 edit 优先使用 `filePath+content` / `filePath+oldcontent/newcontent`，避免 `apply_edit`。
+- 强制写文件用 `write_file`（`filePath+content`），改文件用 `edit`（`filePath+oldcontent/newcontent`），避免 `edit.command` / `apply_edit`。
 - 遇到工具报错时：先读错误信息并调整调用参数，不要重复同一个失败调用（减少 tool-call loop）。
-

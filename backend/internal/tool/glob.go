@@ -30,13 +30,13 @@ func globDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "glob",
-			Description: "List files matching a glob pattern within the sandbox root (relative to $BASH_ROOT_DIR unless absolute within it).",
+			Description: "在沙箱根目录内按 glob 模式列出匹配的文件路径（pattern 相对 $BASH_ROOT_DIR，或为其内部的绝对路径）。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"pattern": map[string]any{
 						"type":        "string",
-						"description": "Glob pattern to match (e.g. **/*.go).",
+						"description": "glob 匹配模式（例如：**/*.go）。",
 					},
 				},
 				"required":             []string{"pattern"},
