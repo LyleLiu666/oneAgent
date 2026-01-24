@@ -89,7 +89,7 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 		opts.Trace.OnStart(ctx, messages)
 	}
 
-	defaultMaxTokens := 4096
+	defaultMaxTokens := 8192
 	reqBody := responsesRequest{
 		Model:  model,
 		Input:  buildResponsesInput(messages),

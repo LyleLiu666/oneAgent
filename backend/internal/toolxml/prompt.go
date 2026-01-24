@@ -77,6 +77,24 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString(">>>>\n")
 			b.WriteString("EOF\n")
 			b.WriteString("</command>\n")
+		case "glob":
+			b.WriteString("- glob:\n")
+			b.WriteString("  <tool_name>glob</tool_name>\n")
+			b.WriteString("  <pattern>**/*.go</pattern>\n")
+			b.WriteString("  Notes: pattern is relative to $BASH_ROOT_DIR (or absolute within it).\n")
+		case "ls":
+			b.WriteString("- ls:\n")
+			b.WriteString("  <tool_name>ls</tool_name>\n")
+			b.WriteString("  <path>path/to/dir</path> (optional, defaults to '.')\n")
+		case "multiedit":
+			b.WriteString("- multiedit:\n")
+			b.WriteString("  <tool_name>multiedit</tool_name>\n")
+			b.WriteString("  <edits><![CDATA[\n")
+			b.WriteString("  [\n")
+			b.WriteString("    {\"filePath\":\"path/to/file\",\"oldString\":\"...\",\"newString\":\"...\",\"replaceAll\":true}\n")
+			b.WriteString("  ]\n")
+			b.WriteString("  ]]></edits>\n")
+			b.WriteString("  <replaceAll>true</replaceAll> (optional, applies to all edits)\n")
 		default:
 			if strings.TrimSpace(name) != "" {
 				b.WriteString(fmt.Sprintf("- %s: not documented\n", name))

@@ -138,6 +138,9 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"replaceAll",
 		"replace_all",
 		"content",
+		"pattern",
+		"path",
+		"edits",
 	} {
 		if value, ok := tagValue(callInner, tag); ok {
 			fields[tag] = value

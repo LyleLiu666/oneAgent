@@ -155,7 +155,7 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, messages []C
 	}
 
 	system, anthropicMessages := buildAnthropicPayload(messages, opts != nil && opts.EnablePromptCache)
-	maxTokens := 4096
+	maxTokens := 8192
 	if opts != nil && opts.MaxTokens != nil {
 		maxTokens = *opts.MaxTokens
 	}
@@ -299,7 +299,7 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 	}
 
 	system, anthropicMessages := buildAnthropicPayload(messages, opts != nil && opts.EnablePromptCache)
-	maxTokens := 4096
+	maxTokens := 8192
 	if opts != nil && opts.MaxTokens != nil {
 		maxTokens = *opts.MaxTokens
 	}

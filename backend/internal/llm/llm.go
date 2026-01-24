@@ -326,7 +326,7 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 		reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
 	}
 
-	defaultMaxTokens := 4096
+	defaultMaxTokens := 8192
 	reqBody := chatCompletionRequest{
 		Model:    model,
 		Messages: reqMessages,
@@ -479,7 +479,7 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 		reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
 	}
 
-	defaultMaxTokens := 4096
+	defaultMaxTokens := 8192
 	reqBody := chatCompletionRequest{
 		Model:    model,
 		Messages: reqMessages,

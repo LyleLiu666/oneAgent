@@ -139,7 +139,7 @@ func buildCompressionSummary(ctx context.Context, client llm.Client, input strin
 		return "", nil
 	}
 
-	maxTokens := 1200
+	maxTokens := 8192
 	temperature := 0.0
 	opts := &llm.ChatCompletionOptions{
 		MaxTokens:   &maxTokens,

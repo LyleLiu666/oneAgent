@@ -13,6 +13,9 @@ import (
 const (
 	ToolIDBash       = "bash"
 	ToolIDEdit       = "edit"
+	ToolIDGlob       = "glob"
+	ToolIDLs         = "ls"
+	ToolIDMultiEdit  = "multiedit"
 	ToolIDSearch     = "search"
 	ToolIDRunCommand = "run_command"
 )
@@ -65,6 +68,9 @@ func newDefinition(id string, spec llm.Tool, handler Handler) Definition {
 var registry = map[string]Definition{
 	ToolIDBash:       bashDefinition(),
 	ToolIDEdit:       smartEditDefinition(),
+	ToolIDGlob:       globDefinition(),
+	ToolIDLs:         lsDefinition(),
+	ToolIDMultiEdit:  multiEditDefinition(),
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
 }

@@ -443,6 +443,44 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		}
 		data, err := json.Marshal(payload)
 		return data, string(data), err
+	case "glob":
+		pattern := strings.TrimSpace(fields["pattern"])
+		if pattern == "" {
+			return nil, "", errors.New("missing pattern")
+		}
+		payload := map[string]any{
+			"pattern": pattern,
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+	case "ls":
+		pathValue := strings.TrimSpace(fields["path"])
+		payload := map[string]any{}
+		if pathValue != "" {
+			payload["path"] = pathValue
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+	case "multiedit":
+		editsRaw := strings.TrimSpace(fields["edits"])
+		if editsRaw == "" {
+			return nil, "", errors.New("missing edits")
+		}
+		var edits []any
+		if err := json.Unmarshal([]byte(editsRaw), &edits); err != nil {
+			return nil, "", errors.New("edits must be valid JSON array")
+		}
+		if len(edits) == 0 {
+			return nil, "", errors.New("edits must be a non-empty JSON array")
+		}
+		payload := map[string]any{
+			"edits": edits,
+		}
+		if replaceAll := parseBool(fields["replaceAll"]); replaceAll {
+			payload["replaceAll"] = true
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
 
 	case "search":
 		query := strings.TrimSpace(fields["query"])
