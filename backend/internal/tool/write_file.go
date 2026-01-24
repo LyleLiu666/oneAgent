@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ func writeFileDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "write_file",
-			Description: "写入文件内容（创建/覆盖或追加）。路径必须在沙箱根目录内。强烈建议分段、小步：单次 content 建议 ≤3000 字；超过上限会自动截断写入并在结果里标记 truncated/continue_append，后续用 append=true 继续追加。",
+			Description: "写入文件内容（创建/覆盖或追加）。路径必须在沙箱根目录内。强烈建议分段、小步：单次 content 建议 ≤3000 字；超过上限会自动截断写入并在结果里标记 truncated/continue_append，后续用 append=true 继续追加。结果会返回 ok、written_bytes、total_lines/total_bytes 等统计信息。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -49,12 +50,21 @@ type writeFileRequest struct {
 }
 
 type writeFileResult struct {
-	FilePath       string `json:"file_path"`
-	WrittenBytes   int    `json:"written_bytes"`
-	Truncated      bool   `json:"truncated,omitempty"`
-	OriginalRunes  int    `json:"original_runes,omitempty"`
-	WrittenRunes   int    `json:"written_runes,omitempty"`
-	ContinueAppend bool   `json:"continue_append,omitempty"`
+	OK bool `json:"ok"`
+
+	FilePath string `json:"file_path"`
+	Mode     string `json:"mode"` // overwrite | append
+
+	WrittenBytes int   `json:"written_bytes"`
+	WrittenLines int64 `json:"written_lines"`
+
+	TotalBytes int64 `json:"total_bytes"`
+	TotalLines int64 `json:"total_lines"`
+
+	Truncated      bool `json:"truncated,omitempty"`
+	OriginalRunes  int  `json:"original_runes,omitempty"`
+	WrittenRunes   int  `json:"written_runes,omitempty"`
+	ContinueAppend bool `json:"continue_append,omitempty"`
 }
 
 func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -97,6 +107,25 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	writtenRunes := runeCount(content)
 	contentBytes := []byte(content)
+	writtenLines := countLines(contentBytes)
+
+	mode := "overwrite"
+	if req.Append {
+		mode = "append"
+	}
+
+	result := writeFileResult{
+		OK: true,
+
+		FilePath: target,
+		Mode:     mode,
+
+		WrittenBytes: len(contentBytes),
+		WrittenLines: writtenLines,
+
+		TotalBytes: -1,
+		TotalLines: -1,
+	}
 	if req.Append {
 		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
@@ -106,15 +135,19 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if _, err := f.Write(contentBytes); err != nil {
 			return nil, fmt.Errorf("write file error: %w", err)
 		}
+		if stat, err := f.Stat(); err == nil {
+			result.TotalBytes = stat.Size()
+		}
+
+		if totalLines, err := countLinesInFile(target); err == nil {
+			result.TotalLines = totalLines
+		}
 	} else {
 		if err := os.WriteFile(target, contentBytes, 0o644); err != nil {
 			return nil, fmt.Errorf("write file error: %w", err)
 		}
-	}
-
-	result := writeFileResult{
-		FilePath:     target,
-		WrittenBytes: len(contentBytes),
+		result.TotalBytes = int64(len(contentBytes))
+		result.TotalLines = writtenLines
 	}
 	if truncated {
 		result.Truncated = true
@@ -123,4 +156,64 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		result.ContinueAppend = true
 	}
 	return result, nil
+}
+
+func countLines(content []byte) int64 {
+	if len(content) == 0 {
+		return 0
+	}
+
+	var lines int64
+	var lastByte byte
+	for _, b := range content {
+		lastByte = b
+		if b == '\n' {
+			lines++
+		}
+	}
+	if lastByte != '\n' {
+		lines++
+	}
+	return lines
+}
+
+func countLinesInFile(path string) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, 32*1024)
+	var lines int64
+	var sawByte bool
+	var lastByte byte
+
+	for {
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			sawByte = true
+			chunk := buf[:n]
+			for _, b := range chunk {
+				lastByte = b
+				if b == '\n' {
+					lines++
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return 0, readErr
+		}
+	}
+
+	if !sawByte {
+		return 0, nil
+	}
+	if lastByte != '\n' {
+		lines++
+	}
+	return lines, nil
 }
