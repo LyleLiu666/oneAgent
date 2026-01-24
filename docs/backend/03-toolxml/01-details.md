@@ -86,6 +86,8 @@ type Call struct {
 | `stdout_offset` | `stdoutOffset` |
 | `stderr_offset` | `stderrOffset` |
 | `max_delta_bytes` | `maxDeltaBytes` |
+| `max_results` | `maxResults` |
+| `fixed_strings` | `fixedStrings` |
 
 ### 2.2 按工具的字段转换
 
@@ -97,6 +99,7 @@ type Call struct {
 | `write_file` | `filePath`, `content`, `append` | 直接映射 |
 | `glob` | `pattern` | 直接映射 |
 | `ls` | `path` | 直接映射 |
+| `rg` | `pattern`, `path`, `max_results`, `fixed_strings` | 直接映射 |
 | `search` | `query`, `count`, `freshness` | 直接映射 |
 | `multiedit` | `edits` (JSON), `replaceAll` | 解析 JSON 数组 |
 
@@ -106,14 +109,14 @@ type Call struct {
 
 | 场景 | 错误类型 | 处理策略 | 客户端表现 |
 |------|---------|---------|-----------|
-| **XML 解析失败** | ParseError | 返回错误，停止循环 | 显示解析错误 |
+| **XML 解析失败** | ParseError | 生成协议错误的 `<tool_result>`（`ok=false`），继续循环让模型重试；直到达到 `maxSteps` 才返回错误 | 尽量自愈；仅在达到步数上限时提示 |
 | **缺少 tool_name** | ParseError | 返回 "missing \<tool_name\>" | 解析错误 |
 | **工具不存在** | UnknownTool | recordFailure + error JSON | 继续下一个工具 |
 | **参数构建失败** | ArgsError | recordFailure + error JSON | 显示参数错误 |
 | **Handler 执行失败** | ExecutionError | recordFailure + 包装为 error payload | 继续循环 |
 | **超过 20 轮** | LimitReached | 返回 "xml tool call limit reached" | 显示步数警告 |
 | **thinking 未闭合** | Streaming | Flush 丢弃未完成内容 | 静默处理 |
-| **tool_data 截断** | Streaming | 保留尾部等待完整 | 静默等待 |
+| **tool_data 截断** | Streaming | 流内尽量等待补全；若本轮结束仍不完整，生成协议错误的 `<tool_result>`（`ok=false`）并继续循环让模型重试 | 尽量自愈；仅在达到步数上限时提示 |
 | **CDATA 格式错误** | Tolerant | 容错处理，截取可用部分 | 尽量恢复 |
 | **edit 使用旧语法** | Validation | 返回明确错误提示用新语法 | 提示用户 |
 
@@ -154,4 +157,3 @@ type ToolResult struct {
 | `maxSteps` | 20 | 最大循环次数 |
 | `maxSuppressedTail` | 64 | 抑制态保留尾部字符 |
 | `maxSearchTail` | 16 | 搜索态保留尾部字符 |
-

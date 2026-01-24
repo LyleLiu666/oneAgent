@@ -1296,66 +1296,50 @@ func runToolLoop(
 			}
 
 			handler, ok := handlers[call.Function.Name]
+			var (
+				payload    any
+				toolErr    error
+				marshalErr error
+			)
 			if !ok {
+				toolErr = fmt.Errorf("unknown tool: %s", call.Function.Name)
 				broadcaster.Broadcast(StreamEvent{
 					Type: "error",
 					Data: fmt.Sprintf("Unknown tool: %s", call.Function.Name),
 				})
-				err := fmt.Errorf("unknown tool: %s", call.Function.Name)
-				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
-				if db != nil {
-					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-					entry.Error = err.Error()
-					entry.Complete()
-					trace := model.TraceDataJSON{
-						TraceData: model.TraceData{
-							Entries: []model.TraceEntry{entry},
-							Model:   modelName,
-						},
-					}
-					msg := model.ChatMessage{
-						SessionID: sessionID,
-						Role:      model.MessageRoleAssistant,
-						Type:      model.MessageTypeText,
-						Content:   "",
-						Trace:     trace,
-					}
-					if createErr := db.Create(&msg).Error; createErr == nil {
-						persisted = true
-					}
-				}
-				return combined.String(), persisted, err
-			}
-
-			broadcaster.Broadcast(StreamEvent{
-				Type: "trace",
-				Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
-			})
-
-			payload, err := handler(ctx, json.RawMessage(call.Function.Arguments))
-			if err != nil {
+				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
+				payload = map[string]string{"error": toolErr.Error()}
+			} else {
 				broadcaster.Broadcast(StreamEvent{
-					Type: "error",
-					Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, err),
+					Type: "trace",
+					Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
 				})
-				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
 
-				// FEEDBACK: Return error to LLM so it can retry
-				payload = map[string]string{
-					"error": fmt.Sprintf("Tool execution failed: %v", err),
+				payload, toolErr = handler(ctx, json.RawMessage(call.Function.Arguments))
+				if toolErr != nil {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "error",
+						Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, toolErr),
+					})
+					recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
+
+					// FEEDBACK: Return error to LLM so it can retry
+					payload = map[string]string{
+						"error": fmt.Sprintf("Tool execution failed: %v", toolErr),
+					}
 				}
 			}
 
-			response, err := json.Marshal(payload)
-			if err != nil {
+			response, marshalErr := json.Marshal(payload)
+			if marshalErr != nil {
 				broadcaster.Broadcast(StreamEvent{
 					Type: "error",
-					Data: fmt.Sprintf("Tool %s response error: %v", call.Function.Name, err),
+					Data: fmt.Sprintf("Tool %s response error: %v", call.Function.Name, marshalErr),
 				})
-				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, err)
+				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, marshalErr)
 
 				// If marshaling fails, send a plain text error
-				response = []byte(fmt.Sprintf(`{"error": "Failed to marshal tool response: %v"}`, err))
+				response = []byte(fmt.Sprintf(`{"error": "Failed to marshal tool response: %v"}`, marshalErr))
 			}
 
 			if db != nil {
@@ -1392,8 +1376,15 @@ func runToolLoop(
 			if enableTrace {
 				entry := model.NewTraceEntry(model.TraceTypeToolResult, call.Function.Name)
 				entry.Output = string(response)
-				if err != nil {
-					entry.Error = err.Error()
+				if toolErr != nil {
+					entry.Error = toolErr.Error()
+				}
+				if marshalErr != nil {
+					if entry.Error == "" {
+						entry.Error = marshalErr.Error()
+					} else {
+						entry.Error = entry.Error + "; " + marshalErr.Error()
+					}
 				}
 				entry.Metadata["tool_call_id"] = call.ID
 				entry.Metadata["protocol"] = "json"

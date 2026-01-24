@@ -147,6 +147,10 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"append",
 		"pattern",
 		"path",
+		"max_results",
+		"maxResults",
+		"fixed_strings",
+		"fixedStrings",
 		"edits",
 	} {
 		if value, ok := tagValue(callInner, tag); ok {
@@ -203,6 +207,16 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["max_delta_bytes"]; !ok {
 		if v, ok := fields["maxDeltaBytes"]; ok {
 			fields["max_delta_bytes"] = v
+		}
+	}
+	if _, ok := fields["max_results"]; !ok {
+		if v, ok := fields["maxResults"]; ok {
+			fields["max_results"] = v
+		}
+	}
+	if _, ok := fields["fixed_strings"]; !ok {
+		if v, ok := fields["fixedStrings"]; ok {
+			fields["fixed_strings"] = v
 		}
 	}
 

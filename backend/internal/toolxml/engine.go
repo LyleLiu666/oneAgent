@@ -119,6 +119,54 @@ func RunLoop(
 
 		toolBlock, ok := ExtractLatestToolData(raw.String())
 		if !ok {
+			if indexCaseInsensitive(StripThinking(raw.String()), toolDataStart) != -1 {
+				protoErr := errors.New("truncated <tool_data> block")
+				if onTrace != nil {
+					onTrace(fmt.Sprintf("Tool protocol error: %v", protoErr))
+				}
+
+				toolName := "tool_protocol"
+				toolCallID := fmt.Sprintf("xml_%d_protocol", step)
+				result := ToolResult{
+					ToolName:   toolName,
+					ToolCallID: toolCallID,
+					OK:         false,
+					Error:      protoErr.Error(),
+					OutputJSON: fmt.Sprintf(`{"error":%q}`, protoErr.Error()),
+				}
+				recordedCall := llm.ToolCall{
+					ID:   toolCallID,
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      toolName,
+						Arguments: fmt.Sprintf(`{"error":%q}`, protoErr.Error()),
+					},
+				}
+
+				toolResultMsg := buildToolResultMessage([]ToolResult{result})
+				if recordFailure != nil {
+					recordFailure(toolName, toolCallID, assistantForHistory, protoErr)
+				}
+				if observeStep != nil {
+					observeStep(StepRecord{
+						VisibleContent:    stepVisible,
+						AssistantContent:  assistantForHistory,
+						ToolCalls:         []llm.ToolCall{recordedCall},
+						ToolResults:       []ToolResult{result},
+						ToolResultMessage: toolResultMsg,
+					})
+				}
+
+				messages = append(messages, llm.ChatMessage{
+					Role:    "assistant",
+					Content: assistantForHistory,
+				})
+				messages = append(messages, llm.ChatMessage{
+					Role:    "user",
+					Content: toolResultMsg,
+				})
+				continue
+			}
 			if observeFinal != nil {
 				observeFinal(stepVisible, assistantForHistory)
 			}
@@ -127,10 +175,51 @@ func RunLoop(
 
 		calls, err := ParseToolData(toolBlock)
 		if err != nil {
-			if onError != nil {
-				onError(fmt.Sprintf("Tool protocol parse error: %v", err))
+			if onTrace != nil {
+				onTrace(fmt.Sprintf("Tool protocol parse error: %v", err))
 			}
-			return combined.String(), err
+
+			toolName := "tool_protocol"
+			toolCallID := fmt.Sprintf("xml_%d_protocol", step)
+			result := ToolResult{
+				ToolName:   toolName,
+				ToolCallID: toolCallID,
+				OK:         false,
+				Error:      err.Error(),
+				OutputJSON: fmt.Sprintf(`{"error":%q}`, err.Error()),
+			}
+			recordedCall := llm.ToolCall{
+				ID:   toolCallID,
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      toolName,
+					Arguments: fmt.Sprintf(`{"error":%q}`, err.Error()),
+				},
+			}
+
+			toolResultMsg := buildToolResultMessage([]ToolResult{result})
+			if recordFailure != nil {
+				recordFailure(toolName, toolCallID, toolBlock, err)
+			}
+			if observeStep != nil {
+				observeStep(StepRecord{
+					VisibleContent:    stepVisible,
+					AssistantContent:  assistantForHistory,
+					ToolCalls:         []llm.ToolCall{recordedCall},
+					ToolResults:       []ToolResult{result},
+					ToolResultMessage: toolResultMsg,
+				})
+			}
+
+			messages = append(messages, llm.ChatMessage{
+				Role:    "assistant",
+				Content: assistantForHistory,
+			})
+			messages = append(messages, llm.ChatMessage{
+				Role:    "user",
+				Content: toolResultMsg,
+			})
+			continue
 		}
 		messages = append(messages, llm.ChatMessage{
 			Role:    "assistant",
@@ -295,18 +384,25 @@ func buildToolResultMessage(results []ToolResult) string {
 		b.WriteString("</ok>\n")
 		if r.Error != "" {
 			b.WriteString("    <error><![CDATA[")
-			b.WriteString(r.Error)
+			b.WriteString(escapeCDATA(r.Error))
 			b.WriteString("]]></error>\n")
 		}
 		if r.OutputJSON != "" {
 			b.WriteString("    <output><![CDATA[")
-			b.WriteString(r.OutputJSON)
+			b.WriteString(escapeCDATA(r.OutputJSON))
 			b.WriteString("]]></output>\n")
 		}
 		b.WriteString("  </call>\n")
 	}
 	b.WriteString("</tool_result>\n")
 	return b.String()
+}
+
+func escapeCDATA(value string) string {
+	if value == "" {
+		return ""
+	}
+	return strings.ReplaceAll(value, "]]>", "]]]]><![CDATA[>")
 }
 
 func escapeXMLText(value string) string {
@@ -518,6 +614,29 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		}
 		if freshness := strings.TrimSpace(fields["freshness"]); freshness != "" {
 			payload["freshness"] = freshness
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
+	case "rg":
+		pattern := strings.TrimSpace(fields["pattern"])
+		if pattern == "" {
+			return nil, "", errors.New("missing pattern")
+		}
+		pathValue := strings.TrimSpace(fields["path"])
+		payload := map[string]any{
+			"pattern": pattern,
+		}
+		if pathValue != "" {
+			payload["path"] = pathValue
+		}
+		if rawMax := strings.TrimSpace(fields["max_results"]); rawMax != "" {
+			if maxResults, err := strconv.Atoi(rawMax); err == nil && maxResults > 0 {
+				payload["max_results"] = maxResults
+			}
+		}
+		if fixed := parseBool(fields["fixed_strings"]); fixed {
+			payload["fixed_strings"] = true
 		}
 		data, err := json.Marshal(payload)
 		return data, string(data), err

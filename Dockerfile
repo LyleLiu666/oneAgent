@@ -65,6 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     jq \
     tree \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install build dependencies

@@ -88,6 +88,14 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("  ]\n")
 			b.WriteString("  ]]></edits>\n")
 			b.WriteString("  <replaceAll>true</replaceAll>（可选；对所有 edits 生效）\n")
+		case "rg":
+			b.WriteString("- rg（ripgrep，本地高速搜索，支持正则）：\n")
+			b.WriteString("  <tool_name>rg</tool_name>\n")
+			b.WriteString("  <pattern>...</pattern>\n")
+			b.WriteString("  <path>path/to/dir</path>（可选，默认 '.'）\n")
+			b.WriteString("  <max_results>50</max_results>（可选，默认 50，最大 200；达到上限会提前终止并标记 truncated=true）\n")
+			b.WriteString("  <fixed_strings>true</fixed_strings>（可选；true=字面量搜索）\n")
+			b.WriteString("  说明：若环境未安装 rg，将返回 available=false（工具调用 ok=true），你需要自行决定下一步（例如改用 bash）。\n")
 		default:
 			if strings.TrimSpace(name) != "" {
 				b.WriteString(fmt.Sprintf("- %s: not documented\n", name))

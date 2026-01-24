@@ -16,6 +16,7 @@ const (
 	ToolIDGlob       = "glob"
 	ToolIDLs         = "ls"
 	ToolIDMultiEdit  = "multiedit"
+	ToolIDRg         = "rg"
 	ToolIDSearch     = "search"
 	ToolIDRunCommand = "run_command"
 	ToolIDWriteFile  = "write_file"
@@ -72,6 +73,7 @@ var registry = map[string]Definition{
 	ToolIDGlob:       globDefinition(),
 	ToolIDLs:         lsDefinition(),
 	ToolIDMultiEdit:  multiEditDefinition(),
+	ToolIDRg:         rgDefinition(),
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
 	ToolIDWriteFile:  writeFileDefinition(),

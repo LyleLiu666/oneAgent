@@ -3,6 +3,7 @@ package toolxml
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -158,5 +159,62 @@ func TestBuildToolArgs_EditWithCommand_IsRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "apply_edit") || !strings.Contains(err.Error(), "command") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildToolArgs_Rg_RunsRgTool(t *testing.T) {
+	root := t.TempDir()
+	prevCfg := config.AppConfig
+	config.AppConfig = &config.Config{BashRootDir: root}
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
+	resolvedRoot, err := shell.ResolveBashRoot(root)
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+
+	target := filepath.Join(resolvedRoot, "a.txt")
+	if err := os.WriteFile(target, []byte("abc\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	args, _, err := buildToolArgs("rg", map[string]string{
+		"pattern":     "abc$",
+		"path":        ".",
+		"max_results": "10",
+	})
+	if err != nil {
+		t.Fatalf("build args: %v", err)
+	}
+
+	rgDef := mustToolDefinition(t, "rg")
+	gotAny, err := rgDef.Handler(context.Background(), args)
+	if err != nil {
+		t.Fatalf("rg tool: %v", err)
+	}
+	got, ok := gotAny.(tool.RgToolResult)
+	if !ok {
+		t.Fatalf("expected tool.RgToolResult, got %T", gotAny)
+	}
+	if _, err := exec.LookPath("rg"); err != nil {
+		if got.Available {
+			t.Fatalf("expected available=false when rg missing")
+		}
+		if got.NotAvailableReason == "" {
+			t.Fatalf("expected not_available_reason")
+		}
+		return
+	}
+	if !got.Available {
+		t.Fatalf("expected available=true")
+	}
+	if len(got.Matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(got.Matches))
+	}
+	if got.Matches[0].Path != "a.txt" {
+		t.Fatalf("expected path=%q, got %q", "a.txt", got.Matches[0].Path)
+	}
+	if got.Matches[0].Lines != "abc" {
+		t.Fatalf("expected lines=%q, got %q", "abc", got.Matches[0].Lines)
 	}
 }

@@ -49,6 +49,7 @@ func Infos() []Info
 | `write_file` | write_file | 创建/覆盖/追加文件 | 219 |
 | `glob` | glob | 文件路径模式匹配 | 247 |
 | `ls` | ls | 列出目录内容 | 119 |
+| `rg` | rg | 本地高速搜索 (ripgrep) | 407 |
 | `search` | search | Web 搜索 (Bocha) | 142 |
 
 ---
@@ -255,6 +256,55 @@ Response: SearchResponse from Bocha API
 
 ---
 
+### 2.8 rg 工具 (ripgrep)
+
+```json
+Request: {
+    "pattern": "String (Required) - 正则表达式（或 fixed_strings=true 时为字面量）",
+    "path": "String (Optional, Default: '.') - 搜索路径（相对 $BASH_ROOT_DIR，或为其内部的绝对路径）",
+    "max_results": "Integer (Optional, Default: 50, Max: 200) - 最多返回多少条匹配",
+    "fixed_strings": "Boolean (Optional) - true=字面量搜索"
+}
+
+Response: {
+    "available": "Boolean - 是否可用（若系统未安装 rg，则为 false；工具调用本身不报错）",
+    "not_available_reason": "String - 不可用原因（可选）",
+    "root": "String - 沙箱根目录",
+    "path": "String - 实际搜索路径（绝对路径）",
+    "pattern": "String - 搜索模式",
+    "max_results": "Integer",
+    "fixed_strings": "Boolean",
+    "max_line_runes": "Integer - 单行最多返回多少字符（超出会截断）",
+    "max_output_bytes": "Integer - 总输出内容上限（估算；超过会提前终止并标记 truncated=true）",
+    "matches": [{
+        "path": "String - 文件路径（相对 root）",
+        "line_number": "Integer - 行号",
+        "lines": "String - 行内容（不含换行）",
+        "lines_truncated": "Boolean - lines 是否被截断",
+        "original_line_runes": "Integer - 截断前的字符数（可选）",
+        "submatches": [{
+            "match": "String",
+            "start": "Integer",
+            "end": "Integer",
+            "match_truncated": "Boolean - match 是否被截断",
+            "original_match_runes": "Integer - 截断前的字符数（可选）"
+        }]
+    }],
+    "truncated": "Boolean - 达到 max_results 或 max_output_bytes 后提前终止",
+    "truncated_reason": "String - max_results | max_output_bytes（可选）",
+    "duration_ms": "Integer - 执行耗时（毫秒）",
+    "stderr": "String - 错误输出（截断）"
+}
+```
+
+**说明**:
+- 不经过 shell，因此允许 `$` 等正则符号。
+- 搜索路径必须在 `$BASH_ROOT_DIR` 内。
+- 为了稳定性与避免 LLM 接收过大内容：会对单行与整体输出做截断；如需更多结果，建议缩小 `path` 范围或更精确的 `pattern` 后重试。
+- 若 `available=false`，说明环境缺少 `rg`，应自行决定后续策略（例如改用 `bash`）。
+
+---
+
 ## 4. Sad Path Matrix
 
 | 场景 | 工具 | 错误消息 | 处理 |
@@ -295,4 +345,3 @@ const (
 // search 工具读取 API Key
 apiKey := model.GetUserSetting(db, userID, model.SettingKeyBochaAPIKey)
 ```
-

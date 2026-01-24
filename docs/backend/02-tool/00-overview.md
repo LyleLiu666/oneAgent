@@ -11,11 +11,10 @@
 ## 模块能力
 
 - 工具注册表：`All()` / `Mount(ids)` / `ToolsForLLM(defs)`
-- 工具实现：`bash` / `run_command` / `edit` / `write_file` / `glob` / `ls` / `search`
+- 工具实现：`bash` / `run_command` / `edit` / `write_file` / `glob` / `ls` / `rg` / `search`
 - 安全约束：路径限制在 `$BASH_ROOT_DIR`、禁用部分 shell 特性、输出截断等
 
 ## 代码规模
 
 - ~2170 行
 - 核心文件：`registry.go` (145), `smart_edit.go` (233), `run_command.go` (201), `write_file.go` (219), `glob.go` (247)
-
