@@ -57,7 +57,9 @@
 - **THEN** `tool_use` 与 `tool_result` 对应内容块也被注入 cache_control（或被明确降级并可观测）
 
 ### Requirement: 缓存能力矩阵与回退策略
-系统必须 (MUST) 维护显式的 provider 缓存能力矩阵，并仅在 provider 声明支持时注入对应字段/头；当上游返回“不支持缓存字段/参数”错误时，系统必须 (MUST) 自动回退并向用户/日志提示。
+系统必须 (MUST) 维护显式的 provider 缓存能力矩阵，并覆盖系统已集成的所有 provider（不得只在部分 provider 下生效）。
+
+系统必须 (MUST) 仅在 provider 声明支持时注入对应字段/头；当上游返回“不支持缓存字段/参数”错误时，系统必须 (MUST) 自动回退并向用户/日志提示。
 
 #### Scenario: 不支持字段时自动降级
 - **GIVEN** 某 provider 不支持 `prompt_cache_key`
@@ -66,12 +68,19 @@
 - **OR** 若上游返回“不支持字段”错误，则系统自动关闭该字段并记录降级原因
 
 ### Requirement: 缓存指标必须可观测
-系统必须 (MUST) 为每次 LLM 调用记录缓存相关指标，并至少包含：是否启用缓存、使用的 cache key（可脱敏/哈希）、以及在 provider 可提供时的 cached tokens/hit 信息；这些信息必须 (MUST) 能在 trace 或 UI 中被查看。
+系统必须 (MUST) 为每次 LLM 调用记录缓存相关指标，并至少包含：是否启用缓存、使用的 cache key（可脱敏/哈希）、以及在 provider 可提供时的 cached tokens/hit 信息；这些信息必须 (MUST) 能在 trace/log/UI 中被查看。
+
+系统必须 (MUST) 将每次 LLM 调用的完整 request/response（含 messages）写入日志文件，并在 trace 中记录该日志文件路径指针（trace 只保存“摘要 + 指针”，避免回灌大体量 payload）。
 
 #### Scenario: 用户可确认缓存是否生效
 - **GIVEN** 用户启用 `enable_kv_cache`
 - **WHEN** 触发一次对话请求并完成 LLM 调用
 - **THEN** 用户可在 trace/UI 中看到本次调用的 `prompt_cache_enabled` 与缓存命中相关字段（若可得）
+
+#### Scenario: trace 包含 LLM payload 日志指针
+- **GIVEN** 一次 LLM 调用产生了完整 request/response（含 messages）
+- **WHEN** 系统记录本次调用的 trace
+- **THEN** trace 中包含该次调用对应的日志文件路径指针
 
 ### Requirement: prompt_cache_key 必须与会话稳定段绑定并支持 epoch
 当 provider 支持 `prompt_cache_key` 时，系统必须 (MUST) 为同一会话在多轮之间复用 cache key，并在“稳定前缀发生结构性变化”（如模型切换、工具协议切换、会话压缩）时支持引入 `epoch` 以更新 cache key，避免不可解释的 miss 或潜在碰撞。

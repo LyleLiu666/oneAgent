@@ -53,7 +53,7 @@ findings 文件中包含两类核心信息：
 - 将 Top-K 技能摘要块写入子 Agent TurnContext（volatile）（中文；不得回写稳定 system prompt）
 
 ### 4) 观测与存储（Trace / 可选 Session）
-MVP 推荐：
+推荐：
 - **完整痕迹落日志文件**；系统 trace 仅保存摘要与指针（例如 log 文件路径、run_id），避免把大体量内容写入 Settings SQLite：
   - `trace_log_path`：记录子 Agent 的完整过程（消息、工具调用/结果、错误、时间等）
   - `findings_path`：记录交付件（流水账 + Findings + 修改文件列表）
@@ -108,7 +108,7 @@ MVP 推荐：
 - 工具权限：默认继承主工具集（包含文件类工具），但必须受 workspace/scope 限制；并支持 allowlist 作为收敛手段
 
 ## 并发与文件作用域 (Concurrency & File Scope)
-MVP 推荐先实现**串行** subagent（避免并发编辑同一资源带来的锁与长等待）。
+默认采用**串行** subagent（避免并发编辑同一资源带来的锁与长等待）。
 
 如果未来需要并发 subagent，建议依赖一个“计划/分工”模块，在启动并发 subagent 前先划定每个 subagent 的可编辑范围（scope，glob 规则，基于 `ONEAGENT_HOME` 的相对路径），并在文件工具层强制校验：
 - 子 Agent 只能对 scope 内文件做写/改/删；越界则返回可理解错误，促使其重试或调整计划
@@ -119,7 +119,7 @@ MVP 推荐先实现**串行** subagent（避免并发编辑同一资源带来的
 - **保存完整过程 vs 仅保存摘要**：本方案同时做：完整过程写日志（可回溯），主上下文只保留短总结与引用（可控）。
 - **技能注入**：提升专注度，但也会增加 prompt 体积，需要 Top-K 与摘要长度控制。
 
-## 开放问题 (Open Questions)
-1. findings 文件的固定文件名：`FINDINGS.md` 是否足够，还是需要支持自定义（例如按步骤命名）？
-2. 日志文件切分：按 run 单文件（`trace.jsonl`）是否足够？是否需要压缩/轮转策略？
-3. 子 Agent 失败重试策略：是系统自动重试（例如补充约束），还是交由主 Agent 决策？
+## 默认约定 (Defaults)
+1. findings 文件名固定为 `FINDINGS.md`（位于每次 run 的目录下），避免引入额外命名协议。
+2. 日志切分：每次 run 生成单个 `trace.jsonl`；日志保留与清理由全局日志策略统一控制（按日期目录 best-effort 清理）。
+3. 失败重试：系统不做自动重试；由主 Agent 决策是否重试/如何补充约束，子 Agent 仅返回失败原因与可追溯指针。

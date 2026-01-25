@@ -40,21 +40,22 @@
 - 不在第一阶段实现“完全离线安装全部系统依赖”（如 `pandoc`/`ffmpeg`/`wkhtmltopdf` 等可通过自检提示用户安装；后续再评估是否内置/打包）。
 
 ## What Changes
-> 采用“分阶段迁移”，先得到一个可用的本地工具 MVP，再逐步收敛依赖与交付体验。
+> 采用“分阶段交付”，但每一阶段都以可发布、可诊断、可回滚为标准（工业级交付）。
 
-### 阶段 1: 本地工具 MVP（最小可用）
+### 阶段 1: 本地工具交付版（可上线）
 - 增加 `oneagent` CLI 入口（或将现有 `cmd/server` 扩展为多子命令）。
 - 引入“home 目录”概念（默认 `~/.oneagent_default/`；选择 workspace 时 `home=<workspace>/`），作为 **agent 可修改文件的最大范围**。
 - oneAgent 的可变状态统一存放在 `<home>/.oneagent/` 下，包含：
   - 配置文件（如 `config.yaml`）
   - 本地访问令牌（`config/auth_token`）
   - Settings SQLite（仅用于 Settings，例如 API keys）
-  - 其它状态的文件存储（会话/trace/logs 等）
+  - 其它状态的文件存储（会话/trace/logs 等），并建议以 `session_id` 分目录/分文件以降低并发写冲突
 - 默认以本机进程运行后端（并继续内嵌前端静态文件），通过 `oneagent serve` 启动；默认以 LAN 可访问方式启动，但不默认开放公网。
 - 默认以“本地访问令牌（自动生成、不过期）”作为访问控制（替代 Keycloak/OAuth 登录）。
-- 为“外部依赖”提供 `oneagent doctor` 自检（例如检查 `rg`/`git`/`jq` 等可选工具是否存在，并输出建议）。
+- 保存每次 LLM 调用的完整 request/response（含 messages）到日志文件（替代原先入库的做法）；trace 仅保存指标摘要与日志指针，便于成本分析与回溯排障。
+- 为“外部依赖”提供 `oneagent doctor` 自检（例如检查 `rg`/`git`/`jq` 等可选工具是否存在，并输出建议；当 `rg` 缺失时提示安装，同时允许相关能力降级为 `grep -R`）。
 
-### 阶段 2: 存储与认证的本地化（提升“零依赖”程度）
+### 阶段 2: 存储与认证的本地化（持续降依赖）
 - 存储方案：
   - **SQLite 仅用于 Settings 持久化**（自动创建/迁移；Provider API Key 等敏感配置仅以 `has_*` 形式对外暴露）。
   - 其它状态（会话/消息/trace/subagent logs 等）走文件存储，落在 `<home>/.oneagent/data/` 与 `<home>/.oneagent/logs/`。
@@ -98,8 +99,7 @@
   - 仍可继续使用 Docker 路径（至少在一个过渡期内）
   - 或能清晰迁移到本地工具模式（文档与工具支持）
 
-## 开放问题 (Open Questions)
-为避免“想当然”，在进入实现前需要明确以下关键决策（可在评审时一并敲定）：
-1. **反向代理与 IPv6**：默认监听策略（`0.0.0.0`/`::`）如何做得跨平台且可预期？是否需要 `TRUST_PROXY`/`BASE_URL` 等配置来改善反代体验？
-2. **文件存储约定**：会话/消息/trace 的文件目录结构与命名（按 session_id/run_id？）以及并发写入策略如何定义，才能尽量少返工且便于排障？
-3. **敏感 token 的落盘策略**：Settings 中配置的 API Key 是否需要“落盘加密”（如用 password 派生密钥），还是仅依赖本机文件权限即可？
+## 默认约定 (Defaults)
+1. **反向代理与 IPv6**：默认 `local` 监听 `0.0.0.0`，同时支持 `--bind ::` 启用 IPv6；系统不依赖 RemoteIP 做安全阻断。反代下对 `X-Forwarded-*` 的信任由显式配置控制（例如 `TRUST_PROXY`），默认不信任。
+2. **日志清理与轮转策略**：日志按日期目录分层；默认保留 30 天（可配置），启动时执行 best-effort 清理；`doctor` 输出日志目录与保留策略（避免磁盘无限增长）。
+3. **敏感 token 的落盘策略**：不做落盘加密（避免引入密钥管理复杂度）；依赖本机文件权限，并确保 API 永不返回明文 token（仅返回 `has_*`）。

@@ -8,9 +8,8 @@
   - [ ] key 计算纳入 model/tool/system_prompt 变化（避免不必要 miss 或潜在碰撞） <!-- id: 5 -->
   - [ ] 上游返回“不支持字段/参数”时自动降级并提示 <!-- id: 6 -->
 - [ ] 增加缓存可观测性：
-  - [ ] 在 trace/DB 中记录 cache enabled、cache key（脱敏/哈希）、cached tokens（若可得） <!-- id: 7 -->
+  - [ ] 在 trace/log 中记录 cache enabled、cache key（脱敏/哈希）、cached tokens（若可得）；每次 LLM 调用完整 request/response（含 messages）写入 log 文件，trace 仅保存摘要与指针 <!-- id: 7 -->
   - [ ] 前端最小展示（Trace 或 Settings 面板） <!-- id: 8 -->
 - [ ] 测试与验证：
   - [ ] 单元测试：cache selector 在典型消息序列（含压缩摘要、含工具消息）下输出稳定 <!-- id: 9 -->
   - [ ] 集成测试（mock provider）：确保各 provider 的请求 payload 注入符合 capability matrix <!-- id: 10 -->
-

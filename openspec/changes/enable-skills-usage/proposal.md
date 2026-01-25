@@ -41,15 +41,15 @@
 ### 3) 不引入持久化索引：基于 grep/ripgrep 的召回
 为支持上千技能规模，本阶段不引入 SQLite FTS 索引，而是采用“扫描 + grep”：
 - 由技能召回工具在本地扫描三处来源得到 `SKILL.md` 列表（含 metadata）
-- 对 query 使用 `rg`（ripgrep）在 `SKILL.md` 上做匹配计分，返回 Top-8（稳定排序）
+- 对 query 优先使用 `rg`（ripgrep）在 `SKILL.md` 上做匹配计分，返回 Top-8（稳定排序）；当 `rg` 缺失时允许降级为 `grep -R` 以保持基本可用
 
-> 说明：不支持 Windows 的前提下，`rg` 在 macOS/Linux 性能与可用性更好；若 `rg` 缺失，可由 `doctor` 提示安装。
+> 说明：不支持 Windows 的前提下，`rg` 在 macOS/Linux 性能与可用性更好；若 `rg` 缺失，应由 `doctor` 提示安装，同时系统允许降级为 `grep -R`。
 
 ### 4) 独立的技能召回工具（Skill Recall Tool）
 新增一个独立组件（可作为可执行工具或内部库 + CLI）：
 - 输入：本轮任务描述（用户消息）与可选上下文（例如系统提示词、会话摘要）
 - 输出：Top-8 技能候选（`id/name/description/path/score`），并可带上简短“命中原因”（可选）
-- 召回策略：基于 metadata + `rg` 匹配计分（MVP），后续可扩展 embedding / rerank
+- 召回策略：基于 metadata + 内容匹配计分（优先 `rg`，缺失时降级 `grep -R`），后续可扩展 embedding / rerank
 
 > 本阶段不引入“Selector Prompt + 二次 LLM 调用”的选择器；推荐技能直接取 Top-1（或无推荐）。
 

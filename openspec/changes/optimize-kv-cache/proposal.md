@@ -20,6 +20,7 @@
 - Anthropic：设置 `anthropic-beta: prompt-caching`，并在 `buildAnthropicPayload()` 的 text block 上按索引注入 `cache_control: {type: "ephemeral"}`。
 - OpenRouter/Bedrock：按索引在 message 上注入 `cache_control` / `cachePoint`。
 - OpenAI-compat / Responses：发送 `prompt_cache_key`（当前以 `session_id` 作为 key）。
+- DeepSeek（或其它“自动前缀识别”类 provider）：无需客户端显式标记，但仍强依赖“稳定前缀不变”的 prompt 结构才能获得收益。
 - `backend/internal/handler/session_compress.go` 会在上下文过长时生成摘要并重建 prompt（summary 作为 assistant 文本消息插入）。
 
 ## 主要问题与风险 (Problems / Risks)
@@ -57,7 +58,7 @@
 在 Anthropic payload 构建时，将 cache_control 的注入扩展到 tool_use/tool_result block（或提供可配置策略），在工具循环中提升缓存收益。
 
 ### 4) 统一 Provider 缓存能力表与回退策略
-引入显式的 provider capability 矩阵：
+引入显式的 provider capability 矩阵，并覆盖所有已集成 provider（不能只在部分 provider 下生效）：
 - 是否支持 `prompt_cache_key`
 - 是否支持 message-level `cache_control`
 - 是否支持 `cachePoint`
@@ -66,20 +67,20 @@
 对不支持的字段：不注入、或在检测到上游返回“不支持字段”错误时自动回退（并在 UI/日志提示）。
 
 ### 5) 增加可观测性（Metrics & Tracing）
-在 LLM call trace / DB 记录中新增并展示：
+在 LLM call trace / 日志中新增并展示：
 - `prompt_cache_enabled`（是否开启）
 - `prompt_cache_key`（可脱敏/哈希）
 - `cached_prompt_tokens`（若 provider 返回）
 - `cache_hit`/`cache_write`（若 provider 支持）
-并在前端提供最小可视化（例如 Settings 或 Trace 面板），让用户能确认“缓存真的在工作”。
+并将每次 LLM 调用的完整 request/response（含 messages）写入日志文件（替代原先入库的做法）；trace 仅保存指标摘要与日志指针。前端提供最小可视化（例如 Trace 面板），让用户能确认“缓存真的在工作”。
 
 ## 影响范围 (Impact)
 - 后端：
   - `backend/internal/llm`：cache policy、Anthropic payload、provider capability、metrics 抽取
   - `backend/internal/handler/chat.go` / `session_compress.go`：prompt builder 接入、摘要缓存策略、cache key 策略
-  - `backend/internal/model`：LLMCall 持久化字段（如新增缓存指标）
+  - trace/log：缓存指标落 trace，完整 LLM request/response（含 messages）落日志文件，并在 trace 中记录指针
 - 前端：
-  - Settings/Trace：展示缓存开关与命中指标（最小可用）
+  - Settings/Trace：展示缓存开关与命中指标（最小必要展示）
 - 文档：
   - 补充“缓存友好 Prompt 写法”最佳实践，避免后续能力破坏缓存
 
@@ -90,9 +91,6 @@
   - 长会话压缩后的后续轮次仍可获得明显缓存收益
 - 引入 skills/plan/subagent 等动态注入能力时，不出现“缓存命中率断崖式下降”的回归。
 
-## 开放问题 (Open Questions)
-1. 目标优先级：你最关心的是 **降低延迟** 还是 **降低成本**（两者可能对应不同的标记策略）？
-2. 主要使用的 provider 是哪些（OpenAI / Claude / OpenRouter / Bedrock / DeepSeek…）？`prompt_cache_key` 在这些 provider 上的真实支持矩阵需要以实际验证为准。
-3. 是否接受在会话压缩发生后引入“cache epoch”（导致 prompt_cache_key 变化），以提升安全性与可预测性？
-4. 对缓存指标的持久化：是只做 trace（短期）还是需要入库并可统计（长期）？
-
+## 默认约定 (Defaults)
+1. `cache epoch`：默认启用，用于在会话压缩/模型切换/工具协议切换等“稳定前缀结构变化”事件发生后更新 cache key，提升可预测性并避免不可解释的 miss。
+2. 日志落盘：LLM payload 默认采用“按调用单文件 JSON”（位于 `ONEAGENT_HOME/.oneagent/logs/llm/YYYY-MM-DD/<session_id>/<llm_call_id>.json`），trace 记录指标摘要与日志指针；日志默认保留 30 天（可配置），启动时 best-effort 清理超期目录。

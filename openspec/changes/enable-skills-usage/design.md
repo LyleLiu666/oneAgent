@@ -39,7 +39,7 @@
 - `internal/skill` 负责发现三处来源的 `SKILL.md` 并解析元数据（name/description/tags/path/source）。
 - `internal/skillrecall` 负责对 query 做召回与排序：
   - **优先使用 `rg`**（ripgrep）对候选 `SKILL.md` 做内容匹配计分（可跟随 symlink；并发/超时可控）。
-  - 若 `rg` 不可用，可降级为 `grep -R` 或 Go 递归扫描（MVP 可先只做 `rg` + 明确提示）。
+  - 若 `rg` 不可用，降级为 `grep -R`（或等价实现）以保持基本可用，并在 `doctor` 中提示安装 `rg`。
   - 排序必须稳定（score 相同用 `skill_id` 或 `path` 做 tie-break），避免 prompt 抖动。
 
 > 评估：`go-memdb` 更适合结构化查询与内存索引，但对“全文召回”帮助有限（仍需自己实现倒排/分词/权重），复杂度与收益不匹配；`rg` 在 macOS/Linux 下性能极佳且实现成本最低，因此本阶段选择 `rg` 方案。
@@ -53,7 +53,7 @@
 - **CLI**：`oneagent skills search --query "..."`
 - **库接口**：供 `ChatHandler` 直接调用（避免频繁 fork 进程）
 
-召回策略（MVP，Top-8 固定）：
+召回策略（Top-8 固定）：
 - 对 name/description/tags 做基础匹配计分
 - 使用 `rg` 对 `SKILL.md` 内容做补充计分（可选，但建议）
 - 返回 Top-8 + score（稳定排序）
@@ -95,6 +95,6 @@
 - **grep vs 自建索引**：`rg` 方案实现成本低、性能高、无需引入持久化索引；代价是每次召回需要跑一次搜索（可通过缓存与 Top-K 限制控制）。
 - **目录兼容性**：`.claude` / `.codex` 的真实组织结构可能存在差异；扫描需支持 symlink 且避免循环。
 
-## 开放问题 (Open Questions)
-1. 召回 query 的构成：仅用“用户最后一句”，还是包含系统提示词/会话摘要/最近 N 轮？
-2. 语义指定技能名的解析策略：只支持“直接提到技能名称”，还是要支持别名/中文名映射与模糊匹配？
+## 默认约定 (Defaults)
+1. 召回 query：默认使用“用户最后一句 + 会话摘要（若存在）”，以提升召回相关性且保持可复现。
+2. 显式技能名解析：默认按“规范化 skill name”的 case-insensitive 精确匹配（将空格/`_`/`-` 归一化），命中多个时取最长匹配；不做别名库与复杂模糊匹配（后续再扩展）。

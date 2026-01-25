@@ -27,6 +27,19 @@
 - OpenRouter/Bedrock：在 message 上注入 `cache_control` / `cachePoint`。
 - Anthropic：在 text content block 上注入 `cache_control`，并设置 `anthropic-beta` header。
 
+### 2.2.1 支持的厂商（能力矩阵）
+缓存能力在不同厂商/协议上差异明显。系统需要一个显式的 capability matrix，并确保“所有已集成 provider”均有明确策略（不会出现某些 provider 开了缓存反而把请求打挂/静默失效）。
+
+参考业界常见做法（“两头锁定 + session key”），各厂商建议策略如下：
+
+| 厂商 | 协议/参数 | 实现方式 |
+| :--- | :--- | :--- |
+| **Anthropic** | `anthropic-beta: prompt-caching` | 注入 `cache_control: {type: "ephemeral"}`（覆盖 text/tool_use/tool_result） |
+| **OpenRouter** | 扩展头部/字段 | 注入 `cache_control: {type: "ephemeral"}` |
+| **AWS Bedrock** | Nova/Anthropic on Bedrock | 注入 `cachePoint: {type: "ephemeral"}` |
+| **OpenAI** | 官方/兼容实现 | 绑定 `prompt_cache_key`（默认使用 `session_id`，并结合 epoch/signature） |
+| **DeepSeek** | 自动前缀识别 | 客户端无需显式标记，但必须保持 stable prefix 结构稳定才能获益 |
+
 ### 2.3 关键正向点（已经做得比较好）
 - **会话内稳定 key**：使用 `session_id` 作为 cache key（对支持 `prompt_cache_key` 的 provider），可在多轮间复用。
 - **工具定义稳定**：tool registry/mount 与 tool spec 输出均为稳定排序，减少“仅顺序变化导致 cache miss”的抖动。
@@ -73,10 +86,10 @@
 - 不在 stable prefix 上“原地编辑/拼接”动态内容。
 
 ### 4.2 Cache Selector：从“固定规则”升级为“策略”
-默认策略（兼容现状）可以是：
-- cache stable system prompt
-- cache stable summary（若存在）
-- cache tail N messages（用于下一轮）
+默认策略（兼容现状）采用“两头锁定”：
+- cache stable system prompt（前两条 system）
+- cache stable summary（若存在，且需要显式标记型 provider 必须覆盖）
+- cache tail N messages（默认 N=2，用于下一轮复用）
 
 对不同 provider：
 - `prompt_cache_key` 型：继续用 key + prefix 复用为主
@@ -100,11 +113,10 @@
 
 落点：
 - trace（开发期）
-- DB（可选，用于长期统计）
+- log（完整 LLM request/response 含 messages；替代原先入库方式）
 - UI 展示（用户可确认）
 
 ## 5. 与现有 change 的交互建议
 - `enable-skills-usage`：避免把“推荐技能摘要（动态）”拼进第一条 system message；改为 TurnContext 段（不污染 stable prefix）。
 - `enable-plan-observer-validation`：observer 结果/计划状态属于动态，应放在 TurnContext 段。
 - `enable-subagent-orchestration`：handoff/findings 引用本质是稳定化策略，建议与 Prompt Builder 复用同一套“稳定段/动态段”规范。
-

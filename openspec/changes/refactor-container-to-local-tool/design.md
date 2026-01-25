@@ -52,8 +52,15 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
       config.yaml
       auth_token            # 本地访问令牌（opaque string）
     settings.db             # SQLite：仅用于 Settings（API keys 等）
-    data/                   # 文件存储：会话/消息/索引等（具体格式后续定）
-    logs/                   # 日志（含 subagent trace）
+    data/                   # 文件存储：会话/消息等（按 session_id 分目录/分文件）
+      sessions/
+        <session_id>/
+          session.json
+          messages.jsonl
+    logs/                   # 日志：trace/llm/subagent 等（按日期 + session_id 分层）
+      trace/YYYY-MM-DD/<session_id>/trace.jsonl
+      llm/YYYY-MM-DD/<session_id>/<call_id>.json
+      subagent/YYYY-MM-DD/<session_id>/<run_id>/...
     tmp/                    # 临时文件（可清理）
     skills/                 # 项目私有 skills（若使用）
     PLAN.md                 # 计划文件（若启用 plan 模块）
@@ -70,7 +77,7 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 - 默认仅允许修改 workspace 内文件；workspace 外允许读取任意绝对路径，但原则上避免写入
 - 文件类工具/搜索类工具/命令执行工具应默认对齐到 workspace（并支持按子目录进一步收敛为 scope，以支持未来并发 subagent）
 
-> 已知限制（MVP）：`bash/run_command` 可能绕过文件工具层的 home/scope 校验；本阶段仅在提示词中约束“禁止使用 bash 修改文件”，暂不做强制拦截。
+> 已知限制：`bash/run_command` 在宿主机上运行，无法完全复用文件工具层的 home/scope 强制校验。出于灵活性与实现成本考虑（也无法彻底防止通过脚本/编辑器修改文件），当前不做硬性拦截，仅做强引导：默认 `BASH_ROOT_DIR` 对齐 `ONEAGENT_HOME`（workspace），并在提示词/错误信息中强调“优先用文件工具修改文件；bash 主要用于只读/运行命令”。
 
 ### 3) 配置层级与兼容策略
 现状主要依赖环境变量。工具化后应提供配置文件，同时保留 env 兼容。
@@ -161,7 +168,7 @@ Keycloak/OAuth 相关能力：
 - **支持成本**：本地环境的差异会带来更多问题（依赖缺失、权限、路径、编码、字体等）。
 - **文件存储的演进成本**：一旦文件目录结构/命名被用户依赖，未来迁移会更难；需要尽早确定约定并尽量保持兼容。
 
-## 开放问题 (Open Questions)
-- “工具形应用”的核心交互是否仍以 Web UI 为主？是否需要增加纯 CLI 模式（例如 `oneagent chat`）？
-- 反向代理支持：是否需要 `TRUST_PROXY`/`BASE_URL`/`X-Forwarded-*` 处理来改善反代下的 URL 与日志体验？
-- SQLite 数据库中落盘的 API Key 是否需要加密（例如 password 派生密钥），还是仅依赖本机文件权限即可？
+## 默认约定 (Defaults)
+- 核心交互以 Web UI 为主；本变更不引入纯 CLI 聊天模式（如 `oneagent chat`）。
+- 反向代理支持以“显式信任”为原则：默认不信任 `X-Forwarded-*`，通过配置（如 `TRUST_PROXY`/allowlist）显式开启后再使用相关头部改善 URL/日志体验。
+- Settings SQLite 中落盘的 API Key 不做加密；依赖本机文件权限，并确保 API 永不返回明文 token（仅返回 `has_*`）。

@@ -16,7 +16,13 @@
 2) `~/.claude/skills`
 3) `~/.codex/skills`
 
-技能召回工具应该 (SHOULD) 优先使用 `rg`（ripgrep）对 `SKILL.md` 内容进行匹配计分；在 `rg` 不可用时可以降级（例如 `grep -R` 或 Go 递归扫描），但不得依赖外部网络。
+技能召回工具应该 (SHOULD) 优先使用 `rg`（ripgrep）对 `SKILL.md` 内容进行匹配计分；在 `rg` 不可用时系统必须 (MUST) 降级为 `grep -R`（或等价实现）以保持基本可用，并通过 `doctor` 明确提示安装 `rg`；整个流程不得依赖外部网络。
+
+#### Scenario: rg 缺失时降级为 grep
+- **GIVEN** 运行环境未安装 `rg`
+- **WHEN** 执行技能召回（基于本地文件）
+- **THEN** 工具仍可返回技能候选列表（允许性能下降）
+- **THEN** 系统能提供可操作的提示（例如提示安装 `rg`）
 
 #### Scenario: ~/.claude skills 为 symlink 目录
 - **GIVEN** `~/.claude/skills/code-review-excellence` 是一个 symlink，指向某个真实目录且该目录内包含 `SKILL.md`

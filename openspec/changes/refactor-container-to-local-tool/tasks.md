@@ -19,11 +19,13 @@
 - [ ] 明确定义 workspace：新建会话时可选择/复用 workspace；不启用 workspace 时默认只对话不改文件 <!-- id: 26 -->
 - [ ] 将文件类工具的默认可写范围对齐到 workspace（workspace 外允许读取任意绝对路径，但默认不允许写/改/删；越界写/改/删返回清晰错误） <!-- id: 27 -->
 - [ ] 重新定义 `BASH_ROOT_DIR`：默认对齐到当前会话的 workspace（并保留 env/flag 覆盖能力） <!-- id: 28 -->
+- [ ] 提供统一的“path 规范化 + scope(glob) 匹配”实现，并复用到文件工具/plan/subagent（含 symlink 与 `..` 越界处理与一致错误信息） <!-- id: 29 -->
 
 ## 4. 存储层（Settings SQLite + 文件存储；不支持 Postgres）
 - [ ] 定义 Settings 的最小 schema（仅覆盖 Settings 需要的数据），并实现迁移机制 <!-- id: 9 -->
 - [ ] Settings 默认落 SQLite：`ONEAGENT_HOME/.oneagent/settings.db`（自动创建/迁移） <!-- id: 10 -->
-- [ ] 会话/消息/trace 等其它状态使用文件存储：`ONEAGENT_HOME/.oneagent/data/` 与 `ONEAGENT_HOME/.oneagent/logs/` <!-- id: 11 -->
+- [ ] 会话/消息/trace/LLM 调用 payload 等其它状态使用文件存储：按 `session_id` 分目录/分文件，落 `ONEAGENT_HOME/.oneagent/data/` 与 `ONEAGENT_HOME/.oneagent/logs/`；LLM 完整 request/response（含 messages）写入 log 文件，trace 仅保存摘要与指针 <!-- id: 11 -->
+- [ ] 日志按日期目录分层并支持 retention 清理：默认保留 30 天（可配置），启动时 best-effort 清理超期目录；`doctor` 输出日志目录与保留策略 <!-- id: 30 -->
 - [ ] 增加最小集成测试：Settings SQLite 读写 + 文件存储 round-trip + health/doctor 可诊断 <!-- id: 12 -->
 
 ## 5. 认证模式（本地访问令牌；无登录体系）
@@ -43,6 +45,6 @@
 
 ## 8. 端到端验证（TDD）
 - [ ] E2E：在无 Docker 情况下从零启动（local profile），使用本地访问令牌完成一次登录并完成一次对话 <!-- id: 22 -->
-- [ ] E2E：缺失可选依赖（如 rg）时，doctor 与工具调用表现符合预期（降级/提示） <!-- id: 23 -->
+- [ ] E2E：缺失可选依赖（如 rg）时，doctor 与工具调用表现符合预期（提示安装，并允许降级为 `grep -R`） <!-- id: 23 -->
 - [ ] E2E：在局域网内通过其它设备访问 UI（默认 LAN 监听），登录页包含“仅建议局域网/公网风险大”提示（不依赖 IP 阻断） <!-- id: 24 -->
 - [ ] E2E：Settings 页面可配置 LLM Provider API Key 与搜索 API Key，重启后仍生效，且接口不会泄露明文 token <!-- id: 25 -->
