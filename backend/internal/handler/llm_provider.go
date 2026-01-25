@@ -1,18 +1,17 @@
 package handler
 
 import (
+	"database/sql"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
-	"github.com/liu_y/oneAgent/backend/internal/database"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
-	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 )
 
 var supportedProviderTypes = map[string]bool{
@@ -87,38 +86,43 @@ type updateModelRequest struct {
 	EnableKVCache *bool   `json:"enable_kv_cache"`
 }
 
-// ListProviders returns providers (optionally with models) for the current user.
 func ListProviders(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-	if db == nil {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
 		c.JSON(http.StatusOK, []providerResponse{})
 		return
 	}
 
-	var providers []model.LLMProvider
-	if err := db.Where("user_id = ?", userID).
-		Preload("Models").
-		Order("updated_at DESC").
-		Find(&providers).Error; err != nil {
+	ctx := c.Request.Context()
+	providers, err := rt.Settings.ListProviders(ctx, userID)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load providers"})
 		return
 	}
 
-	resp := make([]providerResponse, 0, len(providers))
-	for _, provider := range providers {
-		resp = append(resp, toProviderResponse(provider))
+	models, err := rt.Settings.ListModels(ctx, userID, "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load models"})
+		return
+	}
+	modelsByProvider := make(map[string][]settingsdb.Model)
+	for _, m := range models {
+		modelsByProvider[m.ProviderID] = append(modelsByProvider[m.ProviderID], m)
 	}
 
+	resp := make([]providerResponse, 0, len(providers))
+	for _, provider := range providers {
+		resp = append(resp, toProviderResponse(provider, modelsByProvider[provider.ID]))
+	}
 	c.JSON(http.StatusOK, resp)
 }
 
-// CreateProvider stores a new provider configuration.
 func CreateProvider(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-	if db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
 		return
 	}
 
@@ -137,36 +141,28 @@ func CreateProvider(c *gin.Context) {
 	baseURL := strings.TrimSpace(req.BaseURL)
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	provider := model.LLMProvider{
+	provider, err := rt.Settings.CreateProvider(c.Request.Context(), settingsdb.Provider{
 		ID:           uuid.New().String(),
 		UserID:       userID,
 		Name:         strings.TrimSpace(req.Name),
 		ProviderType: providerType,
 		BaseURL:      baseURL,
 		APIKey:       strings.TrimSpace(req.APIKey),
-	}
-
-	if err := db.Create(&provider).Error; err != nil {
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create provider"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, toProviderResponse(provider))
+	c.JSON(http.StatusCreated, toProviderResponse(provider, nil))
 }
 
-// UpdateProvider updates an existing provider configuration.
 func UpdateProvider(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	providerID := c.Param("id")
-	db := database.GetDB()
-	if db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
-		return
-	}
-
-	var provider model.LLMProvider
-	if err := db.Where("id = ? AND user_id = ?", providerID, userID).First(&provider).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Provider not found"})
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
 		return
 	}
 
@@ -197,74 +193,84 @@ func UpdateProvider(c *gin.Context) {
 		updates["api_key"] = strings.TrimSpace(*req.APIKey)
 	}
 
-	if len(updates) == 0 {
-		c.JSON(http.StatusOK, toProviderResponse(provider))
-		return
-	}
-
-	if err := db.Model(&provider).Updates(updates).Error; err != nil {
+	provider, err := rt.Settings.UpdateProvider(c.Request.Context(), userID, providerID, updates)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Provider not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update provider"})
 		return
 	}
 
-	db.Preload("Models").First(&provider, "id = ?", providerID)
-	c.JSON(http.StatusOK, toProviderResponse(provider))
+	models, _ := rt.Settings.ListModels(c.Request.Context(), userID, provider.ID)
+	c.JSON(http.StatusOK, toProviderResponse(provider, models))
 }
 
-// DeleteProvider removes a provider and its models.
 func DeleteProvider(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	providerID := c.Param("id")
-	db := database.GetDB()
-	if db == nil {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
 		c.Status(http.StatusNoContent)
 		return
 	}
 
-	result := db.Where("id = ? AND user_id = ?", providerID, userID).Delete(&model.LLMProvider{})
-	if result.RowsAffected == 0 {
+	deleted, err := rt.Settings.DeleteProvider(c.Request.Context(), userID, providerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete provider"})
+		return
+	}
+	if !deleted {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Provider not found"})
 		return
 	}
-
 	c.Status(http.StatusNoContent)
 }
 
-// ListModels returns models for the current user.
 func ListModels(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	providerID := strings.TrimSpace(c.Query("provider_id"))
-	db := database.GetDB()
-	if db == nil {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
 		c.JSON(http.StatusOK, []modelResponse{})
 		return
 	}
 
-	query := db.Where("user_id = ?", userID)
-	if providerID != "" {
-		query = query.Where("provider_id = ?", providerID)
-	}
-
-	var models []model.LLMModel
-	if err := query.Preload("Provider").Order("updated_at DESC").Find(&models).Error; err != nil {
+	models, err := rt.Settings.ListModels(c.Request.Context(), userID, providerID)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load models"})
 		return
 	}
 
+	providers, _ := rt.Settings.ListProviders(c.Request.Context(), userID)
+	providerByID := make(map[string]settingsdb.Provider, len(providers))
+	for _, p := range providers {
+		providerByID[p.ID] = p
+	}
+
 	resp := make([]modelResponse, 0, len(models))
 	for _, m := range models {
-		resp = append(resp, toModelResponse(m))
+		var provider *providerSlim
+		if p, ok := providerByID[m.ProviderID]; ok {
+			provider = &providerSlim{
+				ID:           p.ID,
+				Name:         p.Name,
+				ProviderType: p.ProviderType,
+				BaseURL:      p.BaseURL,
+			}
+		}
+		resp = append(resp, toModelResponse(m, provider))
 	}
 
 	c.JSON(http.StatusOK, resp)
 }
 
-// CreateModel adds a model under a provider.
 func CreateModel(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-	if db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
 		return
 	}
 
@@ -274,8 +280,7 @@ func CreateModel(c *gin.Context) {
 		return
 	}
 
-	var provider model.LLMProvider
-	if err := db.Where("id = ? AND user_id = ?", req.ProviderID, userID).First(&provider).Error; err != nil {
+	if _, err := rt.Settings.GetProvider(c.Request.Context(), userID, req.ProviderID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Provider not found"})
 		return
 	}
@@ -285,7 +290,7 @@ func CreateModel(c *gin.Context) {
 		enableKV = *req.EnableKVCache
 	}
 
-	llmModel := model.LLMModel{
+	llmModel, err := rt.Settings.CreateModel(c.Request.Context(), settingsdb.Model{
 		ID:            uuid.New().String(),
 		ProviderID:    req.ProviderID,
 		UserID:        userID,
@@ -293,34 +298,22 @@ func CreateModel(c *gin.Context) {
 		Model:         strings.TrimSpace(req.Model),
 		IsDefault:     req.IsDefault,
 		EnableKVCache: enableKV,
-	}
-
-	if err := db.Create(&llmModel).Error; err != nil {
+		Options:       map[string]any{},
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create model"})
 		return
 	}
 
-	if llmModel.IsDefault {
-		clearOtherDefaults(db, userID, llmModel.ProviderID, llmModel.ID)
-	}
-
-	db.Preload("Provider").First(&llmModel, "id = ?", llmModel.ID)
-	c.JSON(http.StatusCreated, toModelResponse(llmModel))
+	c.JSON(http.StatusCreated, toModelResponse(llmModel, nil))
 }
 
-// UpdateModel updates an existing model.
 func UpdateModel(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	modelID := c.Param("id")
-	db := database.GetDB()
-	if db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
-		return
-	}
-
-	var llmModel model.LLMModel
-	if err := db.Where("id = ? AND user_id = ?", modelID, userID).First(&llmModel).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Model not found"})
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
 		return
 	}
 
@@ -344,73 +337,63 @@ func UpdateModel(c *gin.Context) {
 		updates["enable_kv_cache"] = *req.EnableKVCache
 	}
 
-	if len(updates) == 0 {
-		db.Preload("Provider").First(&llmModel, "id = ?", llmModel.ID)
-		c.JSON(http.StatusOK, toModelResponse(llmModel))
-		return
-	}
-
-	if err := db.Model(&llmModel).Updates(updates).Error; err != nil {
+	updated, err := rt.Settings.UpdateModel(c.Request.Context(), userID, modelID, updates)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Model not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update model"})
 		return
 	}
 
-	if req.IsDefault != nil && *req.IsDefault {
-		clearOtherDefaults(db, userID, llmModel.ProviderID, llmModel.ID)
-	}
-
-	db.Preload("Provider").First(&llmModel, "id = ?", llmModel.ID)
-	c.JSON(http.StatusOK, toModelResponse(llmModel))
+	c.JSON(http.StatusOK, toModelResponse(updated, nil))
 }
 
-// DeleteModel removes a model.
 func DeleteModel(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	modelID := c.Param("id")
-	db := database.GetDB()
-	if db == nil {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
 		c.Status(http.StatusNoContent)
 		return
 	}
 
-	result := db.Where("id = ? AND user_id = ?", modelID, userID).Delete(&model.LLMModel{})
-	if result.RowsAffected == 0 {
+	deleted, err := rt.Settings.DeleteModel(c.Request.Context(), userID, modelID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete model"})
+		return
+	}
+	if !deleted {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Model not found"})
 		return
 	}
-
 	c.Status(http.StatusNoContent)
 }
 
-func clearOtherDefaults(db *gorm.DB, userID, providerID, modelID string) {
-	db.Model(&model.LLMModel{}).
-		Where("user_id = ? AND provider_id = ? AND id <> ?", userID, providerID, modelID).
-		Update("is_default", false)
-}
-
-func toProviderResponse(provider model.LLMProvider) providerResponse {
+func toProviderResponse(provider settingsdb.Provider, models []settingsdb.Model) providerResponse {
 	resp := providerResponse{
 		ID:           provider.ID,
 		Name:         provider.Name,
 		ProviderType: provider.ProviderType,
 		BaseURL:      provider.BaseURL,
-		HasAPIKey:    provider.APIKey != "",
+		HasAPIKey:    strings.TrimSpace(provider.APIKey) != "",
 		CreatedAt:    provider.CreatedAt,
 		UpdatedAt:    provider.UpdatedAt,
 	}
 
-	if len(provider.Models) > 0 {
-		resp.Models = make([]modelResponse, 0, len(provider.Models))
-		for _, m := range provider.Models {
-			resp.Models = append(resp.Models, toModelResponse(m))
+	if len(models) > 0 {
+		resp.Models = make([]modelResponse, 0, len(models))
+		for _, m := range models {
+			resp.Models = append(resp.Models, toModelResponse(m, nil))
 		}
 	}
 
 	return resp
 }
 
-func toModelResponse(m model.LLMModel) modelResponse {
-	resp := modelResponse{
+func toModelResponse(m settingsdb.Model, provider *providerSlim) modelResponse {
+	return modelResponse{
 		ID:            m.ID,
 		ProviderID:    m.ProviderID,
 		Name:          m.Name,
@@ -419,14 +402,6 @@ func toModelResponse(m model.LLMModel) modelResponse {
 		EnableKVCache: m.EnableKVCache,
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
+		Provider:      provider,
 	}
-	if m.Provider.ID != "" {
-		resp.Provider = &providerSlim{
-			ID:           m.Provider.ID,
-			Name:         m.Provider.Name,
-			ProviderType: m.Provider.ProviderType,
-			BaseURL:      m.Provider.BaseURL,
-		}
-	}
-	return resp
 }

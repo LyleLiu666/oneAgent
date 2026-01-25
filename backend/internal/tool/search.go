@@ -7,9 +7,8 @@ import (
 	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/bocha"
-	"github.com/liu_y/oneAgent/backend/internal/database"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
-	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 )
 
 type searchArgs struct {
@@ -69,12 +68,12 @@ func searchHandler(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 
 	// Get API key from database settings
-	db := database.GetDB()
+	db := SettingsDBFromContext(ctx)
 	if db == nil {
-		return nil, fmt.Errorf("数据库不可用")
+		return nil, fmt.Errorf("settings db 不可用")
 	}
 
-	apiKey, err := model.GetUserSetting(db, userID, model.SettingKeyBochaAPIKey)
+	apiKey, err := db.GetUserSetting(ctx, userID, settingsdb.SettingKeyBochaAPIKey)
 	if err != nil || apiKey == "" {
 		return nil, fmt.Errorf("未配置 Bocha API Key，请在 Settings 中设置")
 	}

@@ -659,7 +659,7 @@ onMounted(async () => {
 
       <!-- Footer note -->
       <p class="mt-8 text-center text-sm text-surface-500">
-        Some settings are managed through your Keycloak account
+        This instance is protected by a local access token (AUTH_MODE=token). Keep it safe.
       </p>
     </div>
   </div>

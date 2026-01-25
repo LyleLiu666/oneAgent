@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
 
@@ -57,6 +59,14 @@ func TestRunToolLoop_SelfHeal_UnknownTool(t *testing.T) {
 	sm := NewStreamManager()
 	broadcaster := sm.GetOrCreate("session-1")
 
+	store, err := sessionstore.New(filepath.Join(t.TempDir(), "sessions"))
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	if _, err := store.GetOrCreateSession("session-1", "user-1", ChatModule, "title"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
 	combined, _, err := runToolLoop(
 		context.Background(),
 		client,
@@ -69,6 +79,7 @@ func TestRunToolLoop_SelfHeal_UnknownTool(t *testing.T) {
 		nil,
 		"model-1",
 		false,
+		store,
 	)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)

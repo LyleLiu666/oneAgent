@@ -27,6 +27,10 @@ backend/vendor/
 backend/go.work
 go.work.sum
 
+# Embedded frontend assets (generated)
+backend/internal/web/static/*
+!backend/internal/web/static/.gitkeep
+
 # Node / Frontend
 node_modules/
 frontend/node_modules/

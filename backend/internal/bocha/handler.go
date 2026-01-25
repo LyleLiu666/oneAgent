@@ -5,9 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/liu_y/oneAgent/backend/internal/database"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
-	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 )
 
 // searchHandlerRequest represents the request body for Bocha search.
@@ -34,8 +33,13 @@ func SearchHandler(c *gin.Context) {
 	}
 
 	// Get user's Bocha API key
-	db := database.GetDB()
-	apiKey, err := model.GetUserSetting(db, userID, model.SettingKeyBochaAPIKey)
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
+		return
+	}
+
+	apiKey, err := rt.Settings.GetUserSetting(c.Request.Context(), userID, settingsdb.SettingKeyBochaAPIKey)
 	if err != nil || apiKey == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Bocha API key not configured. Please set it in Settings."})
 		return

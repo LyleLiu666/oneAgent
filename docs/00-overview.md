@@ -1,10 +1,15 @@
 # oneAgent 项目技术概览
 
-> 一个现代化的 AI 对话应用，基于 Go + Vue 3 构建，支持多 LLM 提供商、工具调用和实时流式响应。
+> 一个“本地工具形应用”(local tool) 的 AI 对话应用：Go 后端内嵌 Vue 3 前端，支持多 LLM 提供商、工具调用与 SSE 流式响应。
 
----
+## 默认运行画像（local tool）
 
-## 系统架构
+- 统一入口：`oneagent` CLI（`serve`/`doctor`）
+- 默认认证：本地访问令牌 `AUTH_MODE=token`（不依赖 Keycloak/OAuth）
+- 默认存储：Settings SQLite + 其它状态文件存储（会话/日志）
+- 默认约定：面向局域网（LAN）使用；不依赖 “按 IP 阻断公网访问”
+
+## 系统架构（local tool）
 
 ```mermaid
 graph TB
@@ -21,44 +26,52 @@ graph TB
         ToolXML[ToolXML Parser]
         SBE[Smart Edit Matcher]
         Bocha[Web Search]
+        Auth[Token Auth Middleware]
     end
 
-    subgraph External["External Services"]
-        OpenAI[OpenAI API]
-        Anthropic[Anthropic API]
-        Keycloak[Keycloak Auth]
-        PG[(PostgreSQL)]
+    subgraph LocalStorage["Local Storage (ONEAGENT_HOME)"]
+        Settings[(SQLite settings.db)]
+        Sessions[[data/sessions/**]]
+        Logs[[logs/**]]
+    end
+
+    subgraph External["External LLM Providers"]
+        OpenAI[OpenAI-compatible]
+        Anthropic[Anthropic]
+        Other[Others...]
     end
 
     UI --> API_Client
-    API_Client -->|SSE Stream| Handler
+    API_Client -->|SSE Stream| Auth
+    Auth --> Handler
     Handler --> LLM
     LLM --> OpenAI
     LLM --> Anthropic
+    LLM --> Other
     Handler --> Tool
     Tool --> SBE
     Tool --> Bocha
     Handler --> ToolXML
-    Handler --> PG
-    API_Client -->|OAuth| Keycloak
-```
 
----
+    Backend --> Settings
+    Backend --> Sessions
+    Backend --> Logs
+```
 
 ## 技术栈
 
 | 层级 | 技术 | 用途 |
 |------|------|------|
-| **Frontend** | Vue 3 + TypeScript | SPA 框架 |
+| **Frontend** | Vue 3 + TypeScript | SPA |
 | | Tailwind CSS | 样式系统 |
 | | Pinia | 状态管理 |
 | | Vue Query | 异步数据管理 |
-| **Backend** | Go 1.22+ | 服务端语言 |
+| **Backend** | Go | 服务端语言 |
 | | Gin | HTTP 框架 |
-| | GORM | ORM |
-| **Database** | PostgreSQL 16 | 持久化存储 |
-| **Auth** | Keycloak | OIDC 认证 |
-| **部署** | Docker Compose | 容器编排 |
+| **Storage** | SQLite | Settings（API keys 等敏感配置） |
+| | File Storage | 会话/消息/日志 |
+| **Auth** | Local Token | `Authorization: Bearer <token>` |
+| **交付** | 单可执行文件 | `oneagent serve` |
 
 ---
 
@@ -95,11 +108,11 @@ sequenceDiagram
     participant FE as Frontend
     participant BE as Backend
     participant LLM as LLM Provider
-    participant DB as PostgreSQL
+    participant FS as File/SQLite
 
     U->>FE: 发送消息
     FE->>BE: POST /api/chat (SSE)
-    BE->>DB: 加载会话历史
+    BE->>FS: 加载会话历史（文件）
     BE->>LLM: 流式请求
     
     loop 每个 token
@@ -115,7 +128,7 @@ sequenceDiagram
         LLM-->>BE: 继续响应
     end
     
-    BE->>DB: 保存消息
+    BE->>FS: 保存消息（文件）
     BE-->>FE: 完成事件
 ```
 
@@ -135,8 +148,8 @@ sequenceDiagram
 | `GET` | `/api/tools` | 获取工具列表 |
 | `GET/PUT` | `/api/bocha/settings` | 搜索设置 |
 | `POST` | `/api/bocha/search` | Web 搜索 |
-| `GET` | `/api/auth/config` | 获取认证配置 |
-| `POST` | `/api/auth/callback` | OAuth 回调 |
+| `GET` | `/api/auth/config` | **废弃**（返回 410） |
+| `POST` | `/api/auth/callback` | **废弃**（返回 410） |
 
 ---
 
@@ -144,23 +157,20 @@ sequenceDiagram
 
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
+| `ONEAGENT_HOME` | Home 目录（agent 可写边界） | `~/.oneagent_default` |
+| `PROFILE` | `local`/`dev` | `local` |
+| `BIND` | 监听地址 | local=`0.0.0.0` |
 | `PORT` | 服务端口 | `8080` |
-| `DATABASE_URL` | PostgreSQL 连接字符串 | - |
-| `KEYCLOAK_URL` | Keycloak 地址 | - |
-| `KEYCLOAK_REALM` | Keycloak Realm | `base-realm` |
-| `KEYCLOAK_CLIENT_ID` | Keycloak Client | `base-app` |
-| `ENABLE_TRACE` | 启用调试输出 | `false` |
+| `AUTH_MODE` | `token`/`none` | `token` |
+| `ENABLE_TRACE` | 启用 trace | `false` |
+| `BASH_ROOT_DIR` | bash/文件工具根目录 | `ONEAGENT_HOME` |
+| `LOG_RETENTION_DAYS` | 日志保留天数 | `30` |
 
 ---
 
 ## 快速开始
 
 ```bash
-# 克隆并启动
-cd oneAgent
-cp .env.example .env
-docker-compose up --build
-
-# 访问应用: http://localhost:8080
-# Keycloak: http://localhost:8180 (admin/admin123)
+make build
+./dist/oneagent serve
 ```

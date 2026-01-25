@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { initKeycloak } from "@/composables/useAuth";
+import { initAuth } from "@/composables/useAuth";
 
 const routes = [
   {
@@ -39,9 +39,8 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const authStore = useAuthStore();
 
-  // Ensure Keycloak callback (code/state) is processed before we decide to redirect.
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    await initKeycloak();
+    await initAuth();
   }
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {

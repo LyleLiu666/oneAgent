@@ -18,12 +18,16 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -31,13 +35,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
-	"github.com/liu_y/oneAgent/backend/internal/config"
-	"github.com/liu_y/oneAgent/backend/internal/database"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/llmlog"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
+	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 	"github.com/liu_y/oneAgent/backend/internal/toolxml"
 )
@@ -137,14 +142,14 @@ type TruncateSessionRequest struct {
 
 // ChatHandler handles chat-related API endpoints.
 type ChatHandler struct {
-	cfg           *config.Config
+	rt            *oneruntime.Runtime
 	streamManager *StreamManager
 }
 
 // NewChatHandler creates a new ChatHandler with LLM client.
-func NewChatHandler(cfg *config.Config) *ChatHandler {
+func NewChatHandler(rt *oneruntime.Runtime) *ChatHandler {
 	return &ChatHandler{
-		cfg:           cfg,
+		rt:            rt,
 		streamManager: NewStreamManager(),
 	}
 }
@@ -167,8 +172,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 
+	if h.rt == nil || h.rt.Sessions == nil || h.rt.Settings == nil || h.rt.LLMLog == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
 
 	// Create or get session
 	sessionID := req.SessionID
@@ -183,26 +192,16 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 
 	// Ensure session exists and get history
-	var session model.ChatSession
-	var dbMessages []model.ChatMessage
-	if db != nil {
-		result := db.Where("id = ?", sessionID).First(&session)
-		if result.Error != nil {
-			// Create new session
-			sessionMetadata := model.JSONB{}
-			session = model.ChatSession{
-				ID:       sessionID,
-				UserID:   userID,
-				Title:    truncateString(req.Message, 100),
-				Module:   ChatModule,
-				Metadata: sessionMetadata,
-			}
-			db.Create(&session)
-		}
+	title := truncateString(req.Message, 100)
+	if _, err := h.rt.Sessions.GetOrCreateSession(sessionID, userID, ChatModule, title); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session"})
+		return
+	}
 
-		// Load message history for context
-		// EXTENSION: Add sliding window or summarization for long conversations
-		db.Where("session_id = ?", sessionID).Order("created_at ASC, id ASC").Find(&dbMessages)
+	session, persistedMessages, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
 	}
 
 	selectedModelID := strings.TrimSpace(req.ModelID)
@@ -240,10 +239,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 
 	// Build conversation history (include persisted tool calls/results for KV cache and correctness).
-	messages := make([]llm.ChatMessage, 0, 1+len(dbMessages)+1)
+	messages := make([]llm.ChatMessage, 0, 1+len(persistedMessages)+1)
 	messages = append(messages, llm.BuildSystemMessage(systemPrompt))
-	if len(dbMessages) > 0 {
-		messages = append(messages, buildLLMHistoryFromDB(dbMessages, toolProtocol)...)
+	if len(persistedMessages) > 0 {
+		messages = append(messages, buildLLMHistoryFromMessages(persistedMessages, toolProtocol)...)
 	}
 
 	// Add current user message
@@ -260,13 +259,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		messages[0].Content = strings.TrimSpace(messages[0].Content) + "\n\n" + toolxml.SystemPrompt(toolDefs)
 	}
 
-	resolvedModel, err := h.resolveModel(db, userID, selectedModelID)
+	resolvedModel, err := h.resolveModel(c.Request.Context(), userID, selectedModelID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if db != nil && resolvedModel.ModelID != "" {
+	if resolvedModel.ModelID != "" {
 		metadata := session.Metadata
 		if metadata == nil {
 			metadata = model.JSONB{}
@@ -291,7 +290,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		}
 
 		if shouldUpdate {
-			db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("metadata", metadata)
+			_ = h.rt.Sessions.UpdateSessionMetadata(sessionID, metadata)
 		}
 	}
 
@@ -346,7 +345,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					})
 				}
 
-				compressed, compressedMessages, err := compressSessionIfNeeded(ctx, db, sessionID, dbMessages, messages, resolvedModel.Client)
+				compressed, compressedMessages, err := compressSessionIfNeeded(ctx, h.rt.Sessions, sessionID, persistedMessages, messages, resolvedModel.Client)
 				if err != nil {
 					broadcaster.Broadcast(StreamEvent{
 						Type: "trace",
@@ -355,7 +354,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 					// Fallback: keep the last two rounds and continue without DB mutation.
 					if before > sessionCompressionMaxContextRunes {
-						_, toKeep := splitForCompression(dbMessages, sessionCompressionKeepTextMsgs)
+						_, toKeep := splitForCompression(persistedMessages, sessionCompressionKeepTextMsgs)
 						placeholder := fmt.Sprintf("【会话压缩】摘要生成失败（%v），已仅保留最近两轮对话。", err)
 
 						fallback := make([]llm.ChatMessage, 0, 2+len(toKeep)+1)
@@ -381,15 +380,17 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			}
 
-			if db != nil {
-				// Save user message only after compression succeeds (or is skipped).
-				userMsg := model.ChatMessage{
-					SessionID: sessionID,
-					Role:      model.MessageRoleUser,
-					Type:      model.MessageTypeText,
-					Content:   req.Message,
-				}
-				db.Create(&userMsg)
+			// Save user message only after compression succeeds (or is skipped).
+			if _, err := h.rt.Sessions.AppendMessage(sessionID, model.ChatMessage{
+				Role:    model.MessageRoleUser,
+				Type:    model.MessageTypeText,
+				Content: req.Message,
+			}); err != nil {
+				broadcaster.Broadcast(StreamEvent{
+					Type: "error",
+					Data: fmt.Sprintf("Failed to persist user message: %v", err),
+				})
+				return
 			}
 
 			// Start trace collection
@@ -459,9 +460,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			// Trace internal steps (fake ones purely for UI experience if config enabled)
-			if h.cfg.EnableTrace {
+			if h.rt.Config.EnableTrace {
 				traceEntry := model.NewTraceEntry(model.TraceTypeLLMCall, "ChatCompletion")
-				traceEntry.Input = messages
+				traceEntry.Input = map[string]any{
+					"message_count": len(messages),
+					"tool_protocol": toolProtocol,
+					"tool_ids":      selectedToolIDs,
+				}
 				traceEntry.Model = resolvedModel.ModelName
 				traceEntries = append(traceEntries, traceEntry)
 
@@ -475,6 +480,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			// Call LLM with streaming
 			var fullContent string
 			ctx := context.Background() // Use background context so generation survives request cancellation
+			ctx = tool.ContextWithUserID(ctx, userID)
+			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 
 			opts := &llm.ChatCompletionOptions{
 				Trace: traceCallback,
@@ -489,23 +496,19 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				opts.Tools = tool.ToolsForLLM(toolDefs)
 			}
 
-			var llmCallID uint
-			if db != nil {
-				messagesJSON, err := json.Marshal(messages)
-				if err == nil {
-					call := model.LLMCall{
-						SessionID:  sessionID,
-						UserID:     userID,
-						ProviderID: resolvedModel.ProviderID,
-						ModelID:    resolvedModel.ModelID,
-						ModelName:  resolvedModel.ModelName,
-						Messages:   string(messagesJSON),
-						CreatedAt:  time.Now(),
-					}
-					if err := db.Create(&call).Error; err == nil {
-						llmCallID = call.ID
-					}
-				}
+			llmCallID := uuid.NewString()
+			callRecord := llmlog.CallRecord{
+				ID:                 llmCallID,
+				SessionID:          sessionID,
+				UserID:             userID,
+				Model:              resolvedModel.ModelName,
+				Provider:           resolvedModel.ProviderType,
+				CreatedAt:          time.Now(),
+				Request:            map[string]any{"messages": messages, "tool_protocol": toolProtocol},
+				PromptCacheEnabled: opts.EnablePromptCache,
+			}
+			if opts.EnablePromptCache && strings.TrimSpace(opts.PromptCacheKey) != "" {
+				callRecord.PromptCacheKeyHash = sha256Hex(opts.PromptCacheKey)
 			}
 
 			var err error
@@ -539,10 +542,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						recordToolFailure(sessionID, userID, resolvedModel, toolName, toolCallID, args, toolErr)
 					},
 					func(step toolxml.StepRecord) {
-						if db == nil {
-							return
-						}
-
 						var parentID uint
 						content, err := marshalPersistedToolCall("xml", step.VisibleContent, step.AssistantContent, step.ToolCalls)
 						if err != nil {
@@ -562,7 +561,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						})
 
 						var traceData model.TraceDataJSON
-						if h.cfg.EnableTrace {
+						if h.rt.Config.EnableTrace {
 							entries := make([]model.TraceEntry, 0, len(step.ToolCalls)*2)
 							resultByID := make(map[string]toolxml.ToolResult, len(step.ToolResults))
 							for _, r := range step.ToolResults {
@@ -602,14 +601,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						}
 
 						callMsg := model.ChatMessage{
-							SessionID: sessionID,
-							Role:      model.MessageRoleAssistant,
-							Type:      model.MessageTypeToolCall,
-							Content:   content,
-							Trace:     traceData,
+							Role:    model.MessageRoleAssistant,
+							Type:    model.MessageTypeToolCall,
+							Content: content,
+							Trace:   traceData,
 						}
-						if err := db.Create(&callMsg).Error; err == nil {
-							parentID = callMsg.ID
+						if persisted, err := h.rt.Sessions.AppendMessage(sessionID, callMsg); err == nil {
+							parentID = persisted.ID
 							toolLoopPersisted = true
 						}
 
@@ -646,22 +644,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 							},
 						})
 						resultMsg := model.ChatMessage{
-							SessionID: sessionID,
-							Role:      model.MessageRoleUser,
-							Type:      model.MessageTypeToolResult,
-							Content:   resultContent,
+							Role:    model.MessageRoleUser,
+							Type:    model.MessageTypeToolResult,
+							Content: resultContent,
 						}
 						if parentID != 0 {
 							resultMsg.ParentID = &parentID
 						}
-						if err := db.Create(&resultMsg).Error; err == nil {
+						if _, err := h.rt.Sessions.AppendMessage(sessionID, resultMsg); err == nil {
 							toolLoopPersisted = true
 						}
 					},
 					func(visibleContent, assistantContent string) {
-						if db == nil {
-							return
-						}
 						content := strings.TrimSpace(assistantContent)
 						if content == "" {
 							content = visibleContent
@@ -673,12 +667,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 							MsgType: model.MessageTypeText,
 						})
 						msg := model.ChatMessage{
-							SessionID: sessionID,
-							Role:      model.MessageRoleAssistant,
-							Type:      model.MessageTypeText,
-							Content:   content,
+							Role:    model.MessageRoleAssistant,
+							Type:    model.MessageTypeText,
+							Content: content,
 						}
-						if err := db.Create(&msg).Error; err == nil {
+						if _, err := h.rt.Sessions.AppendMessage(sessionID, msg); err == nil {
 							toolLoopPersisted = true
 						}
 					},
@@ -703,7 +696,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					})
 					err = fmt.Errorf("tool calling not supported for this provider")
 				} else {
-					fullContent, toolLoopPersisted, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel, resolvedModel.ModelName, h.cfg.EnableTrace)
+					fullContent, toolLoopPersisted, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel, resolvedModel.ModelName, h.rt.Config.EnableTrace, h.rt.Sessions)
 				}
 			} else {
 				assistantStreamID := uuid.NewString()
@@ -746,7 +739,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				})
 			}
 
-			if toolProtocol == "xml" && err != nil && db != nil && toolLoopPersisted {
+			if toolProtocol == "xml" && err != nil && toolLoopPersisted {
 				// Ensure an assistant "air bubble" exists on XML tool failures (history + trace).
 				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
 				entry.Error = err.Error()
@@ -764,7 +757,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					Content:   "",
 					Trace:     trace,
 				}
-				_ = db.Create(&msg).Error
+				_, _ = h.rt.Sessions.AppendMessage(sessionID, msg)
 			}
 
 			if err != nil {
@@ -772,18 +765,23 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				// Error broadcast handled in OnComplete trace or here
 			}
 
-			if db != nil && llmCallID != 0 {
-				update := map[string]any{
-					"response": fullContent,
-				}
-				if err != nil {
-					update["error"] = err.Error()
-				}
-				db.Model(&model.LLMCall{}).Where("id = ?", llmCallID).Updates(update)
+			callRecord.Response = fullContent
+			if err != nil {
+				callRecord.Error = err.Error()
+			}
+			logPath := h.rt.LLMLog.PathForCall(time.Now(), sessionID, llmCallID)
+			if writeErr := h.rt.LLMLog.WriteCall(logPath, callRecord); writeErr != nil {
+				log.Printf("LLM log write error: %v", writeErr)
 			}
 
 			// Complete trace
-			if h.cfg.EnableTrace && len(traceEntries) > 0 {
+			if h.rt.Config.EnableTrace && len(traceEntries) > 0 {
+				traceEntries[0].Metadata["llm_log_path"] = logPath
+				traceEntries[0].Metadata["prompt_cache_enabled"] = opts.EnablePromptCache
+				if callRecord.PromptCacheKeyHash != "" {
+					traceEntries[0].Metadata["prompt_cache_key_hash"] = callRecord.PromptCacheKeyHash
+				}
+
 				traceEntries[0].Complete()
 				traceEntries[0].Output = fullContent
 				if err != nil {
@@ -791,8 +789,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			}
 
-			// Save assistant message to database (also persist error cases so history shows an "air bubble" + trace).
-			if db != nil && !toolLoopPersisted && (fullContent != "" || err != nil) {
+			// Save assistant message (also persist error cases so history shows an "air bubble" + trace).
+			if !toolLoopPersisted && (fullContent != "" || err != nil) {
 				entries := traceEntries
 				if err != nil && len(entries) == 0 {
 					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
@@ -810,21 +808,14 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 
 				assistantMsg := model.ChatMessage{
-					SessionID: sessionID,
-					Role:      model.MessageRoleAssistant,
-					Type:      model.MessageTypeText,
-					Content:   fullContent,
-					Trace:     traceData,
+					Role:    model.MessageRoleAssistant,
+					Type:    model.MessageTypeText,
+					Content: fullContent,
+					Trace:   traceData,
 				}
-				db.Create(&assistantMsg)
-
-				// Update session timestamp
-				db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now())
-			}
-
-			if db != nil && toolLoopPersisted {
-				// Tool loop saved multiple messages; still bump session timestamp.
-				db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now())
+				if _, persistErr := h.rt.Sessions.AppendMessage(sessionID, assistantMsg); persistErr != nil {
+					log.Printf("Failed to persist assistant message: %v", persistErr)
+				}
 			}
 		}()
 	}
@@ -863,19 +854,16 @@ loop:
 // EXTENSION: Add pagination, filtering by module
 func (h *ChatHandler) GetSessions(c *gin.Context) {
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-
-	if db == nil {
-		c.JSON(http.StatusOK, []model.ChatSession{})
+	if h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
 		return
 	}
 
-	// Filter by module for multi-module support
-	// EXTENSION: Make module a query parameter
-	var sessions []model.ChatSession
-	db.Where("user_id = ? AND module = ?", userID, ChatModule).
-		Order("updated_at DESC").
-		Find(&sessions)
+	sessions, err := h.rt.Sessions.ListSessions(userID, ChatModule)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load sessions"})
+		return
+	}
 
 	c.JSON(http.StatusOK, sessions)
 }
@@ -885,25 +873,21 @@ func (h *ChatHandler) GetSessions(c *gin.Context) {
 func (h *ChatHandler) GetSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-
-	if db == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+	if h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
 		return
 	}
 
-	var session model.ChatSession
-	result := db.Where("id = ? AND user_id = ?", sessionID, userID).
-		Preload("Messages", func(db *gorm.DB) *gorm.DB {
-			return db.Order("created_at ASC, id ASC")
-		}).
-		First(&session)
-
-	if result.Error != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+	session, msgs, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
 		return
 	}
-
+	session.Messages = msgs
 	c.JSON(http.StatusOK, session)
 }
 
@@ -912,23 +896,24 @@ func (h *ChatHandler) GetSession(c *gin.Context) {
 func (h *ChatHandler) DeleteSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-
-	if db == nil {
-		c.Status(http.StatusNoContent)
+	if h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
 		return
 	}
 
-	// Delete messages first
-	db.Where("session_id = ?", sessionID).Delete(&model.ChatMessage{})
-
-	// Delete session
-	result := db.Where("id = ? AND user_id = ?", sessionID, userID).Delete(&model.ChatSession{})
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+	if _, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
 		return
 	}
 
+	if err := h.rt.Sessions.DeleteSession(sessionID, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete session"})
+		return
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -937,12 +922,6 @@ func (h *ChatHandler) DeleteSession(c *gin.Context) {
 func (h *ChatHandler) TruncateSession(c *gin.Context) {
 	sessionID := c.Param("id")
 	userID := middleware.GetUserID(c)
-	db := database.GetDB()
-
-	if db == nil {
-		c.Status(http.StatusNoContent)
-		return
-	}
 
 	var req TruncateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -950,43 +929,17 @@ func (h *ChatHandler) TruncateSession(c *gin.Context) {
 		return
 	}
 
-	tx := db.Begin()
-	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
+	if h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
 		return
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			tx.Rollback()
-			panic(r)
+	if err := h.rt.Sessions.TruncateFromMessageID(sessionID, userID, req.FromMessageID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
 		}
-	}()
-
-	// Ensure session belongs to user.
-	var session model.ChatSession
-	if err := tx.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		return
-	}
-
-	// Delete messages from the specified message (inclusive).
-	if err := tx.Where("session_id = ? AND id >= ?", sessionID, req.FromMessageID).Delete(&model.ChatMessage{}).Error; err != nil {
-		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to truncate messages"})
-		return
-	}
-
-	// Update session timestamp.
-	if err := tx.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now()).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session"})
-		return
-	}
-
-	if err := tx.Commit().Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
 		return
 	}
 
@@ -1002,70 +955,75 @@ type resolvedModel struct {
 	EnableKVCache bool
 }
 
-func (h *ChatHandler) resolveModel(db *gorm.DB, userID, modelID string) (*resolvedModel, error) {
-	if db == nil {
-		if modelID != "" {
-			return nil, fmt.Errorf("database not configured for model lookup")
-		}
-		return nil, fmt.Errorf("no LLM model configured")
+func (h *ChatHandler) resolveModel(ctx context.Context, userID, modelID string) (*resolvedModel, error) {
+	return h.resolveModelWithSettings(ctx, userID, modelID)
+}
+
+func (h *ChatHandler) resolveModelWithSettings(ctx context.Context, userID, modelID string) (*resolvedModel, error) {
+	if h == nil || h.rt == nil || h.rt.Settings == nil {
+		return nil, fmt.Errorf("settings not available")
 	}
 
-	var llmModel model.LLMModel
-	if modelID != "" {
-		if err := db.Where("id = ? AND user_id = ?", modelID, userID).First(&llmModel).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+	var m settingsdb.Model
+	if strings.TrimSpace(modelID) != "" {
+		got, err := h.rt.Settings.GetModel(ctx, userID, strings.TrimSpace(modelID))
+		if err != nil {
+			if err == sql.ErrNoRows {
 				return nil, fmt.Errorf("model not found")
 			}
 			return nil, err
 		}
+		m = got
 	} else {
-		if err := db.Where("user_id = ? AND is_default = ?", userID, true).
-			Order("updated_at DESC").
-			First(&llmModel).Error; err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, err
-			}
-		}
-	}
-
-	if llmModel.ID != "" {
-		var provider model.LLMProvider
-		if err := db.Where("id = ? AND user_id = ?", llmModel.ProviderID, userID).First(&provider).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, fmt.Errorf("provider not found")
-			}
-			return nil, err
-		}
-
-		if provider.BaseURL == "" || provider.APIKey == "" {
-			return nil, fmt.Errorf("provider base_url or api_key is missing")
-		}
-
-		client, err := llm.NewClientForProvider(llm.ProviderConfig{
-			ProviderType: provider.ProviderType,
-			Endpoint:     provider.BaseURL,
-			APIKey:       provider.APIKey,
-			Model:        llmModel.Model,
-		})
+		models, err := h.rt.Settings.ListModels(ctx, userID, "")
 		if err != nil {
 			return nil, err
 		}
-
-		return &resolvedModel{
-			Client:        client,
-			ProviderType:  provider.ProviderType,
-			ProviderID:    provider.ID,
-			ModelID:       llmModel.ID,
-			ModelName:     llmModel.Model,
-			EnableKVCache: llmModel.EnableKVCache,
-		}, nil
+		for _, candidate := range models {
+			if candidate.IsDefault {
+				m = candidate
+				break
+			}
+		}
 	}
 
-	if modelID != "" {
-		return nil, fmt.Errorf("model not found")
+	if m.ID == "" {
+		if strings.TrimSpace(modelID) != "" {
+			return nil, fmt.Errorf("model not found")
+		}
+		return nil, fmt.Errorf("no LLM model configured")
 	}
 
-	return nil, fmt.Errorf("no LLM model configured")
+	provider, err := h.rt.Settings.GetProvider(ctx, userID, m.ProviderID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("provider not found")
+		}
+		return nil, err
+	}
+
+	if strings.TrimSpace(provider.BaseURL) == "" || strings.TrimSpace(provider.APIKey) == "" {
+		return nil, fmt.Errorf("provider base_url or api_key is missing")
+	}
+
+	client, err := llm.NewClientForProvider(llm.ProviderConfig{
+		ProviderType: provider.ProviderType,
+		Endpoint:     provider.BaseURL,
+		APIKey:       provider.APIKey,
+		Model:        m.Model,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &resolvedModel{
+		Client:        client,
+		ProviderType:  provider.ProviderType,
+		ProviderID:    provider.ID,
+		ModelID:       m.ID,
+		ModelName:     m.Model,
+		EnableKVCache: m.EnableKVCache,
+	}, nil
 }
 
 // ============================================================================
@@ -1088,6 +1046,11 @@ func truncateString(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
 type toolCaller interface {
 	ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
 }
@@ -1108,12 +1071,15 @@ func runToolLoop(
 	resolved *resolvedModel,
 	modelName string,
 	enableTrace bool,
+	sessions *sessionstore.Store,
 ) (string, bool, error) {
 	if len(defs) == 0 {
 		return "", false, fmt.Errorf("no tools configured")
 	}
 
-	db := database.GetDB()
+	if sessions == nil {
+		return "", false, fmt.Errorf("session store not configured")
+	}
 	handlers := make(map[string]tool.Handler)
 	for _, def := range defs {
 		handlers[def.Spec.Function.Name] = def.Handler
@@ -1199,26 +1165,23 @@ func runToolLoop(
 				Error:   err.Error(),
 			})
 			recordToolFailure(sessionID, userID, resolved, "", "", "", err)
-			if db != nil {
-				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-				entry.Error = err.Error()
-				entry.Complete()
-				trace := model.TraceDataJSON{
-					TraceData: model.TraceData{
-						Entries: []model.TraceEntry{entry},
-						Model:   modelName,
-					},
-				}
-				msg := model.ChatMessage{
-					SessionID: sessionID,
-					Role:      model.MessageRoleAssistant,
-					Type:      model.MessageTypeText,
-					Content:   "",
-					Trace:     trace,
-				}
-				if createErr := db.Create(&msg).Error; createErr == nil {
-					persisted = true
-				}
+			entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+			entry.Error = err.Error()
+			entry.Complete()
+			trace := model.TraceDataJSON{
+				TraceData: model.TraceData{
+					Entries: []model.TraceEntry{entry},
+					Model:   modelName,
+				},
+			}
+			msg := model.ChatMessage{
+				Role:    model.MessageRoleAssistant,
+				Type:    model.MessageTypeText,
+				Content: "",
+				Trace:   trace,
+			}
+			if _, persistErr := sessions.AppendMessage(sessionID, msg); persistErr == nil {
+				persisted = true
 			}
 			return combined.String(), persisted, err
 		}
@@ -1230,16 +1193,13 @@ func runToolLoop(
 				Role:    model.MessageRoleAssistant,
 				MsgType: model.MessageTypeText,
 			})
-			if db != nil {
-				assistantMsg := model.ChatMessage{
-					SessionID: sessionID,
-					Role:      model.MessageRoleAssistant,
-					Type:      model.MessageTypeText,
-					Content:   result.Content,
-				}
-				if createErr := db.Create(&assistantMsg).Error; createErr == nil {
-					persisted = true
-				}
+			assistantMsg := model.ChatMessage{
+				Role:    model.MessageRoleAssistant,
+				Type:    model.MessageTypeText,
+				Content: result.Content,
+			}
+			if _, persistErr := sessions.AppendMessage(sessionID, assistantMsg); persistErr == nil {
+				persisted = true
 			}
 
 			// Return the content already streamed/broadcast across all steps so llm_calls response matches realtime output.
@@ -1248,20 +1208,18 @@ func runToolLoop(
 
 		var toolCallMsgID uint
 		stepTraceEntries := make([]model.TraceEntry, 0, len(result.ToolCalls)*2)
-		if db != nil {
-			serialized, err := marshalPersistedToolCall("json", result.Content, result.Content, result.ToolCalls)
-			if err == nil {
-				callMsg := model.ChatMessage{
-					SessionID: sessionID,
-					Role:      model.MessageRoleAssistant,
-					Type:      model.MessageTypeToolCall,
-					Content:   serialized,
-				}
-				if err := db.Create(&callMsg).Error; err == nil {
-					toolCallMsgID = callMsg.ID
-					persisted = true
-				}
-			}
+		serialized, marshalErr := marshalPersistedToolCall("json", result.Content, result.Content, result.ToolCalls)
+		if marshalErr != nil {
+			serialized = result.Content
+		}
+		callMsg := model.ChatMessage{
+			Role:    model.MessageRoleAssistant,
+			Type:    model.MessageTypeToolCall,
+			Content: serialized,
+		}
+		if persistedCall, err := sessions.AppendMessage(sessionID, callMsg); err == nil {
+			toolCallMsgID = persistedCall.ID
+			persisted = true
 		}
 		broadcastMsg(broadcaster, streamMsg{
 			Op:      "final",
@@ -1342,22 +1300,20 @@ func runToolLoop(
 				response = []byte(fmt.Sprintf(`{"error": "Failed to marshal tool response: %v"}`, marshalErr))
 			}
 
-			if db != nil {
-				serialized, err := marshalPersistedToolResult("json", call.ID, call.Function.Name, call.Function.Arguments, string(response), nil)
-				if err == nil {
-					resultMsg := model.ChatMessage{
-						SessionID: sessionID,
-						Role:      model.MessageRoleTool,
-						Type:      model.MessageTypeToolResult,
-						Content:   serialized,
-					}
-					if toolCallMsgID != 0 {
-						resultMsg.ParentID = &toolCallMsgID
-					}
-					if createErr := db.Create(&resultMsg).Error; createErr == nil {
-						persisted = true
-					}
-				}
+			serialized, serializeErr := marshalPersistedToolResult("json", call.ID, call.Function.Name, call.Function.Arguments, string(response), nil)
+			if serializeErr != nil {
+				serialized = string(response)
+			}
+			resultMsg := model.ChatMessage{
+				Role:    model.MessageRoleTool,
+				Type:    model.MessageTypeToolResult,
+				Content: serialized,
+			}
+			if toolCallMsgID != 0 {
+				resultMsg.ParentID = &toolCallMsgID
+			}
+			if _, persistErr := sessions.AppendMessage(sessionID, resultMsg); persistErr == nil {
+				persisted = true
 			}
 			broadcastMsg(broadcaster, streamMsg{
 				Op:      "insert",
@@ -1400,39 +1356,36 @@ func runToolLoop(
 			})
 		}
 
-		if db != nil && enableTrace && toolCallMsgID != 0 && len(stepTraceEntries) > 0 {
+		if enableTrace && toolCallMsgID != 0 && len(stepTraceEntries) > 0 {
 			trace := model.TraceDataJSON{
 				TraceData: model.TraceData{
 					Entries: stepTraceEntries,
 					Model:   modelName,
 				},
 			}
-			_ = db.Model(&model.ChatMessage{}).Where("id = ?", toolCallMsgID).Update("trace", trace).Error
+			_ = sessions.UpdateMessageTrace(sessionID, toolCallMsgID, trace)
 		}
 	}
 
 	recordToolFailure(sessionID, userID, resolved, "", "", "", fmt.Errorf("tool call limit reached"))
 	err := fmt.Errorf("tool call limit reached")
-	if db != nil {
-		entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-		entry.Error = err.Error()
-		entry.Complete()
-		trace := model.TraceDataJSON{
-			TraceData: model.TraceData{
-				Entries: []model.TraceEntry{entry},
-				Model:   modelName,
-			},
-		}
-		msg := model.ChatMessage{
-			SessionID: sessionID,
-			Role:      model.MessageRoleAssistant,
-			Type:      model.MessageTypeText,
-			Content:   "",
-			Trace:     trace,
-		}
-		if createErr := db.Create(&msg).Error; createErr == nil {
-			persisted = true
-		}
+	entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+	entry.Error = err.Error()
+	entry.Complete()
+	trace := model.TraceDataJSON{
+		TraceData: model.TraceData{
+			Entries: []model.TraceEntry{entry},
+			Model:   modelName,
+		},
+	}
+	msg := model.ChatMessage{
+		Role:    model.MessageRoleAssistant,
+		Type:    model.MessageTypeText,
+		Content: "",
+		Trace:   trace,
+	}
+	if _, persistErr := sessions.AppendMessage(sessionID, msg); persistErr == nil {
+		persisted = true
 	}
 	return combined.String(), persisted, err
 }
@@ -1441,26 +1394,24 @@ func recordToolFailure(sessionID, userID string, resolved *resolvedModel, toolNa
 	if err == nil {
 		return
 	}
-	db := database.GetDB()
-	if db == nil {
-		return
+	parts := []string{
+		fmt.Sprintf("session_id=%s", sessionID),
+		fmt.Sprintf("user_id=%s", userID),
+		fmt.Sprintf("tool=%s", toolName),
+		fmt.Sprintf("tool_call_id=%s", toolCallID),
+		fmt.Sprintf("error=%v", err),
 	}
-
-	failure := model.ToolCallFailure{
-		SessionID:  sessionID,
-		UserID:     userID,
-		ToolName:   toolName,
-		ToolCallID: toolCallID,
-		Arguments:  args,
-		Error:      err.Error(),
+	if strings.TrimSpace(args) != "" {
+		parts = append(parts, fmt.Sprintf("args=%s", truncateString(args, 500)))
 	}
 	if resolved != nil {
-		failure.ProviderID = resolved.ProviderID
-		failure.ModelID = resolved.ModelID
-		failure.ModelName = resolved.ModelName
+		parts = append(parts,
+			fmt.Sprintf("provider_id=%s", resolved.ProviderID),
+			fmt.Sprintf("model_id=%s", resolved.ModelID),
+			fmt.Sprintf("model=%s", resolved.ModelName),
+		)
 	}
-
-	_ = db.Create(&failure).Error
+	log.Printf("tool_failure: %s", strings.Join(parts, " "))
 }
 
 func extractToolIDs(metadata model.JSONB) ([]string, bool) {

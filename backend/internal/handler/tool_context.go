@@ -9,10 +9,10 @@ import (
 )
 
 type persistedToolCallMessage struct {
-	Protocol    string         `json:"protocol,omitempty"`     // "json" or "xml"
-	Content     string         `json:"content,omitempty"`      // UI-facing assistant content (e.g., without <tool_data> for xml)
-	LLMContent  string         `json:"llm_content,omitempty"`  // Content to feed back into the LLM history (may include <tool_data> for xml)
-	ToolCalls   []llm.ToolCall `json:"tool_calls,omitempty"`   // Structured tool calls (json protocol)
+	Protocol   string         `json:"protocol,omitempty"`    // "json" or "xml"
+	Content    string         `json:"content,omitempty"`     // UI-facing assistant content (e.g., without <tool_data> for xml)
+	LLMContent string         `json:"llm_content,omitempty"` // Content to feed back into the LLM history (may include <tool_data> for xml)
+	ToolCalls  []llm.ToolCall `json:"tool_calls,omitempty"`  // Structured tool calls (json protocol)
 }
 
 type persistedToolResult struct {
@@ -25,12 +25,12 @@ type persistedToolResult struct {
 }
 
 type persistedToolResultMessage struct {
-	Protocol   string              `json:"protocol,omitempty"`     // "json" or "xml"
-	ToolCallID string              `json:"tool_call_id,omitempty"` // Only for json protocol
-	Name       string              `json:"name,omitempty"`         // Only for json protocol
-	Arguments  string              `json:"arguments,omitempty"`    // Only for json protocol
-	Content    string              `json:"content,omitempty"`      // Tool output (json protocol) or <tool_result> block (xml protocol)
-	Results    []persistedToolResult `json:"results,omitempty"`    // Optional structured results for UI
+	Protocol   string                `json:"protocol,omitempty"`     // "json" or "xml"
+	ToolCallID string                `json:"tool_call_id,omitempty"` // Only for json protocol
+	Name       string                `json:"name,omitempty"`         // Only for json protocol
+	Arguments  string                `json:"arguments,omitempty"`    // Only for json protocol
+	Content    string                `json:"content,omitempty"`      // Tool output (json protocol) or <tool_result> block (xml protocol)
+	Results    []persistedToolResult `json:"results,omitempty"`      // Optional structured results for UI
 }
 
 func marshalPersistedToolCall(protocol, content, llmContent string, toolCalls []llm.ToolCall) (string, error) {
@@ -90,11 +90,11 @@ func parsePersistedToolResult(raw string) (persistedToolResultMessage, bool) {
 	return payload, true
 }
 
-func buildLLMHistoryFromDB(dbMessages []model.ChatMessage, toolProtocol string) []llm.ChatMessage {
+func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol string) []llm.ChatMessage {
 	protocol := strings.ToLower(strings.TrimSpace(toolProtocol))
-	out := make([]llm.ChatMessage, 0, len(dbMessages))
+	out := make([]llm.ChatMessage, 0, len(messages))
 
-	for _, msg := range dbMessages {
+	for _, msg := range messages {
 		switch msg.Type {
 		case model.MessageTypeToolCall:
 			payload, ok := parsePersistedToolCall(msg.Content)

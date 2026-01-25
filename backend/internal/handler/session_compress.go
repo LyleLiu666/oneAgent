@@ -7,10 +7,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"gorm.io/gorm"
-
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 )
 
 const (
@@ -169,13 +168,13 @@ func buildCompressionSummary(ctx context.Context, client llm.Client, input strin
 
 func compressSessionIfNeeded(
 	ctx context.Context,
-	db *gorm.DB,
+	sessions *sessionstore.Store,
 	sessionID string,
-	dbMessages []model.ChatMessage,
+	persistedMessages []model.ChatMessage,
 	llmMessages []llm.ChatMessage,
 	client llm.Client,
 ) (bool, []llm.ChatMessage, error) {
-	if db == nil || client == nil {
+	if sessions == nil || client == nil {
 		return false, llmMessages, nil
 	}
 
@@ -183,7 +182,7 @@ func compressSessionIfNeeded(
 		return false, llmMessages, nil
 	}
 
-	toSummarize, toKeep := splitForCompression(dbMessages, sessionCompressionKeepTextMsgs)
+	toSummarize, toKeep := splitForCompression(persistedMessages, sessionCompressionKeepTextMsgs)
 	if len(toSummarize) == 0 {
 		return false, llmMessages, nil
 	}
@@ -205,28 +204,6 @@ func compressSessionIfNeeded(
 		summaryCreatedAt = toKeep[0].CreatedAt.Add(-1 * time.Millisecond)
 	}
 
-	keepIDs := make([]uint, 0, len(toKeep))
-	for _, msg := range toKeep {
-		keepIDs = append(keepIDs, msg.ID)
-	}
-
-	tx := db.Begin()
-	if tx.Error != nil {
-		return false, llmMessages, tx.Error
-	}
-
-	if len(keepIDs) > 0 {
-		if err := tx.Where("session_id = ? AND id NOT IN ?", sessionID, keepIDs).Delete(&model.ChatMessage{}).Error; err != nil {
-			tx.Rollback()
-			return false, llmMessages, err
-		}
-	} else {
-		if err := tx.Where("session_id = ?", sessionID).Delete(&model.ChatMessage{}).Error; err != nil {
-			tx.Rollback()
-			return false, llmMessages, err
-		}
-	}
-
 	summaryMsg := model.ChatMessage{
 		SessionID: sessionID,
 		Role:      model.MessageRoleAssistant,
@@ -234,17 +211,17 @@ func compressSessionIfNeeded(
 		Content:   summaryContent,
 		CreatedAt: summaryCreatedAt,
 	}
-	if err := tx.Create(&summaryMsg).Error; err != nil {
-		tx.Rollback()
-		return false, llmMessages, err
+
+	newStored := make([]model.ChatMessage, 0, 1+len(toKeep))
+	newStored = append(newStored, summaryMsg)
+	newStored = append(newStored, toKeep...)
+	for i := range newStored {
+		newStored[i].ID = uint(i + 1)
+		newStored[i].ParentID = nil
+		newStored[i].SessionID = sessionID
 	}
 
-	if err := tx.Model(&model.ChatSession{}).Where("id = ?", sessionID).Update("updated_at", time.Now()).Error; err != nil {
-		tx.Rollback()
-		return false, llmMessages, err
-	}
-
-	if err := tx.Commit().Error; err != nil {
+	if err := sessions.ReplaceMessages(sessionID, newStored, time.Now(), uint(len(newStored)+1)); err != nil {
 		return false, llmMessages, err
 	}
 

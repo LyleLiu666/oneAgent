@@ -6,9 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/liu_y/oneAgent/backend/internal/database"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
-	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 )
 
 // updateSettingsRequest represents the request body for updating settings.
@@ -30,8 +29,13 @@ func GetSettingsHandler(c *gin.Context) {
 		return
 	}
 
-	db := database.GetDB()
-	settingsMap, err := model.GetUserSettingsMap(db, userID)
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
+		return
+	}
+
+	settingsMap, err := rt.Settings.GetUserSettingsMap(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load settings"})
 		return
@@ -63,12 +67,16 @@ func UpdateSettingsHandler(c *gin.Context) {
 		return
 	}
 
-	db := database.GetDB()
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Settings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Settings not available"})
+		return
+	}
 
 	// Update Bocha API key if provided
 	if req.BochaAPIKey != nil {
 		apiKey := strings.TrimSpace(*req.BochaAPIKey)
-		if err := model.SetUserSetting(db, userID, model.SettingKeyBochaAPIKey, apiKey); err != nil {
+		if err := rt.Settings.SetUserSetting(c.Request.Context(), userID, settingsdb.SettingKeyBochaAPIKey, apiKey); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save settings"})
 			return
 		}

@@ -1,0 +1,181 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/liu_y/oneAgent/backend/internal/buildinfo"
+	"github.com/liu_y/oneAgent/backend/internal/config"
+	"github.com/liu_y/oneAgent/backend/internal/doctor"
+	"github.com/liu_y/oneAgent/backend/internal/runtime"
+	"github.com/liu_y/oneAgent/backend/internal/server"
+)
+
+func main() {
+	args := os.Args[1:]
+	if len(args) == 0 {
+		printUsage()
+		return
+	}
+
+	switch args[0] {
+	case "--help", "-h", "help":
+		printUsage()
+		return
+	case "--version", "version":
+		fmt.Printf("oneagent %s (commit=%s date=%s)\n", buildinfo.Version, buildinfo.Commit, buildinfo.Date)
+		return
+	case "serve":
+		runServe(args[1:])
+		return
+	case "doctor":
+		runDoctor(args[1:])
+		return
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
+		printUsage()
+		os.Exit(2)
+	}
+}
+
+type boolFlag struct {
+	set   bool
+	value bool
+}
+
+func (b *boolFlag) Set(v string) error {
+	b.set = true
+	b.value = strings.EqualFold(strings.TrimSpace(v), "true") || strings.TrimSpace(v) == "1"
+	return nil
+}
+
+func (b *boolFlag) String() string {
+	if b == nil {
+		return ""
+	}
+	if b.value {
+		return "true"
+	}
+	return "false"
+}
+
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default; if workspace enabled, set it to <workspace>/)")
+	profile := fs.String("profile", "", "profile: local|dev (server is deprecated alias)")
+	bind := fs.String("bind", "", "bind address (default: local=0.0.0.0, dev=127.0.0.1)")
+	port := fs.String("port", "", "port (default: 8080)")
+	authMode := fs.String("auth-mode", "", "auth mode: token|none (default: token)")
+	bashRootDir := fs.String("bash-root-dir", "", "BASH_ROOT_DIR (default: ONEAGENT_HOME)")
+	logRetentionDays := fs.Int("log-retention-days", 0, "log retention days (default: 30)")
+	var enableTrace boolFlag
+	fs.Var(&enableTrace, "enable-trace", "enable trace logging (true/false)")
+
+	_ = fs.Parse(args)
+
+	if strings.EqualFold(strings.TrimSpace(*profile), "server") {
+		log.Printf("WARNING: profile=server is deprecated; using profile=local")
+	}
+
+	var enableTracePtr *bool
+	if enableTrace.set {
+		enableTracePtr = &enableTrace.value
+	}
+
+	cfg, err := config.Load(config.LoadOptions{
+		Home:             *home,
+		Profile:          *profile,
+		Bind:             *bind,
+		Port:             *port,
+		AuthMode:         *authMode,
+		EnableTrace:      enableTracePtr,
+		BashRootDir:      *bashRootDir,
+		LogRetentionDays: *logRetentionDays,
+	})
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		log.Fatalf("Failed to init runtime: %v", err)
+	}
+	defer func() {
+		_ = rt.Close()
+	}()
+
+	if err := server.Serve(rt); err != nil {
+		log.Fatalf("Server exited with error: %v", err)
+	}
+}
+
+func runDoctor(args []string) {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default)")
+	profile := fs.String("profile", "", "profile: local|dev (server is deprecated alias)")
+	authMode := fs.String("auth-mode", "", "auth mode: token|none")
+	var enableTrace boolFlag
+	fs.Var(&enableTrace, "enable-trace", "enable trace logging (true/false)")
+	logRetentionDays := fs.Int("log-retention-days", 0, "log retention days (default: 30)")
+
+	_ = fs.Parse(args)
+
+	var enableTracePtr *bool
+	if enableTrace.set {
+		enableTracePtr = &enableTrace.value
+	}
+
+	cfg, err := config.Load(config.LoadOptions{
+		Home:             *home,
+		Profile:          *profile,
+		AuthMode:         *authMode,
+		EnableTrace:      enableTracePtr,
+		LogRetentionDays: *logRetentionDays,
+	})
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		log.Fatalf("Failed to init runtime: %v", err)
+	}
+	defer func() {
+		_ = rt.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	report, err := doctor.Check(ctx, rt, nil)
+	if err != nil {
+		log.Fatalf("doctor failed: %v", err)
+	}
+
+	fmt.Print(doctor.Format(report))
+}
+
+func printUsage() {
+	fmt.Print(`oneagent - local tool runtime
+
+Usage:
+  oneagent serve [flags]    Start the server (UI + API)
+  oneagent doctor [flags]   Run diagnostics
+  oneagent --version        Print version
+
+serve flags:
+  --profile local|dev
+  --home <path>
+  --bind <addr>
+  --port <port>
+  --auth-mode token|none
+  --bash-root-dir <path>
+  --log-retention-days <n>
+  --enable-trace true|false
+`)
+}

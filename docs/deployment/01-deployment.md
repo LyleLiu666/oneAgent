@@ -1,118 +1,42 @@
-# 部署指南
+# 部署指南（本地工具默认）
 
-> Docker Compose 多服务部署
-
----
-
-## 1. 服务架构
-
-```mermaid
-graph LR
-    subgraph Docker Compose
-        FE[Frontend SPA]
-        BE[Backend Go]
-        PG[(PostgreSQL)]
-        KC[Keycloak]
-    end
-    
-    U[User] --> FE
-    FE --> BE
-    BE --> PG
-    BE --> KC
-    BE --> LLM[LLM API]
-```
+> 本项目默认以“本地工具形应用”交付：运行单个 `oneagent` 二进制即可（不依赖 Postgres/Keycloak）。
 
 ---
 
-## 2. 快速启动
+## 1. 推荐方式：本地工具启动
 
 ```bash
-# 克隆仓库
-git clone <repo> && cd oneAgent
-
-# 复制环境变量
-cp .env.example .env
-# 编辑 .env 配置
-
-# 启动所有服务
-docker-compose up --build
-
-# 访问
-# App: http://localhost:8080
-# Keycloak: http://localhost:8180
+make build
+./dist/oneagent serve
 ```
+
+访问：`http://localhost:8080`
+
+认证：
+- 默认 `AUTH_MODE=token`
+- token 文件：`ONEAGENT_HOME/.oneagent/config/auth_token`
+- 运行 `./dist/oneagent doctor` 查看 token 文件路径（不会输出明文 token）
+
+安全提示：仅建议在可信局域网内使用；将服务暴露到公网风险极大。
 
 ---
 
-## 3. 环境变量
+## 2. 环境变量（常用）
 
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
-| `PORT` | 后端端口 | `8080` |
-| `DATABASE_URL` | PostgreSQL 连接串 | - |
-| `KEYCLOAK_URL` | Keycloak 地址 | - |
-| `KEYCLOAK_REALM` | Keycloak Realm | `base-realm` |
-| `KEYCLOAK_CLIENT_ID` | Client ID | `base-app` |
-| `KEYCLOAK_CLIENT_SECRET` | Client Secret | - |
-| `JWT_SECRET` | JWT 签名密钥 | - |
-| `JWT_EXPIRE_DAYS` | JWT 有效期 (天) | `7` |
-| `BASH_ROOT_DIR` | 工具沙箱目录 | - |
-| `ENABLE_TRACE` | 启用调试追踪 | `false` |
+| `ONEAGENT_HOME` | Home 目录（agent 可写边界） | `~/.oneagent_default` |
+| `PROFILE` | `local`/`dev` | `local` |
+| `BIND` | 监听地址 | local=`0.0.0.0` |
+| `PORT` | 端口 | `8080` |
+| `AUTH_MODE` | `token`/`none` | `token` |
+| `BASH_ROOT_DIR` | bash/文件工具根目录 | `ONEAGENT_HOME` |
+| `LOG_RETENTION_DAYS` | 日志保留天数 | `30` |
 
 ---
 
-## 4. Keycloak 配置
+## 3. Legacy：Docker Compose（不再作为默认路径）
 
-### 首次设置
-
-1. 访问 `http://localhost:8180`
-2. 登录 `admin` / `admin123`
-3. 创建 Realm: `base-realm`
-4. 创建 Client: `base-app`
-   - Client Protocol: `openid-connect`
-   - Access Type: `public`
-   - Valid Redirect URIs: `http://localhost:8080/*`
-   - Web Origins: `http://localhost:8080`
-5. 创建测试用户
-
----
-
-## 5. Docker Compose 服务
-
-```yaml
-services:
-  app:
-    build: .
-    ports:
-      - "8080:8080"
-    environment:
-      - DATABASE_URL
-      - KEYCLOAK_URL
-    depends_on:
-      - postgres
-      - keycloak
-
-  postgres:
-    image: postgres:16
-    environment:
-      - POSTGRES_DB
-      - POSTGRES_USER
-      - POSTGRES_PASSWORD
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:24
-    ports:
-      - "8180:8080"
-```
-
----
-
-## 6. 生产部署
-
-建议：
-- 使用外部 PostgreSQL 服务
-- 使用托管 Keycloak 或其他 OIDC 提供商
-- 配置 HTTPS 和反向代理
-- 设置健康检查 (`/health`)
+本项目已不再以 Postgres/Keycloak 作为默认依赖，也不再推荐以 Docker Compose 作为“默认交付形态”。
+如果你需要容器化部署，请以本地工具模式的目录契约与认证策略为准，自行在反代/容器编排中落地（并明确公网暴露风险）。

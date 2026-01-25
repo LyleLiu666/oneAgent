@@ -5,7 +5,7 @@ import { VueQueryPlugin } from '@tanstack/vue-query'
 
 import App from './App.vue'
 import router from './router'
-import { initKeycloak } from './composables/useAuth'
+import { initAuth } from './composables/useAuth'
 
 import './styles/index.css'
 
@@ -28,17 +28,14 @@ app.use(VueQueryPlugin, {
     },
 })
 
-// Initialize Keycloak and mount app
+// Initialize auth and mount app
 async function initializeApp() {
     try {
-        console.log('Initializing Keycloak...')
-        await initKeycloak()
-        console.log('Keycloak initialized')
+        await initAuth()
     } catch (error) {
-        console.error('Failed to initialize Keycloak:', error)
+        console.error('Failed to initialize auth:', error)
     }
 
-    // Setup Router (after Keycloak init to avoid clobbering OIDC callback URL)
     app.use(router)
 
     await router.isReady()
