@@ -71,12 +71,13 @@
 - **THEN** 系统返回的 XML 不要求主 Agent 或子 Agent 显式使用 `<![CDATA[...]]>` 才能正确解析/使用节点内容
 
 ### Requirement: 按步骤注入技能 (Per-Step Skill Injection)
-系统应该 (SHOULD) 支持按子 Agent 步骤任务自动挑选并注入相关技能（Top-K skills 的中文摘要）到子 Agent 的 system prompt；同时系统必须 (MUST) 支持显式指定要注入的 skill（当自动召回不可用或用户有明确偏好时）。
+系统应该 (SHOULD) 支持按子 Agent 步骤任务自动挑选相关技能（Top-K skills 的中文摘要），并将其写入子 Agent TurnContext（volatile）（不得回写稳定 system prompt，以保持 KV cache 友好）；同时系统必须 (MUST) 支持显式指定要注入的 skill（当自动召回不可用或用户有明确偏好时）。
 
 #### Scenario: 翻译步骤注入 Translator 技能
 - **GIVEN** 一个子 Agent 步骤任务是“将英文 README 翻译为中文”
-- **WHEN** 系统为该步骤构建子 Agent 的 system prompt
-- **THEN** system prompt 中包含与翻译相关的技能摘要（例如包含 Translator skill 的名称与描述）
+- **WHEN** 系统为该步骤构建子 Agent TurnContext（volatile）的技能注入消息
+- **THEN** TurnContext 中包含与翻译相关的技能摘要（例如包含 Translator skill 的名称与描述）
+- **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
 ### Requirement: 限制与递归控制 (Limits & Recursion Control)
 系统必须 (MUST) 对子 Agent 的执行施加限制，包括但不限于：最大递归深度、最大工具执行步数/时长、交接输出大小上限；并且默认禁止子 Agent 再次启动子 Agent（或限制在允许的最大深度内）。

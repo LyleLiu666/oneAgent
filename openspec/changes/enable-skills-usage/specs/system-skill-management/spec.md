@@ -43,34 +43,37 @@
 
 #### Scenario: 海量技能时仅召回 Top-8 且不注入全量列表
 - **GIVEN** 可用技能数量为 1000+
-- **WHEN** 生成本轮 system prompt
+- **WHEN** 构建本轮 TurnContext（volatile）的“技能建议”注入消息
 - **THEN** 技能召回阶段只处理 Top-8 候选（固定为 8）
-- **THEN** system prompt 不得出现“全量技能列表”或“把所有技能都列出”的行为
+- **THEN** TurnContext 不得出现“全量技能列表”或“把所有技能都列出”的行为
+- **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
 #### Scenario: 无推荐技能时不注入推荐块
 - **GIVEN** 技能召回工具返回空结果（无候选）
-- **WHEN** 生成本轮 system prompt
-- **THEN** system prompt 不包含“## 技能建议”块（或包含但明确说明无推荐技能）
+- **WHEN** 构建本轮 TurnContext（volatile）的“技能建议”注入消息
+- **THEN** TurnContext 不包含“## 技能建议”块（或包含但明确说明无推荐技能）
+- **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
 ### Requirement: 显式指定技能名称（语义）(Explicit Skill Selection, Semantic)
 系统必须 (MUST) 保留“按技能名称指定”的使用方式：当用户在自然语言中明确表达要使用某个技能（通常会提到技能名称）时，系统应优先解析并推荐该技能（可跳过召回/选择流程或作为 override）。
 
 #### Scenario: 用户自然语言指定技能名优先生效
 - **GIVEN** 用户输入包含 “请使用 code-review-excellence 这个技能”
-- **WHEN** 生成本轮 system prompt
+- **WHEN** 构建本轮 TurnContext（volatile）的“技能建议”注入消息
 - **THEN** 系统将 `code-review-excellence` 作为推荐技能（前提：该技能存在）
+- **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
 ### Requirement: 中文上下文注入 (Chinese Context Injection)
-系统必须 (MUST) 使用中文提示词注入“推荐技能摘要”，以符合用户偏好，并引导 agent 在使用前先读取技能文件。
+系统必须 (MUST) 通过 TurnContext（volatile）消息使用中文提示词注入“推荐技能摘要”，以符合用户偏好，并引导 agent 在使用前先读取技能文件；系统不得 (MUST NOT) 回写稳定 system prompt。
 
 #### Scenario: 中文提示词标题 (Scenario: Chinese Prompt Header)
 - **GIVEN** 系统产生一个推荐技能
-- **WHEN** 生成系统提示词时
+- **WHEN** 生成 TurnContext（volatile）注入消息时
 - **THEN** 它**必须**包含 "## 技能建议"
 - **THEN** 它**必须**包含 "你需要先读取" 或等价表述（强调先读技能文件再执行）
 
 #### Scenario: 列表中的技能描述 (Scenario: Skill Description in List)
 - **GIVEN** 系统推荐技能 "Translator"，描述为 "Expert in translation"
-- **WHEN** 生成系统提示词时
+- **WHEN** 生成 TurnContext（volatile）注入消息时
 - **THEN** 它**必须**包含 "- Translator: Expert in translation"
 - **THEN** 它**必须**包含该技能的来源与路径信息（至少能定位到 `SKILL.md`）

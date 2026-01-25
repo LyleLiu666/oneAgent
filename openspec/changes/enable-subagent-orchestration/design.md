@@ -35,7 +35,7 @@ findings 文件中包含两类核心信息：
 
 ### 1) 子 Agent 运行器（`internal/subagent`）
 职责：
-- 组装子 Agent 的 system prompt（基于主 prompt + 交接模板 + skills 注入）
+- 组装子 Agent 的 prompt（Stable Prefix 复用主 Agent；本步骤 task/交接摘要/skills 通过 TurnContext（volatile）追加，避免回写稳定 system prompt）
 - 选择模型与工具集合（allowlist）
 - 运行 tool-loop（复用或抽象现有逻辑），并限制最大步数/时长
 - 引导子 Agent 生成 findings 文件，并返回“短总结 + 引用路径”给调用方
@@ -50,7 +50,7 @@ findings 文件中包含两类核心信息：
 ### 3) 技能注入适配（依赖/联动 `enable-skills-usage`）
 当 skill recall 工具可用时：
 - `internal/subagent` 在启动前调用“召回工具”获取 Top-K skills
-- 将 Top-K 技能摘要块追加到子 Agent system prompt（中文）
+- 将 Top-K 技能摘要块写入子 Agent TurnContext（volatile）（中文；不得回写稳定 system prompt）
 
 ### 4) 观测与存储（Trace / 可选 Session）
 MVP 推荐：
@@ -96,7 +96,7 @@ MVP 推荐：
 1. 主 Agent agentic 判断任务是否适合拆分/是否需要子 Agent
 2. 主 Agent（可选）将任务拆为步骤（可由用户/LLM 产生）
 3. 主 Agent 调用 `subagent` 工具，传入本步骤 task + 前序短总结/引用
-4. `internal/subagent` 构建 prompt（主 prompt + skills + handoff 约束）
+4. `internal/subagent` 构建 prompt（Stable Prefix + handoff 约束 + TurnContext（task/交接摘要/skills））
 5. 子 Agent 运行 tool-loop 执行任务
 6. 子 Agent 生成 `FINDINGS.md`（交付件）与完整 trace 日志
 7. 系统校验交付件存在与基本结构，并将“短总结 + 引用路径”作为 tool result 返回主 Agent（同时写 trace 指针）

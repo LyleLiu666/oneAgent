@@ -10,7 +10,7 @@
 - [ ] 在 `backend/internal/handler/chat.go` 集成：
   - [ ] 支持“语义显式指定技能名称”（不依赖特殊语法）：当用户明确表示要用某个技能时，解析/命中该技能并作为推荐技能（可跳过召回/选择或作为 override） <!-- id: 8 -->
   - [ ] 否则：每次聊天前调用召回得到 Top-8，并取 Top-1 作为推荐技能（或 none） <!-- id: 9 -->
-- [ ] 更新系统提示词构建逻辑：以**中文**注入“推荐技能摘要”（而非 Top-8 全列表），并明确“主 agent 自行判断是否使用” <!-- id: 10 -->
+- [ ] 更新 prompt 构建逻辑：在 Stable Prefix 之后追加 TurnContext（volatile），以**中文**写入“推荐技能摘要”（Top-1；而非 Top-8 全列表）；不得回写稳定 system prompt，且该 TurnContext 不应被标记为 cacheable <!-- id: 10 -->
 - [ ] 单元测试：
   - [ ] frontmatter 解析与回退策略 <!-- id: 11 -->
   - [ ] 多来源合并与优先级覆盖 <!-- id: 12 -->

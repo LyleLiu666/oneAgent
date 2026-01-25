@@ -3,13 +3,13 @@
 ## 摘要 (Summary)
 为 oneAgent 增加一套“子 Agent（sub-agent）”能力，用于把复杂工作切分为多个相对独立的步骤，并把每个步骤交给一个隔离上下文的子 Agent 执行，从而显著降低单次推理的上下文负担与“思维污染”。
 
-子 Agent 的 system prompt **默认复用主 Agent** 的提示词，但允许在每个步骤按任务性质注入更聚焦的“skill”（与 `enable-skills-usage` 提案形成联动），实现类似人类在多任务间“清空大脑→切换工作模式”的效果。
+子 Agent 的 Stable Prefix **默认复用主 Agent** 的稳定前缀（system prompt + 静态工具规范等）。每个步骤的 task/交接摘要/skills 摘要必须写入 TurnContext（volatile），不得回写稳定 system prompt（避免打碎 KV cache），从而实现类似人类在多任务间“清空大脑→切换工作模式”的效果。
 
 ## 动机 (Motivation)
 1. **上下文切割**：长链路任务（例如 4 步）在第 3 步时往往不需要第 1/2 步的全部细节，只需要可追溯的“流水账 + 关键结论/约束”即可继续推进。
 2. **认知负担与漂移**：上下文越长越容易引入干扰信息，导致方案漂移、重复劳动、忽略新约束。
 3. **更像人类的工作方式**：人类完成阶段性任务会在阶段间切换心智模型（后端→前端→文档），并保留关键节点记录而非全量记忆。
-4. **与技能模块联动**：每个步骤可以自动挑选相关 skill 并注入子 Agent system prompt，提高专注度与执行质量，同时避免把大量技能塞进主提示词。
+4. **与技能模块联动**：每个步骤可以自动挑选相关 skill 并写入子 Agent TurnContext（volatile），提高专注度与执行质量，同时避免把大量技能塞进主提示词或回写稳定前缀。
 
 ## 建议方案 (Proposed Solution)
 ### 1) 子 Agent 启动应当是 agentic（由主 Agent 判断）
@@ -34,7 +34,7 @@
 ### 3) 与技能召回联动（可选，但建议）
 当 `enable-skills-usage` 落地后，子 Agent 在启动前可以：
 - 基于“本步骤任务描述”调用技能召回工具获取 Top-K skills
-- 仅把 Top-K skills 的中文摘要注入到子 Agent 的 system prompt（而非注入主 Agent 或全量技能）
+- 仅把 Top-K skills 的中文摘要写入子 Agent TurnContext（volatile）（而非回写稳定 system prompt、也不注入主 Agent 或全量技能）
 
 ### 4) 资源限制与安全边界
 为避免递归膨胀与失控，子 Agent 需要具备默认限制：

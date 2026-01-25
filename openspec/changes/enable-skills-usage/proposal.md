@@ -10,7 +10,7 @@
 
 三处来源默认全部启用；系统对三处来源取**并集**后按技能 `name` 去重（同名冲突的消解规则在 design 中定义）。
 
-考虑到未来可能存在几千个技能，本方案引入一个**独立于主 agent** 的“技能召回/挑选工具”（Skill Recall Tool），用以在聊天开始前从海量技能中挑选出少量最相关的技能，再注入到系统提示词中，避免把完整技能列表塞进提示词导致上下文膨胀与性能退化。
+考虑到未来可能存在几千个技能，本方案引入一个**独立于主 agent** 的“技能召回/挑选工具”（Skill Recall Tool），用以在聊天开始前从海量技能中挑选出少量最相关的技能，并把“推荐技能摘要”写入 TurnContext（volatile）（而非回写稳定 system prompt），避免把完整技能列表塞进上下文导致膨胀，同时保持 KV cache 友好。
 
 ## 动机 (Motivation)
 1. **兼容 Claude Code**：希望复用/迁移 Claude Code 的 `~/.claude/skills` 目录下已有技能资产。
@@ -54,9 +54,9 @@
 > 本阶段不引入“Selector Prompt + 二次 LLM 调用”的选择器；推荐技能直接取 Top-1（或无推荐）。
 
 ### 5) 提示词注入（Injection）
-`ChatHandler` 在构建 system prompt 时：
+`ChatHandler` 在构建 prompt 时：
 - 调用技能召回工具召回 Top-8，并取 Top-1 作为推荐技能（或 `none`）
-- 仅将“推荐技能摘要”以中文形式追加到 system prompt（避免注入全量或大列表）
+- 将“推荐技能摘要”以中文形式写入 TurnContext（volatile）消息（避免注入全量或大列表；不得回写稳定 system prompt，避免破坏 KV cache）
 - 提示 agent：如需使用某技能，需先读取对应 `SKILL.md` 并遵循其操作协议
 
 ### 6) 保留“指定技能名称”的使用方式（Explicit Skill）

@@ -14,7 +14,7 @@
 ## enable-skills-usage（技能发现与召回）
 该特性目标是“从海量技能里挑少量相关技能注入 prompt”，避免把全量技能塞进上下文。
 - **来源**：`<workspace>/.oneagent/skills/**/SKILL.md`、`~/.claude/skills/**/SKILL.md`、`~/.codex/skills/**/SKILL.md`；取并集后按 name 去重（.oneagent > .claude > .codex），必须支持目录 symlink 且避免循环。
-- **召回方案已调整**：本阶段不引入 SQLite FTS/索引；采用 `rg`（ripgrep）对 `SKILL.md` 匹配计分并返回 Top-8（稳定排序），system prompt 仅注入 Top-1 推荐技能摘要。
+- **召回方案已调整**：本阶段不引入 SQLite FTS/索引；采用 `rg`（ripgrep）对 `SKILL.md` 匹配计分并返回 Top-8（稳定排序），TurnContext（volatile）仅注入 Top-1 推荐技能摘要（不回写稳定 system prompt，保持 KV cache 友好）。
 - **为什么不用 go-memdb**：memdb 更偏结构化内存索引，做全文召回仍要自建倒排/分词/权重；相比之下 `rg` 在 macOS/Linux 性能更好、实现成本最低。
 
 主要风险在于：`rg` 缺失时的降级策略（MVP 可先 doctor 提示安装）、扫描边界（避免误扫超大目录/设置超时与输出上限）、以及 symlink 循环处理。
@@ -23,7 +23,7 @@
 该特性通过隔离上下文的 subagent 来执行步骤，并用“短总结 + findings 引用”控制主上下文膨胀。
 - **交付件**：每步产出 `FINDINGS.md` + `trace.jsonl`，落 `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/...`；主 agent 仅保留 `summary + findings_path/trace_log_path`。
 - **scope**：子 agent 可写范围使用 glob（相对 `ONEAGENT_HOME`），由文件工具层强制越界拦截；并发先后置（MVP 串行）。
-- **联动**：按步骤注入 skills（调用 skills recall Top-K）可作为增强项。
+- **联动**：按步骤调用 skills recall Top-K，并把 skills 摘要写入子 agent TurnContext（volatile）可作为增强项（不得回写稳定 system prompt）。
 
 主要风险是资源治理（max_steps/max_runtime/log 大小）、日志轮转清理、失败重试语义；这些如果不尽早定，容易出现“能跑但不可控/不可运维”的情况。
 
