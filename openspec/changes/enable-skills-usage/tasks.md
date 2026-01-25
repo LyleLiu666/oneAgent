@@ -3,7 +3,7 @@
 - [ ] 定义技能来源：`<workspace>/.oneagent/skills`、`~/.claude/skills`、`~/.codex/skills`（三者默认启用；取并集后按 name 去重；同名冲突按稳定规则消解） <!-- id: 1 -->
 - [ ] 创建 `internal/skill`：扫描技能目录包（目录内 `SKILL.md`）并解析元数据（frontmatter + 回退策略） <!-- id: 2 -->
 - [ ] 支持目录 symlink：扫描时跟随 symlink 目录，且避免循环引用 <!-- id: 3 -->
-- [ ] 创建 `internal/skillindex`：使用 SQLite FTS 建立本地技能索引（支持增量更新） <!-- id: 4 -->
+- [ ] 创建 `internal/skillindex`：使用 SQLite FTS 建立本地技能索引（支持增量更新；索引默认落在 `ONEAGENT_HOME`，并按 workspace 做隔离） <!-- id: 4 -->
 - [ ] 创建独立的技能召回/挑选组件：
   - [ ] 召回：Top-8（固定） <!-- id: 5 -->
   - [ ] 选择器：用 Selector Prompt（复用主对话模型）在 Top-8 中选出 `selected_skill` 或 `none`（可配置关闭/降级为 Top-1） <!-- id: 6 -->

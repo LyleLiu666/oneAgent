@@ -41,7 +41,7 @@
 ### 3) 技能索引（Index）
 为支持上千技能规模，系统维护一个本地索引（建议 SQLite + FTS）：
 - 由“技能召回工具”负责构建/更新索引（可增量更新）
-- 索引存储在 `.oneagent/` 下（例如 `.oneagent/cache/skill-index.sqlite`）
+- 索引默认存储在 `ONEAGENT_HOME` 下（避免污染 workspace/repo），并按 workspace 做隔离（例如 `ONEAGENT_HOME/cache/skills/<workspace_id>/skill-index.sqlite`）
 
 ### 4) 独立的技能召回/挑选工具（Skill Recall Tool）
 新增一个独立组件（可作为可执行工具或内部库 + CLI）：

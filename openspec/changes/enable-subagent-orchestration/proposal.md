@@ -50,8 +50,8 @@
   - 数据库中的 trace 只存“摘要 + 指针”（例如 log 文件路径、run_id）
 
 示例目录（仅示意，可配置）：
-- `<workspace>/.logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
-- `<workspace>/.logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
+- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
+- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
 
 ## 影响范围 (Impact)
 - 后端：新增子 Agent 运行组件与工具；需要接入现有 tool-loop、trace 与（可选）会话/消息持久化
@@ -66,5 +66,5 @@
 - 子 Agent 的完整执行痕迹可被回溯（日志文件 + trace 指针）。
 
 ## 开放问题 (Open Questions)
-1. 默认工具权限：子 Agent 默认是否拥有与主 Agent 相同的工具集合？是否需要按任务类型收敛到最小权限？
+1. 默认工具权限：按当前方向，默认与主 Agent 一致（包含文件类工具），但应受 workspace/scope 限制；是否仍需要按任务类型提供可选的最小权限模板？
 2. 并发：是否需要支持并行子 Agent（例如并行调研/对比），还是先做串行（MVP）？

@@ -12,16 +12,19 @@
 - **THEN** 系统输出版本号与构建信息（至少包含 git commit 或 build date）
 
 ### Requirement: 支持运行画像（profile）并提供安全默认值
-系统必须 (MUST) 支持至少 `local` 与 `dev` 两种运行画像，并在 `local` 模式下默认以局域网（LAN）可访问方式启动，同时默认阻止公网访问。
+系统必须 (MUST) 支持至少 `local` 与 `dev` 两种运行画像，并在 `local` 模式下默认以局域网（LAN）可访问方式启动。
+
+系统必须 (MUST) 默认启用认证（见 `auth-mode`），并在登录页面明确提示“仅建议在可信局域网内使用；在公网暴露有非常大风险”。
+
+系统不应 (SHOULD NOT) 依赖“按客户端 IP 识别公网并阻止”的方式作为默认安全策略（IPv6 与反向代理场景下该策略不可靠）。
 
 #### Scenario: local 模式默认监听局域网
 - **WHEN** 用户执行 `oneagent serve --profile local` 且未显式指定 bind 地址
 - **THEN** 服务默认监听 `0.0.0.0`（或等价的“对局域网可访问”的监听地址）
 
-#### Scenario: local 模式默认阻止公网访问
-- **WHEN** 服务以 `local` profile 启动且未显式开启公网访问
-- **WHEN** 有来自公网 IP 的请求访问任意受保护 API
-- **THEN** 系统拒绝该请求（例如返回 HTTP 403）
+#### Scenario: local 模式支持 IPv6 bind
+- **WHEN** 用户执行 `oneagent serve --profile local --bind ::`（或等价 IPv6 监听地址）
+- **THEN** 服务可以正常启动并接受来自 IPv6 的请求（例如浏览器可访问 UI）
 
 #### Scenario: server profile 废弃
 - **WHEN** 用户执行 `oneagent serve --profile server`

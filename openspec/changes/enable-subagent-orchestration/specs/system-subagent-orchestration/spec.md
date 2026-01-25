@@ -81,10 +81,22 @@
 ### Requirement: 限制与递归控制 (Limits & Recursion Control)
 系统必须 (MUST) 对子 Agent 的执行施加限制，包括但不限于：最大递归深度、最大工具执行步数/时长、交接输出大小上限；并且默认禁止子 Agent 再次启动子 Agent（或限制在允许的最大深度内）。
 
+同时系统应该 (SHOULD) 将“最大步数/时长/日志规模”的默认值设置得**偏大**（目标是长时间运行并交付可用结果，而非 demo），并允许通过配置覆盖。
+
 #### Scenario: 子 Agent 尝试再启动子 Agent 被拒绝
 - **GIVEN** 系统默认最大递归深度为 1
 - **WHEN** 子 Agent 尝试启动另一个子 Agent
 - **THEN** 系统拒绝该请求并返回清晰的错误原因（例如“subagent recursion is disabled”）
+
+### Requirement: 默认工具权限与文件作用域 (Default Tools & File Scope)
+系统必须 (MUST) 默认允许子 Agent 使用与主 Agent 相同的工具集合（包含文件读写/编辑/删除等工具），以支持生产级交付。
+
+系统必须 (MUST) 支持对子 Agent 的“可写文件范围”进行限制（scope，通常是 workspace 的子目录集合），并在文件工具层强制执行：超出 scope 的写/改/删请求必须被拒绝并返回可理解错误。
+
+#### Scenario: 子 Agent 越界修改文件被拒绝
+- **GIVEN** 当前会话 workspace 为 `<workspace>/`，并且子 Agent scope 被限制为 `<workspace>/backend/`
+- **WHEN** 子 Agent 尝试修改 `<workspace>/frontend/App.vue`
+- **THEN** 系统拒绝该写/改/删操作，并返回清晰错误（例如 “path is outside subagent scope”）
 
 ### Requirement: 子 Agent 可观测性与完整痕迹落盘 (Sub-Agent Observability & Full Trace Logging)
 系统必须 (MUST) 记录子 Agent 执行的可观测数据，包括 parent→child 关联、输入摘要、输出短总结、耗时与模型信息，并以 `subagent` 类型的 trace 条目暴露。
@@ -100,5 +112,5 @@
 #### Scenario: 日志文件按日期与 session_id 分类可定位
 - **GIVEN** 主 Agent 触发一次子 Agent 执行
 - **WHEN** 子 Agent 执行结束
-- **THEN** 系统在 `<workspace>/.logs/subagent/YYYY-MM-DD/<session_id>/`（或等价可配置目录）下生成可定位的日志文件（jsonl）
+- **THEN** 系统在 `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/`（或等价可配置目录）下生成可定位的日志文件（jsonl）
 - **THEN** 系统返回的 `trace_log_path` 指向该日志文件

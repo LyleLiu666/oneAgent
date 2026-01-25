@@ -2,27 +2,36 @@
 
 ## ADDED Requirements
 
-### Requirement: 默认使用共享密码作为访问控制
-系统必须 (MUST) 支持 `AUTH_MODE=password`，并在未显式配置时默认启用该模式（以满足“局域网可访问但不裸奔”的默认安全要求）。
+### Requirement: 默认生成本地访问令牌（不过期）
+系统必须 (MUST) 支持 `AUTH_MODE=token` 作为默认认证模式，并在未显式配置 token 值时于启动时自动生成一个高强度随机 token（不过期），并持久化到 `ONEAGENT_HOME`（例如 `ONEAGENT_HOME/config/auth_token`）。
 
-#### Scenario: local/dev 默认启用 password
+为兼容历史配置，系统应该 (SHOULD) 继续接受 `AUTH_MODE=password` 作为 `token` 的别名（行为一致）。
+
+#### Scenario: local/dev 默认启用 token
 - **WHEN** 用户以 `local` profile 启动且未显式设置 `AUTH_MODE`
-- **THEN** 系统默认使用 `AUTH_MODE=password`
+- **THEN** 系统默认使用 `AUTH_MODE=token`
 - **WHEN** 用户以 `dev` profile 启动且未显式设置 `AUTH_MODE`
-- **THEN** 系统默认使用 `AUTH_MODE=password`
+- **THEN** 系统默认使用 `AUTH_MODE=token`
 
-### Requirement: Password 模式下 API 必须携带共享密码
-系统必须 (MUST) 在 `AUTH_MODE=password` 时要求所有受保护 API 请求携带共享密码；密码错误或缺失时应拒绝请求。
+### Requirement: Token 模式下 API 必须携带访问令牌
+系统必须 (MUST) 在 `AUTH_MODE=token` 时要求所有受保护 API 请求携带访问令牌；token 错误或缺失时应拒绝请求。
 
-#### Scenario: 缺失或错误密码被拒绝
-- **WHEN** `AUTH_MODE=password` 且客户端未携带密码访问任意受保护 API
+#### Scenario: 缺失或错误 token 被拒绝
+- **WHEN** `AUTH_MODE=token` 且客户端未携带 token 访问任意受保护 API
 - **THEN** 系统返回 HTTP 401（或等价的未授权响应）
-- **WHEN** `AUTH_MODE=password` 且客户端携带错误密码访问任意受保护 API
+- **WHEN** `AUTH_MODE=token` 且客户端携带错误 token 访问任意受保护 API
 - **THEN** 系统返回 HTTP 401（或等价的未授权响应）
 
-#### Scenario: 通过 Authorization 头携带共享密码
-- **WHEN** `AUTH_MODE=password` 且客户端以 `Authorization: Bearer <password>` 形式携带共享密码访问受保护 API
+#### Scenario: 通过 Authorization 头携带 token
+- **WHEN** `AUTH_MODE=token` 且客户端以 `Authorization: Bearer <token>` 形式携带 token 访问受保护 API
 - **THEN** 系统允许该请求通过鉴权
+
+### Requirement: 登录页面提示局域网风险
+系统必须 (MUST) 在登录页面（或等价入口）明确提示：该产品仅建议在可信局域网内使用；将服务暴露到公网有非常大风险。
+
+#### Scenario: 登录页包含风险提示
+- **WHEN** 用户打开登录页面
+- **THEN** 页面包含“仅建议在局域网内使用/公网风险很大”的明确提示文本
 
 ### Requirement: 支持显式关闭认证（仅限开发/离线极简）
 系统必须 (MUST) 支持 `AUTH_MODE=none`，用于开发或离线极简场景；该模式必须显式开启，且启动日志中包含明确风险提示。
@@ -39,4 +48,3 @@
 #### Scenario: OAuth 相关接口返回废弃提示
 - **WHEN** 用户在本地工具模式下请求 `/api/auth/config` 或 `/api/auth/callback`
 - **THEN** 系统返回明确的废弃响应（例如 HTTP 410 或 404，并包含可理解的错误信息）
-

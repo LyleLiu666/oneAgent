@@ -16,10 +16,12 @@
 2) `~/.claude/skills`
 3) `~/.codex/skills`
 
+索引文件默认应存放在 `ONEAGENT_HOME` 下（避免污染 workspace/repo），并可按 workspace 做隔离（例如 `ONEAGENT_HOME/cache/skills/<workspace_id>/skill-index.sqlite`）。
+
 #### Scenario: 索引不存在时自动创建
 - **GIVEN** 工作区存在至少一个技能文件且本地索引文件不存在
 - **WHEN** 执行索引构建/更新
-- **THEN** 生成索引文件（例如位于 `.oneagent/cache/skill-index.sqlite`）
+- **THEN** 生成索引文件（例如位于 `ONEAGENT_HOME/cache/skills/<workspace_id>/skill-index.sqlite`）
 
 #### Scenario: 技能变更触发索引更新
 - **GIVEN** 索引已存在且某个 `SKILL.md` 内容或元数据发生变化

@@ -63,8 +63,8 @@ MVP 推荐：
   - metadata：parent_session_id、run_id、depth、model、tool_ids、耗时等
 
 建议目录结构（仅示意，可配置）：
-- `<workspace>/.logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
-- `<workspace>/.logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
+- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
+- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
 
 ## 交接格式 (Handoff Format)
 子 Agent 的交付以**文件**为主，而不是把所有信息塞回 tool result 文本。
@@ -104,9 +104,15 @@ MVP 推荐：
 
 ## 安全与限制 (Safety & Limits)
 - 最大深度：默认 depth=1（子 Agent 不允许再启动子 Agent）
-- 最大步骤：例如 20 次 tool-loop step（与现有一致或更小）
-- 输出大小：handoff 字段做长度上限（避免把全量过程回灌主上下文）
-- 工具权限：支持 allowlist；默认继承主工具集但可按步骤收敛（MVP 可先继承）
+- 最大步骤/时长/输出：需要配置项并设置**偏大**的默认值（目标是长时间运行与可交付的生产级结果，而非 demo）；同时保留硬上限以避免失控
+- 工具权限：默认继承主工具集（包含文件类工具），但必须受 workspace/scope 限制；并支持 allowlist 作为收敛手段
+
+## 并发与文件作用域 (Concurrency & File Scope)
+MVP 推荐先实现**串行** subagent（避免并发编辑同一资源带来的锁与长等待）。
+
+如果未来需要并发 subagent，建议依赖一个“计划/分工”模块，在启动并发 subagent 前先划定每个 subagent 的可编辑范围（scope，通常是 workspace 的子目录集合），并在文件工具层强制校验：
+- 子 Agent 只能对 scope 内文件做写/改/删；越界则返回可理解错误，促使其重试或调整计划
+- 通过“分区”优先规避全局锁；锁仅作为最后手段（例如短时间文件级锁）
 
 ## 权衡 (Trade-offs)
 - **tool 方式 vs 系统自动编排**：tool 方式更容易融入现有架构；自动编排可更强控但更复杂。

@@ -6,9 +6,9 @@
 一个新的包，负责从多个来源发现技能，并抽象成统一的 `Skill` 列表。
 
 #### 支持的来源（本阶段）
-- **oneAgent 项目私有目录**：`<workspace>/.oneagent/skills/**/SKILL.md`
-- **Claude Code 全局目录**：`~/.claude/skills/**/SKILL.md`
-- **Codex 全局目录**：`~/.codex/skills/**/SKILL.md`
+- **oneAgent 项目私有目录**：`<workspace>/.oneagent/skills/**/SKILL.md`（仅当会话启用 workspace 时生效）
+- **Claude Code 全局目录**：`~/.claude/skills/**/SKILL.md`（`~` 表示用户主目录）
+- **Codex 全局目录**：`~/.codex/skills/**/SKILL.md`（`~` 表示用户主目录）
 
 > 参考实际结构：`~/.claude/skills` 与 `~/.codex/skills` 下常见“技能目录为 symlink 指向真实目录（例如 `~/.agents/skills/...`）”。扫描时必须正确处理 symlink（需要跟随目录 symlink），并避免循环引用。
 
@@ -36,7 +36,7 @@
 
 ### 3) 技能索引（`internal/skillindex`）
 为支持“几千个技能”的场景，引入本地索引层（建议 SQLite + FTS5）：
-- 索引位置：`<workspace>/.oneagent/cache/skill-index.sqlite`（或等价位置）
+- 索引位置：默认存放在 `ONEAGENT_HOME`（避免污染 repo），并按 workspace 做隔离（例如 `ONEAGENT_HOME/cache/skills/<workspace_id>/skill-index.sqlite`）
 - 索引字段：`skill_id/name/description/tags/source/path/mtime/hash`
 - 更新策略（MVP）：启动时或首次请求时“增量构建/更新”
   - 可用 `mtime+size` 或内容 hash 判断变更
