@@ -26,9 +26,9 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 ### 1) Profile: `local` vs `dev`（`server` 废弃）
 - `local`（默认）：面向本机单用户/家庭或办公室局域网使用。
   - 默认监听 `0.0.0.0`（便于同网段设备访问）
-  - 默认阻止公网访问（通过来源 IP 私网白名单/显式开关）
+  - 默认不依赖“按客户端 IP 阻断公网访问”的策略（IPv6/反代场景下不可靠），而是默认启用本地访问令牌认证，并在 UI 中明确风险提示
   - 默认使用本地数据目录，默认 SQLite 持久化
-  - 默认使用共享密码作为访问控制（不再依赖 OAuth/Keycloak）
+  - 默认使用本地访问令牌（自动生成、不过期）作为访问控制（不再依赖 OAuth/Keycloak）
 - `dev`：开发模式（前后端分离、热更新、可选 mock）。
 - `server`：**废弃**（不再作为目标画像；CLI 可选择保留兼容入口但仅输出废弃提示并按 local 处理）。
 
@@ -51,7 +51,6 @@ oneagent/
     config.yaml
   data/              # 数据（数据库、索引、缓存）
     oneagent.db      # SQLite（若启用）
-  sandbox/           # bash-root（工具沙箱根目录）
   logs/              # 日志
   tmp/               # 临时文件（可清理）
 ```
@@ -60,6 +59,12 @@ oneagent/
 - **不要**默认把数据落在当前工作目录，避免污染用户 repo。
 - 允许通过 `ONEAGENT_HOME` 或 `--home` 显式覆盖（便于便携/多实例）。
 - `doctor` 输出当前实际 home 路径与关键子路径。
+
+### 2.5) Workspace（Project）与工具作用域
+容器时代的“工作目录”主要由 volume 与容器文件系统决定；本地工具需要一个更明确的 project 边界。本提案将 `workspace` 定义为“本次会话/任务的项目根目录”：
+- 用户在新建会话时可选择是否启用 workspace，并可复用已存在的 workspace（更像 coding 场景下的 project 选择）
+- 默认仅允许修改 workspace 内文件；workspace 外尽量只读（必要时可读取，但原则上避免写入）
+- 文件类工具/搜索类工具/命令执行工具应默认对齐到 workspace（并支持按子目录进一步收敛为 scope，以支持未来并发 subagent）
 
 ### 3) 配置层级与兼容策略
 现状主要依赖环境变量。工具化后应提供配置文件，同时保留 env 兼容。
@@ -86,13 +91,14 @@ oneagent/
 - 迁移策略：优先做到“SQLite 与 Postgres 均可跑通 + 自动迁移”，至于“跨库数据迁移”可后置为增强项。
 
 ### 5) 认证：新增 Local Auth（避免强依赖 Keycloak）
-当前 OAuth 流程依赖 Keycloak，且前端需要 Keycloak 配置进行跳转。为满足“本地工具 + 局域网默认可访问”的体验，本提案采用**共享密码**作为访问控制，替代登录体系。
+当前 OAuth 流程依赖 Keycloak，且前端需要 Keycloak 配置进行跳转。为满足“本地工具 + 局域网默认可访问”的体验，本提案采用**本地访问令牌**作为访问控制，替代登录体系。
 
-推荐方案：Password Auth（共享密码）
-- `AUTH_MODE=password`（默认）：
-  - 后端通过环境变量/配置文件读取一个共享密码（不做账号体系）
-  - 前端首次访问时输入密码，并将其保存为“访问凭证”（例如存储到本地并在每个请求中带上 `Authorization` 头）
-  - 后端在中间件中验证密码后放行请求，并注入一个固定的单用户身份（例如 `user_id="local"`），以复用现有数据模型与 Settings/Session 存储逻辑
+推荐方案：Token Auth（本地访问令牌）
+- `AUTH_MODE=token`（默认）：
+  - 后端在启动时读取/生成一个本地访问令牌（不过期），并持久化到 `ONEAGENT_HOME`（例如 `ONEAGENT_HOME/config/auth_token`）
+  - 前端首次访问时输入 token，并将其保存为“访问凭证”（例如存储到本地并在每个请求中带上 `Authorization: Bearer <token>`）
+  - 登录页面必须明确提示：仅建议在可信局域网内使用；将服务暴露到公网风险极大
+  - 后端在中间件中验证 token 后放行请求，并注入一个固定的单用户身份（例如 `user_id="local"`），以复用现有数据模型与 Settings/Session 存储逻辑
 - `AUTH_MODE=none`（可选）：
   - 仅用于开发/离线极简场景，必须显式开启
   - 启动日志中输出强提示，并建议只在可信网络中使用
@@ -132,8 +138,8 @@ Keycloak/OAuth 相关能力：
 ### 迁移路径 A（过渡期）：继续使用 Docker（不阻断老用户）
 - 对已有 Docker 用户，在过渡期内保留 `docker-compose.yml` 路径。
 
-### 迁移路径 B（推荐目标）：本地工具默认 SQLite + Password Auth（LAN 优先）
-- 新用户：默认 SQLite + 共享密码，开箱即用；局域网可访问但默认阻止公网访问。
+### 迁移路径 B（推荐目标）：本地工具默认 SQLite + Token Auth（LAN 优先）
+- 新用户：默认 SQLite + 本地访问令牌（自动生成、不过期），开箱即用；局域网可访问并明确提示不要暴露到公网（不做 IP 阻断）。
 - 老用户：可以选择继续使用 Postgres（仅作为迁移/高级用户路径），不强制迁移；后续再提供“导入/导出”工具。
 
 回滚策略：
@@ -148,6 +154,6 @@ Keycloak/OAuth 相关能力：
 
 ## 开放问题 (Open Questions)
 - “工具形应用”的核心交互是否仍以 Web UI 为主？是否需要增加纯 CLI 模式（例如 `oneagent chat`）？
-- 共享密码的配置与轮换机制：仅 env/config，还是支持首次启动生成/交互式设置？
-- LAN 与公网的判定策略：默认私网白名单是否覆盖 IPv6 ULA/链路本地地址？是否需要显式 `--allow-public`？
+- 本地访问令牌的呈现与轮换机制：token 是否仅首次启动输出一次？是否提供 `oneagent auth reset` 用于轮换？
+- 反向代理支持：是否需要 `TRUST_PROXY`/`BASE_URL`/`X-Forwarded-*` 处理来改善反代下的 URL 与日志体验？
 - SQLite 数据库中落盘的 API Key 是否需要加密（例如 password 派生密钥），还是仅依赖本机文件权限即可？

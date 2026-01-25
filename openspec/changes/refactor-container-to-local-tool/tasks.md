@@ -3,7 +3,7 @@
 > 说明：本文件用于实现阶段（apply）逐条勾选。每一项都应可验证（含测试/自检/手工步骤）。
 
 ## 1. 对齐与基线梳理
-- [ ] 明确目标画像与范围（local/dev；server 废弃），并在 proposal/design 中锁定关键决策（LAN 默认、共享密码、SQLite） <!-- id: 1 -->
+- [ ] 明确目标画像与范围（local/dev；server 废弃），并在 proposal/design 中锁定关键决策（workspace 定义、跨平台、SQLite、本地访问令牌、IPv6/反代立场） <!-- id: 1 -->
 - [ ] 盘点当前 Docker 镜像内置依赖清单（rg/jq/pandoc/ffmpeg/...）并分类：必须/可选/可移除 <!-- id: 2 -->
 
 ## 2. CLI 入口与运行画像
@@ -13,8 +13,12 @@
 
 ## 3. 本地 Home/Data 目录
 - [ ] 设计并实现 `ONEAGENT_HOME`（或 `--home`）与默认平台路径解析 <!-- id: 6 -->
-- [ ] 实现目录结构初始化（config/data/sandbox/logs/tmp）与权限策略（最小权限） <!-- id: 7 -->
-- [ ] 将 `BASH_ROOT_DIR` 默认值改为 `ONEAGENT_HOME/sandbox`（并保留 env 覆盖） <!-- id: 8 -->
+- [ ] 实现目录结构初始化（config/data/logs/tmp）与权限策略（最小权限） <!-- id: 7 -->
+
+## 3.5 Workspace（Project）与工具作用域
+- [ ] 明确定义 workspace：新建会话时可选择/复用 workspace；不启用 workspace 时默认只对话不改文件 <!-- id: 26 -->
+- [ ] 将文件类工具的默认可写范围对齐到 workspace（workspace 外仅允许只读；越界写/改/删返回清晰错误） <!-- id: 27 -->
+- [ ] 重新定义 `BASH_ROOT_DIR`：默认对齐到当前会话的 workspace（并保留 env/flag 覆盖能力） <!-- id: 28 -->
 
 ## 4. 存储层本地化（SQLite 默认；Postgres 可选兼容）
 - [ ] 抽象数据库连接层：支持 `sqlite` 与 `postgres` 两种 driver（保持 GORM） <!-- id: 9 -->
@@ -22,10 +26,10 @@
 - [ ] （可选）保持 `DATABASE_URL` 指定 Postgres 的兼容路径（迁移/高级用户），并补充连接失败的可诊断日志 <!-- id: 11 -->
 - [ ] 为 SQLite/Postgres 增加最小集成测试（建库、AutoMigrate、健康检查） <!-- id: 12 -->
 
-## 5. 认证模式（共享密码；无登录体系）
-- [ ] 增加 `AUTH_MODE` 配置（password/none）并在中间件层实现分支 <!-- id: 13 -->
-- [ ] 实现 Password Auth：校验共享密码（推荐沿用 `Authorization: Bearer ...` 以最小化前端改动） <!-- id: 14 -->
-- [ ] 前端适配：以“密码”作为访问凭证（可复用现有 token 存储逻辑），不再依赖 OAuth/Keycloak 登录流程 <!-- id: 15 -->
+## 5. 认证模式（本地访问令牌；无登录体系）
+- [ ] 增加 `AUTH_MODE` 配置（token/none；兼容 password 作为别名）并在中间件层实现分支 <!-- id: 13 -->
+- [ ] 实现 Token Auth：启动时自动生成不过期 token 并持久化到 `ONEAGENT_HOME`；校验 `Authorization: Bearer <token>` <!-- id: 14 -->
+- [ ] 前端适配：以“token”作为访问凭证（可复用现有 token 存储逻辑），登录页明确提示“仅建议局域网/公网风险大” <!-- id: 15 -->
 - [ ] 兼容处理：Keycloak/OAuth 相关接口与前端路由标记为废弃并逐步移除（文档与代码都需对齐） <!-- id: 16 -->
 
 ## 6. Doctor 自检与可选依赖
@@ -38,7 +42,7 @@
 - [ ] 更新 README 与 docs：默认运行方式改为本地工具，并将 Docker 标记为可选方案 <!-- id: 21 -->
 
 ## 8. 端到端验证（TDD）
-- [ ] E2E：在无 Docker 情况下从零启动（local profile），设置/输入共享密码后完成一次对话 <!-- id: 22 -->
+- [ ] E2E：在无 Docker 情况下从零启动（local profile），使用本地访问令牌完成一次登录并完成一次对话 <!-- id: 22 -->
 - [ ] E2E：缺失可选依赖（如 rg）时，doctor 与工具调用表现符合预期（降级/提示） <!-- id: 23 -->
-- [ ] E2E：在局域网内通过其它设备访问 UI（默认 LAN 监听），且来自公网的访问默认被阻止（或有明确的显式开关） <!-- id: 24 -->
+- [ ] E2E：在局域网内通过其它设备访问 UI（默认 LAN 监听），登录页包含“仅建议局域网/公网风险大”提示（不依赖 IP 阻断） <!-- id: 24 -->
 - [ ] E2E：Settings 页面可配置 LLM Provider API Key 与搜索 API Key，重启后仍生效，且接口不会泄露明文 token <!-- id: 25 -->

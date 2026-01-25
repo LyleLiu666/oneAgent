@@ -26,6 +26,14 @@
 - **WHEN** 用户执行 `oneagent serve --profile local --bind ::`（或等价 IPv6 监听地址）
 - **THEN** 服务可以正常启动并接受来自 IPv6 的请求（例如浏览器可访问 UI）
 
+### Requirement: 支持反向代理场景（不依赖 IP 阻断）
+系统必须 (MUST) 支持在反向代理（Nginx/Caddy/Traefik 等）之后运行的场景，且不得依赖“根据 RemoteIP 判定公网/内网并阻断”的逻辑作为默认安全边界（反代下 RemoteIP 往往是代理地址）。
+
+#### Scenario: 反代后仍可正常访问
+- **GIVEN** oneAgent 服务运行在反向代理之后
+- **WHEN** 客户端通过代理访问 UI 并携带 `Authorization: Bearer <token>` 调用受保护 API
+- **THEN** 系统正常鉴权与响应（不因反代场景而错误拒绝）
+
 #### Scenario: server profile 废弃
 - **WHEN** 用户执行 `oneagent serve --profile server`
 - **THEN** 系统输出废弃提示
