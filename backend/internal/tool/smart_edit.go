@@ -6,14 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/sbe"
-	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
 
 type SmartEditFileResult struct {
@@ -92,8 +89,6 @@ func smartEditDefinition() Definition {
 }
 
 func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
-	_ = ctx
-
 	var req editToolRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
@@ -113,11 +108,6 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("edits 数量过多（%d），请分段调用（每次最多 %d 条）", len(edits), maxEditOpsPerCall)
 	}
 
-	root, err := resolveSmartEditRoot()
-	if err != nil {
-		return nil, err
-	}
-
 	totalRunes := 0
 	blocks := make([]sbe.EditBlock, 0, len(edits))
 	for i, op := range edits {
@@ -128,14 +118,14 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("edits[%d].oldString 不能为空", i)
 		}
 
-		target, err := resolvePathWithinRoot(root, op.FilePath)
+		_, target, err := resolvePathForWrite(ctx, op.FilePath)
 		if err != nil {
 			return nil, fmt.Errorf("edits[%d]: %w", i, err)
 		}
 
 		// Ensure file exists
 		if _, err := os.Stat(target); os.IsNotExist(err) {
-			return nil, fmt.Errorf("文件不存在：%q。请先用 write_file 创建（或确认路径在沙箱根目录内）", op.FilePath)
+			return nil, fmt.Errorf("文件不存在：%q。请先用 write_file 创建（或确认路径在 workspace 内）", op.FilePath)
 		}
 
 		oldRunes := runeCount(op.OldString)
@@ -201,33 +191,4 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 // Helper to keep splitting consistent
 func splitLines(value string) []string {
 	return strings.Split(value, "\n")
-}
-
-func resolveSmartEditRoot() (string, error) {
-	cfg := config.GetConfig()
-	return shell.ResolveBashRoot(cfg.BashRootDir)
-}
-
-func resolvePathWithinRoot(root, path string) (string, error) {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return "", errors.New("file path is required")
-	}
-
-	var absPath string
-	if filepath.IsAbs(trimmed) {
-		absPath = filepath.Clean(trimmed)
-	} else {
-		absPath = filepath.Clean(filepath.Join(root, trimmed))
-	}
-
-	rel, err := filepath.Rel(root, absPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve path error: %w", err)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q is outside sandbox root", path)
-	}
-
-	return absPath, nil
 }

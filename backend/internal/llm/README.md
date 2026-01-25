@@ -60,4 +60,4 @@ still sent for consistency when supported.
 Best practices:
 
 - Keep system prompts stable across a session.
-- Put volatile context in user messages to maximize cache hits.
+- Put volatile per-turn context in a dedicated TurnContext message (a user message marked volatile), after stable history, to maximize cache hits.

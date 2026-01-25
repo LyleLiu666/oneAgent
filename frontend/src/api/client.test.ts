@@ -45,6 +45,7 @@ it('decodes UTF-8 correctly when a multibyte rune is split across chunks', async
         '',
         [],
         'json',
+        '',
         (event) => events.push(event),
         (err) => {
             throw err

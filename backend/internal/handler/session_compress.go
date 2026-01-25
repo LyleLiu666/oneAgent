@@ -18,6 +18,8 @@ const (
 
 	sessionCompressionMaxSummaryInputRunes = 120_000
 	sessionCompressionMaxMsgRunesForInput  = 4_000
+
+	sessionCompressionSummaryPrefix = "【会话压缩】"
 )
 
 func approximateContextRunes(messages []llm.ChatMessage) int {
@@ -196,7 +198,7 @@ func compressSessionIfNeeded(
 		summary = "流水账:\n- （摘要生成为空）\n\nFindings:\n- （摘要生成为空）"
 	}
 
-	summaryHeader := fmt.Sprintf("【会话压缩】已压缩 %d 条历史消息\n\n", len(toSummarize))
+	summaryHeader := fmt.Sprintf("%s已压缩 %d 条历史消息\n\n", sessionCompressionSummaryPrefix, len(toSummarize))
 	summaryContent := summaryHeader + summary
 
 	summaryCreatedAt := time.Now()
@@ -232,7 +234,7 @@ func compressSessionIfNeeded(
 
 	newMessages := make([]llm.ChatMessage, 0, 2+len(toKeep)+1)
 	newMessages = append(newMessages, llmMessages[0]) // system (already includes tool prompt additions)
-	newMessages = append(newMessages, llm.BuildAssistantMessage(summaryContent))
+	newMessages = append(newMessages, llm.BuildSessionSummaryMessage(summaryContent))
 
 	for _, msg := range toKeep {
 		newMessages = append(newMessages, llm.ChatMessage{Role: msg.Role, Content: msg.Content})

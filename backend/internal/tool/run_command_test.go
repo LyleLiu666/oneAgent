@@ -13,8 +13,9 @@ import (
 func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
 	startArgs := map[string]any{
 		"action":              "start",
@@ -24,7 +25,7 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 	}
 	startRaw, _ := json.Marshal(startArgs)
 
-	startAny, err := runCommandTool(context.Background(), startRaw)
+	startAny, err := runCommandTool(ctx, startRaw)
 	if err != nil {
 		t.Fatalf("start: expected no error, got %v", err)
 	}
@@ -60,7 +61,7 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 	}
 	pollRaw, _ := json.Marshal(pollArgs)
 
-	pollAny, err := runCommandTool(context.Background(), pollRaw)
+	pollAny, err := runCommandTool(ctx, pollRaw)
 	if err != nil {
 		t.Fatalf("poll: expected no error, got %v", err)
 	}
@@ -88,7 +89,7 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 			"stdout_offset": final.StdoutOffset,
 			"stderr_offset": final.StderrOffset,
 		})
-		nextAny, err := runCommandTool(context.Background(), nextRaw)
+		nextAny, err := runCommandTool(ctx, nextRaw)
 		if err != nil {
 			t.Fatalf("poll again: expected no error, got %v", err)
 		}
@@ -126,9 +127,8 @@ func TestRunCommandTool_StartThenPoll_ReturnsDeltas(t *testing.T) {
 }
 
 func TestRunCommandTool_PollUnknownJob_ReturnsError(t *testing.T) {
-	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	raw, _ := json.Marshal(map[string]any{

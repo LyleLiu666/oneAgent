@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
-import { Send, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu } from 'lucide-vue-next'
+import { Send, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
 import { streamChat, getSessions, getSession, truncateSession, getModels, getTools } from '@/api/client'
@@ -25,6 +25,7 @@ const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
 const toolsLoading = ref(false)
 const tools = ref<ToolOption[]>([])
+const workspacePath = ref(localStorage.getItem('oneagent-workspace') || '')
 
 interface ModelOption {
   id: string
@@ -244,6 +245,12 @@ const loadSessionMessages = async (
       selectedToolProtocol.value = 'json'
     }
     const sessionSystemPrompt = raw?.metadata?.system_prompt
+    const sessionWorkspace = raw?.metadata?.workspace
+    if (typeof sessionWorkspace === 'string' && sessionWorkspace.trim()) {
+      workspacePath.value = sessionWorkspace
+    } else {
+      workspacePath.value = ''
+    }
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
     const mapped: ChatMessage[] = rawMessages.map((m: any, idx: number) => {
         const msg = m ?? {}
@@ -375,6 +382,14 @@ const startNewSession = () => {
   chatStore.setCurrentSession('')
 }
 
+watch(
+  workspacePath,
+  (value) => {
+    localStorage.setItem('oneagent-workspace', String(value || ''))
+  },
+  { immediate: true }
+)
+
 const handleScroll = () => {
   if (messagesContainer.value) {
     const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
@@ -500,6 +515,7 @@ const sendChat = async (rawMessage: string) => {
       chatStore.currentModelId,
       chatStore.currentToolIds,
       chatStore.currentToolProtocol,
+      workspacePath.value,
       (event) => {
         if (event.type === 'session') {
           chatStore.setCurrentSession(event.data)
@@ -857,6 +873,15 @@ onMounted(async () => {
               <option value="json">json tools</option>
               <option value="xml">xml tools</option>
             </select>
+            <div class="flex items-center gap-2">
+              <Folder class="w-4 h-4 text-surface-400" />
+              <input
+                v-model="workspacePath"
+                class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-[220px] max-w-full"
+                placeholder="Workspace path (server)"
+                title="Workspace path on the server machine. File tools will be scoped to this directory."
+              />
+            </div>
             <div v-if="tools.length > 0" class="flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-surface-400" />
               <div class="flex items-center gap-2">

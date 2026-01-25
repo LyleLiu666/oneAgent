@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
@@ -137,15 +136,17 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		wait = 30 * time.Second
 	}
 
-	cfg := config.GetConfig()
-
 	switch action {
 	case "start":
 		if command == "" {
 			return nil, errors.New("command is required")
 		}
+		root, err := resolveWorkspaceRoot(ctx)
+		if err != nil {
+			return nil, err
+		}
 		maxRuntime := time.Duration(req.MaxRuntimeSeconds) * time.Second
-		jobID, err := shell.StartBashAsync(command, maxRuntime, cfg.BashRootDir)
+		jobID, err := shell.StartBashAsync(command, maxRuntime, root)
 		if err != nil {
 			return nil, err
 		}

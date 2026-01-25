@@ -32,6 +32,9 @@ type Config struct {
 	EnableTrace bool
 
 	BashRootDir string
+	// BashRootDirExplicit indicates whether BashRootDir was explicitly configured
+	// via flags/env/config file. When false, tools should default to workspace/home.
+	BashRootDirExplicit bool
 
 	LogRetentionDays int
 
@@ -163,6 +166,9 @@ func loadConfigFile(cfg *Config) error {
 	}
 	if parsed.BashRootDir != nil {
 		cfg.BashRootDir = *parsed.BashRootDir
+		if strings.TrimSpace(cfg.BashRootDir) != "" {
+			cfg.BashRootDirExplicit = true
+		}
 	}
 	if parsed.LogRetentionDays != nil {
 		cfg.LogRetentionDays = *parsed.LogRetentionDays
@@ -189,6 +195,7 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("BASH_ROOT_DIR")); v != "" {
 		cfg.BashRootDir = v
+		cfg.BashRootDirExplicit = true
 	}
 	if v := strings.TrimSpace(os.Getenv("LOG_RETENTION_DAYS")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -218,6 +225,7 @@ func applyOptions(cfg *Config, opts LoadOptions) {
 	}
 	if v := strings.TrimSpace(opts.BashRootDir); v != "" {
 		cfg.BashRootDir = v
+		cfg.BashRootDirExplicit = true
 	}
 	if opts.LogRetentionDays != 0 {
 		cfg.LogRetentionDays = opts.LogRetentionDays
@@ -253,9 +261,7 @@ func normalize(cfg *Config) {
 		cfg.AuthMode = "token"
 	}
 
-	if cfg.BashRootDir == "" {
-		cfg.BashRootDir = cfg.Home
-	} else {
+	if cfg.BashRootDirExplicit && cfg.BashRootDir != "" {
 		expanded, err := expandPath(cfg.BashRootDir)
 		if err == nil {
 			cfg.BashRootDir = expanded
@@ -331,4 +337,3 @@ func expandPath(path string) (string, error) {
 
 // Now returns current time, overrideable in tests.
 var Now = time.Now
-

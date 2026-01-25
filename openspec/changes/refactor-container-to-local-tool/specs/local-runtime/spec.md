@@ -40,13 +40,13 @@
 - **THEN** 系统按 `local` profile 行为启动（或直接拒绝启动并给出明确错误）
 
 ### Requirement: 规范化本地 Home/Data 目录
-系统必须 (MUST) 采用一个统一的 “ONEAGENT_HOME” 目录作为 **agent 可修改文件的最大范围**，并允许通过环境变量或 CLI 参数覆盖。
+系统必须 (MUST) 采用一个统一的 `ONEAGENT_HOME` 目录作为 oneAgent 的**内部状态目录根**（配置/数据/日志），并允许通过环境变量或 CLI 参数覆盖。
 
 系统必须 (MUST) 将 oneAgent 的可变状态统一存放在 `ONEAGENT_HOME/.oneagent/` 下（例如 `config/ data/ logs/ tmp/`），避免把内部文件散落到 workspace 根目录。
 
 #### Scenario: 显式指定 ONEAGENT_HOME
 - **WHEN** 用户设置环境变量 `ONEAGENT_HOME=/tmp/oneagent-home` 并启动 `oneagent serve`
-- **THEN** 系统使用该目录作为 home（agent 可写范围）
+- **THEN** 系统使用该目录作为内部状态目录根
 - **THEN** 系统在首次启动时创建必要的子目录（`ONEAGENT_HOME/.oneagent/config`、`ONEAGENT_HOME/.oneagent/data`、`ONEAGENT_HOME/.oneagent/logs`、`ONEAGENT_HOME/.oneagent/tmp`）
 
 #### Scenario: 未指定时使用默认 home

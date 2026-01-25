@@ -71,6 +71,14 @@ type ChatMessage struct {
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
 	CachePoint   *CacheControl `json:"cachePoint,omitempty"`
 
+	// Volatile marks messages that must not be treated as part of the stable prefix.
+	// It is not serialized to provider payloads; it only guides cache selection.
+	Volatile bool `json:"-"`
+
+	// ForceCacheable marks messages that MUST be included in the cacheable selection
+	// for providers that require explicit cache markers (e.g., long session summaries).
+	ForceCacheable bool `json:"-"`
+
 	// EXTENSION FIELDS (optional, for tool calls):
 	Name       string     `json:"name,omitempty"`         // Function name for tool messages
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // Tool calls from assistant
@@ -116,6 +124,8 @@ type ChatCompletionOptions struct {
 	Stop              []string `json:"stop,omitempty"`              // Stop sequences
 	PromptCacheKey    string   `json:"-"`
 	EnablePromptCache bool     `json:"-"`
+	PromptCacheDowngraded      bool   `json:"-"`
+	PromptCacheDowngradeReason string `json:"-"`
 	Tools             []Tool   `json:"-"`
 	ToolChoice        any      `json:"-"`
 
@@ -321,73 +331,83 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 		opts.Trace.OnStart(ctx, messages)
 	}
 
-	reqMessages := messages
-	if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
-		reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
-	}
-
-	defaultMaxTokens := 8192
-	reqBody := chatCompletionRequest{
-		Model:    model,
-		Messages: reqMessages,
-		Stream:   true,
-	}
-
-	if opts != nil && opts.MaxTokens != nil {
-		reqBody.MaxTokens = opts.MaxTokens
-	} else {
-		reqBody.MaxTokens = &defaultMaxTokens
-	}
-
-	if opts != nil {
-		reqBody.Temperature = opts.Temperature
-		reqBody.TopP = opts.TopP
-		reqBody.FrequencyPenalty = opts.FrequencyPenalty
-		reqBody.PresencePenalty = opts.PresencePenalty
-		reqBody.Stop = opts.Stop
-		reqBody.PromptCacheKey = opts.PromptCacheKey
-		if len(opts.Tools) > 0 {
-			reqBody.Tools = normalizeTools(opts.Tools)
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		reqMessages := messages
+		if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
+			reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
 		}
-		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
+
+		defaultMaxTokens := 8192
+		reqBody := chatCompletionRequest{
+			Model:    model,
+			Messages: reqMessages,
+			Stream:   true,
 		}
-	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Cache-Control", "no-cache")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		err = fmt.Errorf("request failed: %w", err)
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
+		if opts != nil && opts.MaxTokens != nil {
+			reqBody.MaxTokens = opts.MaxTokens
+		} else {
+			reqBody.MaxTokens = &defaultMaxTokens
 		}
-		return err
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+		if opts != nil {
+			reqBody.Temperature = opts.Temperature
+			reqBody.TopP = opts.TopP
+			reqBody.FrequencyPenalty = opts.FrequencyPenalty
+			reqBody.PresencePenalty = opts.PresencePenalty
+			reqBody.Stop = opts.Stop
+			reqBody.PromptCacheKey = opts.PromptCacheKey
+			if len(opts.Tools) > 0 {
+				reqBody.Tools = normalizeTools(opts.Tools)
+			}
+			if opts.ToolChoice != nil {
+				reqBody.ToolChoice = opts.ToolChoice
+			}
+		}
+
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Accept-Encoding", "identity")
+		req.Header.Set("Cache-Control", "no-cache")
+
+		resp, err = c.httpClient.Do(req)
+		if err != nil {
+			err = fmt.Errorf("request failed: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", err)
+			}
+			return err
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+
 		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if attempt == 0 && maybeDowngradePromptCaching(opts, resp.StatusCode, respBody) {
+			continue
+		}
+
 		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
 		return err
 	}
+	defer resp.Body.Close()
 
 	// Parse SSE stream
 	reader := bufio.NewReader(resp.Body)
@@ -474,73 +494,83 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 		opts.Trace.OnStart(ctx, messages)
 	}
 
-	reqMessages := messages
-	if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
-		reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
-	}
-
-	defaultMaxTokens := 8192
-	reqBody := chatCompletionRequest{
-		Model:    model,
-		Messages: reqMessages,
-		Stream:   true,
-	}
-
-	if opts != nil && opts.MaxTokens != nil {
-		reqBody.MaxTokens = opts.MaxTokens
-	} else {
-		reqBody.MaxTokens = &defaultMaxTokens
-	}
-
-	if opts != nil {
-		reqBody.Temperature = opts.Temperature
-		reqBody.TopP = opts.TopP
-		reqBody.FrequencyPenalty = opts.FrequencyPenalty
-		reqBody.PresencePenalty = opts.PresencePenalty
-		reqBody.Stop = opts.Stop
-		reqBody.PromptCacheKey = opts.PromptCacheKey
-		if len(opts.Tools) > 0 {
-			reqBody.Tools = normalizeTools(opts.Tools)
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		reqMessages := messages
+		if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
+			reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
 		}
-		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
+
+		defaultMaxTokens := 8192
+		reqBody := chatCompletionRequest{
+			Model:    model,
+			Messages: reqMessages,
+			Stream:   true,
 		}
-	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return ChatCompletionResult{}, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Cache-Control", "no-cache")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		err = fmt.Errorf("request failed: %w", err)
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
+		if opts != nil && opts.MaxTokens != nil {
+			reqBody.MaxTokens = opts.MaxTokens
+		} else {
+			reqBody.MaxTokens = &defaultMaxTokens
 		}
-		return ChatCompletionResult{}, err
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+		if opts != nil {
+			reqBody.Temperature = opts.Temperature
+			reqBody.TopP = opts.TopP
+			reqBody.FrequencyPenalty = opts.FrequencyPenalty
+			reqBody.PresencePenalty = opts.PresencePenalty
+			reqBody.Stop = opts.Stop
+			reqBody.PromptCacheKey = opts.PromptCacheKey
+			if len(opts.Tools) > 0 {
+				reqBody.Tools = normalizeTools(opts.Tools)
+			}
+			if opts.ToolChoice != nil {
+				reqBody.ToolChoice = opts.ToolChoice
+			}
+		}
+
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return ChatCompletionResult{}, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Accept-Encoding", "identity")
+		req.Header.Set("Cache-Control", "no-cache")
+
+		resp, err = c.httpClient.Do(req)
+		if err != nil {
+			err = fmt.Errorf("request failed: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", err)
+			}
+			return ChatCompletionResult{}, err
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+
 		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if attempt == 0 && maybeDowngradePromptCaching(opts, resp.StatusCode, respBody) {
+			continue
+		}
+
 		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
 		return ChatCompletionResult{}, err
 	}
+	defer resp.Body.Close()
 
 	reader := bufio.NewReader(resp.Body)
 	var fullContent strings.Builder

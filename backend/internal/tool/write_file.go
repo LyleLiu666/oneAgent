@@ -68,8 +68,6 @@ type writeFileResult struct {
 }
 
 func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
-	_ = ctx
-
 	var req writeFileRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
@@ -83,12 +81,7 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("filePath 过长，请缩短路径（建议 <= %d 字）", maxWriteFilePathRunesLimit)
 	}
 
-	root, err := resolveSmartEditRoot()
-	if err != nil {
-		return nil, err
-	}
-
-	target, err := resolvePathWithinRoot(root, req.FilePath)
+	_, target, err := resolvePathForWrite(ctx, req.FilePath)
 	if err != nil {
 		return nil, err
 	}

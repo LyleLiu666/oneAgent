@@ -66,7 +66,7 @@ func (b *boolFlag) String() string {
 
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default; if workspace enabled, set it to <workspace>/)")
+	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default)")
 	profile := fs.String("profile", "", "profile: local|dev (server is deprecated alias)")
 	bind := fs.String("bind", "", "bind address (default: local=0.0.0.0, dev=127.0.0.1)")
 	port := fs.String("port", "", "port (default: 8080)")

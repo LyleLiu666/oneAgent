@@ -570,12 +570,16 @@ func buildAnthropicPayload(messages []ChatMessage, enableCache bool) ([]anthropi
 			}
 
 			for _, call := range msg.ToolCalls {
-				blocks = append(blocks, anthropicContent{
+				block := anthropicContent{
 					Type:  "tool_use",
 					ID:    call.ID,
 					Name:  call.Function.Name,
 					Input: parseToolInput(call.Function.Arguments),
-				})
+				}
+				if enableCache && cacheIndexes[idx] {
+					block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+				}
+				blocks = append(blocks, block)
 			}
 
 			converted = append(converted, anthropicMessage{
@@ -583,13 +587,17 @@ func buildAnthropicPayload(messages []ChatMessage, enableCache bool) ([]anthropi
 				Content: blocks,
 			})
 		case "tool":
+			block := anthropicContent{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   msg.Content,
+			}
+			if enableCache && cacheIndexes[idx] {
+				block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
+			}
 			converted = append(converted, anthropicMessage{
 				Role: "user",
-				Content: []anthropicContent{{
-					Type:      "tool_result",
-					ToolUseID: msg.ToolCallID,
-					Content:   msg.Content,
-				}},
+				Content: []anthropicContent{block},
 			})
 		default:
 			block := anthropicContent{

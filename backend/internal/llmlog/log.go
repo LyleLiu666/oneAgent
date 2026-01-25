@@ -29,6 +29,10 @@ type CallRecord struct {
 
 	PromptCacheEnabled bool   `json:"prompt_cache_enabled"`
 	PromptCacheKeyHash string `json:"prompt_cache_key_hash,omitempty"`
+	PromptCacheEpoch   int    `json:"prompt_cache_epoch,omitempty"`
+
+	PromptCacheDowngraded      bool   `json:"prompt_cache_downgraded,omitempty"`
+	PromptCacheDowngradeReason string `json:"prompt_cache_downgrade_reason,omitempty"`
 }
 
 func New(baseDir string, retentionDays int) (*Writer, error) {
@@ -67,4 +71,3 @@ func (w *Writer) WriteCall(path string, rec CallRecord) error {
 	}
 	return os.Rename(tmp, path)
 }
-

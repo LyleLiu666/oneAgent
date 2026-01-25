@@ -137,10 +137,14 @@ func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol stri
 			out = append(out, llmMsg)
 
 		default:
-			out = append(out, llm.ChatMessage{
+			llmMsg := llm.ChatMessage{
 				Role:    msg.Role,
 				Content: msg.Content,
-			})
+			}
+			if msg.Type == model.MessageTypeText && msg.Role == model.MessageRoleAssistant && strings.HasPrefix(strings.TrimSpace(msg.Content), sessionCompressionSummaryPrefix) {
+				llmMsg.ForceCacheable = true
+			}
+			out = append(out, llmMsg)
 		}
 	}
 

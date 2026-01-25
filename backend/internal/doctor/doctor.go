@@ -90,7 +90,7 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 			continue
 		}
 		if report.Checks[i].Name == "rg" {
-			report.Notes = append(report.Notes, "`rg` not found: skills recall will fall back to `grep -R` (slower).")
+			report.Notes = append(report.Notes, "`rg` not found: skills recall and `rg` tool will fall back to `grep -R` (slower).")
 		}
 		if report.Checks[i].Required {
 			report.Status = "degraded"

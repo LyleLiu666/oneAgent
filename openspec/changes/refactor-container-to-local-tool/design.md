@@ -40,9 +40,9 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 容器时代通过 volume 挂载实现“可变状态外置”。本地工具需要一个一致的目录布局。
 
 约定：
-- **默认 home**：`~/.oneagent_default`（仅 macOS/Linux；本阶段不支持 Windows）
-- **选择 workspace 时**：`home = <workspace>/`（即“home = agent 可修改文件的最大范围”）
-- oneAgent 的可变状态统一存放在 `<home>/.oneagent/` 下，避免把 `config/ logs/ data/` 直接散落在 workspace 根目录。
+- **默认 ONEAGENT_HOME**：`~/.oneagent_default`（仅 macOS/Linux；本阶段不支持 Windows），用于承载 oneAgent 的内部状态目录。
+- **workspace（项目目录）**：会话级可选，用于定义工具默认作用域与写入边界（“agent 可修改文件的最大范围”）。
+- oneAgent 的内部可变状态统一存放在 `ONEAGENT_HOME/.oneagent/` 下，避免把 `config/ logs/ data/` 直接散落到 workspace 根目录。
 
 目录结构建议：
 ```
@@ -67,9 +67,9 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 ```
 
 关键点：
-- **home = agent 可修改文件的最大范围**：任何写/改/删必须在 `<home>/` 内。
-- 允许通过 `--home` 或 `ONEAGENT_HOME` 显式覆盖；若选择了 workspace 且未显式指定 `--home`，则以 workspace 作为 home。
-- `doctor` 输出当前实际 home 路径与关键子路径（但不得输出明文 token）。
+- **workspace = agent 可修改文件的最大范围**：任何写/改/删默认必须在 workspace 内；workspace 外允许读取任意绝对路径，但不允许写/改/删。
+- 允许通过 `--home` 或 `ONEAGENT_HOME` 显式覆盖内部状态目录位置；如需“项目私有数据”，用户可将 `ONEAGENT_HOME=<workspace>`（但本阶段不强制自动切换）。
+- `doctor` 输出当前实际 `ONEAGENT_HOME` 路径与关键子路径（但不得输出明文 token）。
 
 ### 2.5) Workspace（Project）与工具作用域
 容器时代的“工作目录”主要由 volume 与容器文件系统决定；本地工具需要一个更明确的 project 边界。本提案将 `workspace` 定义为“本次会话/任务的项目根目录”：
@@ -77,7 +77,7 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 - 默认仅允许修改 workspace 内文件；workspace 外允许读取任意绝对路径，但原则上避免写入
 - 文件类工具/搜索类工具/命令执行工具应默认对齐到 workspace（并支持按子目录进一步收敛为 scope，以支持未来并发 subagent）
 
-> 已知限制：`bash/run_command` 在宿主机上运行，无法完全复用文件工具层的 home/scope 强制校验。出于灵活性与实现成本考虑（也无法彻底防止通过脚本/编辑器修改文件），当前不做硬性拦截，仅做强引导：默认 `BASH_ROOT_DIR` 对齐 `ONEAGENT_HOME`（workspace），并在提示词/错误信息中强调“优先用文件工具修改文件；bash 主要用于只读/运行命令”。
+> 已知限制：`bash/run_command` 在宿主机上运行，无法完全防止绕过文件工具层的 workspace/scope 约束。出于灵活性与实现成本考虑（也无法彻底防止通过脚本/编辑器修改文件），当前不做硬性拦截，仅做强引导：默认 `BASH_ROOT_DIR` 对齐到当前会话的 workspace（并保留 env/flag 覆盖能力），并在提示词/错误信息中强调“优先用文件工具修改文件；bash 主要用于只读/运行命令”。
 
 ### 3) 配置层级与兼容策略
 现状主要依赖环境变量。工具化后应提供配置文件，同时保留 env 兼容。
@@ -134,6 +134,30 @@ Keycloak/OAuth 相关能力：
 - 端口占用检测：默认端口是否可用
 - 存储可用性：`<home>/.oneagent/settings.db` 是否可创建/是否可写；`<home>/.oneagent/data/` 是否可写
 - 认证：输出 token 文件路径（例如 `<home>/.oneagent/config/auth_token`），但不输出明文 token
+
+#### Docker 镜像依赖盘点（历史默认容器）
+> 目的：把容器内“预装依赖”拆成三类：**必须**（核心能力直接依赖）、**可选**（能力增强/特性依赖）、**可移除**（仅 build 阶段需要或对运行期无贡献）。
+
+| 依赖 | Dockerfile 安装位置 | 用途/关联能力 | 分类 |
+| --- | --- | --- | --- |
+| `bash` | Ubuntu base | `bash`/`run_command` 工具执行 | 必须 |
+| `ca-certificates` | basic utilities | HTTPS（LLM provider / 更新等） | 必须 |
+| `git` | basic utilities / build stage | repo 操作（常见工作流） | 必须 |
+| `tzdata`/`locales` | basic utilities | 运行环境一致性（时间/编码） | 可选 |
+| `ripgrep` (`rg`) | basic utilities | 本地全文搜索加速（缺失可降级 `grep -R`） | 可选 |
+| `jq` | basic utilities | JSON 处理（工具链/脚本常用） | 可选 |
+| `curl`/`wget`/`gnupg` | basic utilities / nodesource | 下载/安装脚本（偏运维） | 可移除（runtime 镜像） |
+| `zip`/`unzip`/`tree`/`procps`/`nano` | basic utilities | 辅助调试/运维/编辑 | 可选（多数可不装） |
+| `build-essential`/`pkg-config`/`libssl-dev`/`libffi-dev` | build deps | 构建 Python 依赖/编译扩展 | 可移除（runtime 镜像） |
+| `nodejs` | app deps | 运行期若无 Node 工具链则不需要 | 可移除（runtime 镜像） |
+| `python3`/`pip`/`venv` + Python libs（`pypdf`/`pdfminer.six`/`opencv`/`librosa` 等） | app deps + pip | 文档/多媒体处理类扩展能力（若有相关工具链） | 可选 |
+| `pandoc`/`poppler-utils` | app deps | 文档转换/PDF 工具链 | 可选 |
+| `ffmpeg`/`pydub` | app deps + pip | 音视频处理 | 可选 |
+| `wkhtmltopdf`/`texlive-latex-base`/fonts | app deps | HTML/PDF/LaTeX 输出与字体 | 可选（体积大） |
+
+说明：
+- 本地工具形态默认不再“内置”上述依赖；改为 `doctor` 诊断 + 缺失提示 + 尽可能降级（例如 `rg → grep -R`）。
+- 对于 Docker（遗留/可选路径），建议后续再做一轮“runtime 镜像瘦身”：把 **可移除** 的依赖迁出最终镜像，仅保留构建阶段。
 
 ### 7) 发布与构建流水线
 当前 Dockerfile 负责“构建前端 + 构建后端 + 打包系统依赖”。本地工具需要新的 pipeline：

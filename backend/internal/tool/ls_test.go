@@ -13,12 +13,13 @@ import (
 func TestLsTool_ListsDirectory(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	resolvedRoot, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
-		t.Fatalf("resolve root: %v", err)
+		t.Fatalf("resolve workspace root: %v", err)
 	}
 
 	if err := os.MkdirAll(filepath.Join(resolvedRoot, "dir", "sub"), 0o700); err != nil {
@@ -31,7 +32,7 @@ func TestLsTool_ListsDirectory(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"path": "dir",
 	})
-	gotAny, err := runLsTool(context.Background(), raw)
+	gotAny, err := runLsTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -56,12 +57,13 @@ func TestLsTool_ListsDirectory(t *testing.T) {
 func TestLsTool_FilePath(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	resolvedRoot, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
-		t.Fatalf("resolve root: %v", err)
+		t.Fatalf("resolve workspace root: %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(resolvedRoot, "file.txt"), []byte("hi\n"), 0o644); err != nil {
@@ -71,7 +73,7 @@ func TestLsTool_FilePath(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"path": "file.txt",
 	})
-	gotAny, err := runLsTool(context.Background(), raw)
+	gotAny, err := runLsTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

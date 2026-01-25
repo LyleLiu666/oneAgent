@@ -112,40 +112,51 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 		}
 	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/responses", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Cache-Control", "no-cache")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		err = fmt.Errorf("request failed: %w", err)
-		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-			opts.Trace.OnComplete(ctx, "", err)
+	var resp *http.Response
+	for attempt := 0; attempt < 2; attempt++ {
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request: %w", err)
 		}
-		return err
-	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+		req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint+"/responses", bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("Accept-Encoding", "identity")
+		req.Header.Set("Cache-Control", "no-cache")
+
+		resp, err = c.httpClient.Do(req)
+		if err != nil {
+			err = fmt.Errorf("request failed: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", err)
+			}
+			return err
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+
 		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if attempt == 0 && maybeDowngradePromptCaching(opts, resp.StatusCode, respBody) {
+			reqBody.PromptCacheKey = ""
+			continue
+		}
+
 		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
 		return err
 	}
+	defer resp.Body.Close()
 
 	reader := bufio.NewReader(resp.Body)
 	var fullContent strings.Builder

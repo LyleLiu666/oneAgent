@@ -1,4 +1,4 @@
-.PHONY: build build-frontend sync-frontend build-backend serve doctor clean
+.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean
 
 DIST_DIR := dist
 ONEAGENT_BIN := $(DIST_DIR)/oneagent
@@ -23,6 +23,9 @@ serve: build
 
 doctor: build
 	@./$(ONEAGENT_BIN) doctor
+
+release:
+	@bash scripts/release_local.sh
 
 clean:
 	@rm -rf $(DIST_DIR)

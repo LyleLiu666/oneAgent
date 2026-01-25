@@ -13,15 +13,12 @@ import (
 func TestMultiEditTool_AppliesEdits(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
-	if err != nil {
-		t.Fatalf("resolve root: %v", err)
-	}
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
-	target := filepath.Join(resolvedRoot, "a.txt")
+	target := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(target, []byte("hello\nworld\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -44,7 +41,7 @@ func TestMultiEditTool_AppliesEdits(t *testing.T) {
 		},
 	})
 
-	if _, err := defs[0].Handler(context.Background(), raw); err != nil {
+	if _, err := defs[0].Handler(ctx, raw); err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 

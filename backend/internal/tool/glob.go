@@ -49,8 +49,6 @@ func globDefinition() Definition {
 }
 
 func runGlobTool(ctx context.Context, raw json.RawMessage) (any, error) {
-	_ = ctx
-
 	var req globToolRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
@@ -61,7 +59,7 @@ func runGlobTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, errors.New("pattern is required")
 	}
 
-	root, err := resolveSmartEditRoot()
+	root, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -85,9 +83,29 @@ func globMatches(root, pattern string) ([]string, error) {
 	}
 
 	if !hasGlobMeta(trimmed) {
-		target, err := resolvePathWithinRoot(root, trimmed)
-		if err != nil {
-			return nil, err
+		target := trimmed
+		if filepath.IsAbs(trimmed) {
+			target = filepath.Clean(trimmed)
+			rel, err := filepath.Rel(root, target)
+			if err != nil {
+				return nil, fmt.Errorf("resolve path error: %w", err)
+			}
+			if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("pattern %q is outside workspace root", pattern)
+			}
+		} else {
+			abs, err := filepath.Abs(filepath.Join(root, trimmed))
+			if err != nil {
+				return nil, fmt.Errorf("resolve path error: %w", err)
+			}
+			target = filepath.Clean(abs)
+			rel, err := filepath.Rel(root, target)
+			if err != nil {
+				return nil, fmt.Errorf("resolve path error: %w", err)
+			}
+			if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("pattern %q is outside workspace root", pattern)
+			}
 		}
 		if _, err := os.Stat(target); err != nil {
 			if os.IsNotExist(err) {
@@ -100,8 +118,14 @@ func globMatches(root, pattern string) ([]string, error) {
 
 	baseDir := globBaseDir(trimmed)
 	if baseDir != "" {
-		if _, err := resolvePathWithinRoot(root, baseDir); err != nil {
-			return nil, err
+		baseAbs := filepath.Join(root, baseDir)
+		baseAbs = filepath.Clean(baseAbs)
+		rel, err := filepath.Rel(root, baseAbs)
+		if err != nil {
+			return nil, fmt.Errorf("resolve base dir error: %w", err)
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("pattern %q is outside workspace root", pattern)
 		}
 	}
 

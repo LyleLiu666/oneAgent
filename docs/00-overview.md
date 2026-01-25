@@ -157,13 +157,13 @@ sequenceDiagram
 
 | 变量 | 描述 | 默认值 |
 |------|------|--------|
-| `ONEAGENT_HOME` | Home 目录（agent 可写边界） | `~/.oneagent_default` |
+| `ONEAGENT_HOME` | 内部状态目录根（config/settings/data/logs） | `~/.oneagent_default` |
 | `PROFILE` | `local`/`dev` | `local` |
 | `BIND` | 监听地址 | local=`0.0.0.0` |
 | `PORT` | 服务端口 | `8080` |
 | `AUTH_MODE` | `token`/`none` | `token` |
 | `ENABLE_TRACE` | 启用 trace | `false` |
-| `BASH_ROOT_DIR` | bash/文件工具根目录 | `ONEAGENT_HOME` |
+| `BASH_ROOT_DIR` | （可选）显式覆盖工具根目录（未设置时使用会话 workspace） | _unset_ |
 | `LOG_RETENTION_DAYS` | 日志保留天数 | `30` |
 
 ---

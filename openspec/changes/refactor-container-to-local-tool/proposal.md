@@ -44,7 +44,7 @@
 
 ### 阶段 1: 本地工具交付版（可上线）
 - 增加 `oneagent` CLI 入口（或将现有 `cmd/server` 扩展为多子命令）。
-- 引入“home 目录”概念（默认 `~/.oneagent_default/`；选择 workspace 时 `home=<workspace>/`），作为 **agent 可修改文件的最大范围**。
+- 引入“workspace（项目目录）”概念（会话级可选，默认不启用），作为 **agent 可修改文件的最大范围**；`ONEAGENT_HOME` 仍用于承载内部状态目录（用户也可通过 `--home <workspace>` 让两者一致）。
 - oneAgent 的可变状态统一存放在 `<home>/.oneagent/` 下，包含：
   - 配置文件（如 `config.yaml`）
   - 本地访问令牌（`config/auth_token`）

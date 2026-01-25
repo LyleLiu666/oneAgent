@@ -18,6 +18,13 @@ make build
 
 访问：`http://localhost:8080`
 
+### Release（产物打包）
+
+```bash
+VERSION=v0.1.0 make release
+ls dist/release
+```
+
 ### 登录方式（本地访问令牌）
 
 - 默认 `AUTH_MODE=token`
@@ -27,26 +34,33 @@ make build
 
 安全提示：仅建议在可信局域网内使用；将服务暴露到公网风险极大。
 
+### Workspace（文件工具作用域）
+
+默认新会话不启用 workspace（仅对话）。如需使用 `edit/write_file/rg/run_command` 等工具修改或搜索本地文件：
+- 在 Chat 顶部输入 `Workspace path (server)`（服务运行机器上的绝对路径，例如你的项目目录）
+- 后端会将其保存到 session metadata，并将文件工具/命令工具默认限制在该目录内
+
 ## Data Layout
 
-- `ONEAGENT_HOME`（默认 `~/.oneagent_default`）是 agent 可修改文件的最大范围
+- `ONEAGENT_HOME`（默认 `~/.oneagent_default`）是 oneAgent 的内部状态目录根
 - oneAgent 的内部状态统一落在：`ONEAGENT_HOME/.oneagent/`
   - `config/`：配置与 `auth_token`
   - `settings.db`：Settings（SQLite，仅用于敏感 token 等配置）
   - `data/sessions/`：会话与消息（按 `session_id` 分目录/分文件）
   - `logs/llm/`：每次 LLM 调用完整 request/response 日志（按日期目录）
+- `workspace`（会话级可选）是文件工具/命令工具的默认作用域与写入边界；未设置时文件相关工具将提示 `workspace is not set`
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ONEAGENT_HOME` | Home 目录（agent 可写边界） | `~/.oneagent_default` |
+| `ONEAGENT_HOME` | 内部状态目录根（config/settings/data/logs） | `~/.oneagent_default` |
 | `PROFILE` | `local` / `dev` | `local` |
 | `BIND` | 监听地址 | `0.0.0.0`（local） |
 | `PORT` | 端口 | `8080` |
 | `AUTH_MODE` | `token` / `none` | `token` |
 | `ENABLE_TRACE` | 是否启用 trace | `false` |
-| `BASH_ROOT_DIR` | bash/文件工具默认根目录 | `ONEAGENT_HOME` |
+| `BASH_ROOT_DIR` | （可选）显式覆盖工具根目录（未设置时使用会话 workspace） | _unset_ |
 | `LOG_RETENTION_DAYS` | 日志保留天数 | `30` |
 
 注意：`DATABASE_URL`（Postgres）在本地工具模式下不支持，设置后会拒绝启动。

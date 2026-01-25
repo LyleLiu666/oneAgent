@@ -28,13 +28,14 @@ func mustToolDefinition(t *testing.T, name string) tool.Definition {
 func TestBuildToolArgs_Edit_RunsEditTool(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	resolvedRoot, err := shell.ResolveBashRoot(root)
 	if err != nil {
 		t.Fatalf("resolve root: %v", err)
 	}
+	ctx := tool.ContextWithWorkspace(context.Background(), tool.WorkspaceConfig{Enabled: true, Root: resolvedRoot})
 
 	target := filepath.Join(resolvedRoot, "a.txt")
 	if err := os.WriteFile(target, []byte("hello\nworld\n"), 0o644); err != nil {
@@ -53,7 +54,7 @@ func TestBuildToolArgs_Edit_RunsEditTool(t *testing.T) {
 	}
 
 	editDef := mustToolDefinition(t, "edit")
-	if _, err := editDef.Handler(context.Background(), args); err != nil {
+	if _, err := editDef.Handler(ctx, args); err != nil {
 		t.Fatalf("edit tool: %v", err)
 	}
 
@@ -69,13 +70,14 @@ func TestBuildToolArgs_Edit_RunsEditTool(t *testing.T) {
 func TestBuildToolArgs_WriteFile_RunsWriteFileTool(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	resolvedRoot, err := shell.ResolveBashRoot(root)
 	if err != nil {
 		t.Fatalf("resolve root: %v", err)
 	}
+	ctx := tool.ContextWithWorkspace(context.Background(), tool.WorkspaceConfig{Enabled: true, Root: resolvedRoot})
 
 	args, _, err := buildToolArgs("write_file", map[string]string{
 		"filePath": "dir/new.txt",
@@ -86,7 +88,7 @@ func TestBuildToolArgs_WriteFile_RunsWriteFileTool(t *testing.T) {
 	}
 
 	writeDef := mustToolDefinition(t, "write_file")
-	if _, err := writeDef.Handler(context.Background(), args); err != nil {
+	if _, err := writeDef.Handler(ctx, args); err != nil {
 		t.Fatalf("write_file tool: %v", err)
 	}
 
@@ -102,13 +104,14 @@ func TestBuildToolArgs_WriteFile_RunsWriteFileTool(t *testing.T) {
 func TestBuildToolArgs_WriteFile_WithAppend_Appends(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	resolvedRoot, err := shell.ResolveBashRoot(root)
 	if err != nil {
 		t.Fatalf("resolve root: %v", err)
 	}
+	ctx := tool.ContextWithWorkspace(context.Background(), tool.WorkspaceConfig{Enabled: true, Root: resolvedRoot})
 
 	if err := os.MkdirAll(filepath.Join(resolvedRoot, "dir"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -127,7 +130,7 @@ func TestBuildToolArgs_WriteFile_WithAppend_Appends(t *testing.T) {
 	}
 
 	writeDef := mustToolDefinition(t, "write_file")
-	if _, err := writeDef.Handler(context.Background(), args); err != nil {
+	if _, err := writeDef.Handler(ctx, args); err != nil {
 		t.Fatalf("write_file tool: %v", err)
 	}
 
@@ -165,13 +168,14 @@ func TestBuildToolArgs_EditWithCommand_IsRejected(t *testing.T) {
 func TestBuildToolArgs_Rg_RunsRgTool(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
 	resolvedRoot, err := shell.ResolveBashRoot(root)
 	if err != nil {
 		t.Fatalf("resolve root: %v", err)
 	}
+	ctx := tool.ContextWithWorkspace(context.Background(), tool.WorkspaceConfig{Enabled: true, Root: resolvedRoot})
 
 	target := filepath.Join(resolvedRoot, "a.txt")
 	if err := os.WriteFile(target, []byte("abc\n"), 0o644); err != nil {
@@ -188,7 +192,7 @@ func TestBuildToolArgs_Rg_RunsRgTool(t *testing.T) {
 	}
 
 	rgDef := mustToolDefinition(t, "rg")
-	gotAny, err := rgDef.Handler(context.Background(), args)
+	gotAny, err := rgDef.Handler(ctx, args)
 	if err != nil {
 		t.Fatalf("rg tool: %v", err)
 	}

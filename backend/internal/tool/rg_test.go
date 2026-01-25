@@ -18,15 +18,12 @@ func TestRgTool_FindsMatches_WithDollarRegex(t *testing.T) {
 
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
-	if err != nil {
-		t.Fatalf("resolve root: %v", err)
-	}
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
-	if err := os.WriteFile(filepath.Join(resolvedRoot, "a.txt"), []byte("abc\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("abc\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -35,7 +32,7 @@ func TestRgTool_FindsMatches_WithDollarRegex(t *testing.T) {
 		"path":    ".",
 	})
 
-	gotAny, err := runRgTool(context.Background(), raw)
+	gotAny, err := runRgTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -63,15 +60,16 @@ func TestRgTool_FindsMatches_WithDollarRegex(t *testing.T) {
 func TestRgTool_RejectsOutsideRootPath(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
 	raw, _ := json.Marshal(map[string]any{
 		"pattern": "abc",
 		"path":    "..",
 	})
 
-	if _, err := runRgTool(context.Background(), raw); err == nil {
+	if _, err := runRgTool(ctx, raw); err == nil {
 		t.Fatalf("expected error")
 	}
 }
@@ -83,15 +81,12 @@ func TestRgTool_TruncatesWhenMaxResultsReached(t *testing.T) {
 
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
-	if err != nil {
-		t.Fatalf("resolve root: %v", err)
-	}
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
-	if err := os.WriteFile(filepath.Join(resolvedRoot, "a.txt"), []byte("x\nx\nx\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\nx\nx\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -101,7 +96,7 @@ func TestRgTool_TruncatesWhenMaxResultsReached(t *testing.T) {
 		"max_results": 2,
 	})
 
-	gotAny, err := runRgTool(context.Background(), raw)
+	gotAny, err := runRgTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -123,20 +118,37 @@ func TestRgTool_TruncatesWhenMaxResultsReached(t *testing.T) {
 	}
 }
 
-func TestRgTool_ReturnsUnavailableWhenRgMissing(t *testing.T) {
+func TestRgTool_FallsBackToGrepWhenRgMissing(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
-	t.Setenv("PATH", "")
+	grepPath, err := exec.LookPath("grep")
+	if err != nil {
+		t.Skip("grep not installed")
+	}
+	toolDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(toolDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(grepPath, filepath.Join(toolDir, "grep")); err != nil {
+		t.Fatalf("symlink grep: %v", err)
+	}
+	t.Setenv("PATH", toolDir)
+
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("abc\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
 
 	raw, _ := json.Marshal(map[string]any{
-		"pattern": "abc",
-		"path":    ".",
+		"pattern":       "abc",
+		"path":          ".",
+		"fixed_strings": true,
 	})
 
-	gotAny, err := runRgTool(context.Background(), raw)
+	gotAny, err := runRgTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -144,13 +156,16 @@ func TestRgTool_ReturnsUnavailableWhenRgMissing(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected RgToolResult, got %T", gotAny)
 	}
-	if got.Available {
-		t.Fatalf("expected available=false")
+	if !got.Available {
+		t.Fatalf("expected available=true")
 	}
-	if len(got.Matches) != 0 {
-		t.Fatalf("expected 0 matches, got %d", len(got.Matches))
+	if got.Backend != "grep" {
+		t.Fatalf("expected backend=%q, got %q", "grep", got.Backend)
 	}
 	if got.NotAvailableReason == "" {
-		t.Fatalf("expected not_available_reason")
+		t.Fatalf("expected not_available_reason (rg missing)")
+	}
+	if len(got.Matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(got.Matches))
 	}
 }

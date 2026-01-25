@@ -92,8 +92,9 @@ func TestBuildToolArgs_RunCommand_XMLFields(t *testing.T) {
 func TestRunLoop_XMLRunCommand_Executes(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
+	ctx := tool.ContextWithWorkspace(context.Background(), tool.WorkspaceConfig{Enabled: true, Root: root})
 
 	defs, err := tool.Mount([]string{tool.ToolIDRunCommand})
 	if err != nil {
@@ -116,7 +117,7 @@ func TestRunLoop_XMLRunCommand_Executes(t *testing.T) {
 
 	var steps []StepRecord
 	combined, err := RunLoop(
-		context.Background(),
+		ctx,
 		client,
 		[]llm.ChatMessage{{Role: "user", Content: "run"}},
 		nil,

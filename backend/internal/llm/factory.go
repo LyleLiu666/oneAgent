@@ -36,7 +36,7 @@ func NewClientForProvider(cfg ProviderConfig) (Client, error) {
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleNone), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeOpenAIResponse:
 		return NewOpenAIResponsesClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
@@ -57,49 +57,49 @@ func NewClientForProvider(cfg ProviderConfig) (Client, error) {
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleCacheControl), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeBedrock:
 		return newOpenAIClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleCachePoint), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeDeepSeek:
 		return newOpenAIClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleNone), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeZhipuAI:
 		return newOpenAIClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleNone), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeMiniMax:
 		return newOpenAIClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleNone), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeAntigravity:
 		return newOpenAIClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleNone), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	case ProviderTypeCodex:
 		return newOpenAIClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
 			APIKey:   cfg.APIKey,
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
-		}, cacheControlStyleNone), nil
+		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", cfg.ProviderType)
 	}

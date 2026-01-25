@@ -51,8 +51,6 @@ func lsDefinition() Definition {
 }
 
 func runLsTool(ctx context.Context, raw json.RawMessage) (any, error) {
-	_ = ctx
-
 	var req lsToolRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
@@ -63,12 +61,7 @@ func runLsTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		pathValue = "."
 	}
 
-	root, err := resolveSmartEditRoot()
-	if err != nil {
-		return nil, err
-	}
-
-	target, err := resolvePathWithinRoot(root, pathValue)
+	root, target, err := resolvePathForRead(ctx, pathValue)
 	if err != nil {
 		return nil, err
 	}

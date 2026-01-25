@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
@@ -66,9 +65,13 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, errors.New("command is required")
 	}
 
-	cfg := config.GetConfig()
+	root, err := resolveWorkspaceRoot(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	result, err := shell.RunBash(ctx, req.Command, timeout, cfg.BashRootDir, "")
+	result, err := shell.RunBash(ctx, req.Command, timeout, root, "")
 	if err != nil {
 		return nil, err
 	}

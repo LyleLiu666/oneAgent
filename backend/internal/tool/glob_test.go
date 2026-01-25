@@ -14,12 +14,12 @@ import (
 func TestGlobTool_MatchesPatterns(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
-
-	resolvedRoot, err := resolveSmartEditRoot()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	resolvedRoot, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
-		t.Fatalf("resolve root: %v", err)
+		t.Fatalf("resolve workspace root: %v", err)
 	}
 
 	writeFile := func(path, content string) {
@@ -39,7 +39,7 @@ func TestGlobTool_MatchesPatterns(t *testing.T) {
 		"pattern": "dir/*.go",
 	})
 
-	gotAny, err := runGlobTool(context.Background(), raw)
+	gotAny, err := runGlobTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -56,7 +56,7 @@ func TestGlobTool_MatchesPatterns(t *testing.T) {
 		"pattern": "dir/**/*.go",
 	})
 
-	gotAny, err = runGlobTool(context.Background(), raw)
+	gotAny, err = runGlobTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

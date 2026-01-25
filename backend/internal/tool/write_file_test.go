@@ -14,12 +14,13 @@ import (
 func TestWriteFileTool_WritesFile(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	resolvedRoot, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
-		t.Fatalf("resolve root: %v", err)
+		t.Fatalf("resolve workspace root: %v", err)
 	}
 
 	raw, _ := json.Marshal(map[string]any{
@@ -27,7 +28,7 @@ func TestWriteFileTool_WritesFile(t *testing.T) {
 		"content":  "hello\nworld\n",
 	})
 
-	gotAny, err := runWriteFileTool(context.Background(), raw)
+	gotAny, err := runWriteFileTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -69,19 +70,20 @@ func TestWriteFileTool_WritesFile(t *testing.T) {
 func TestWriteFileTool_AppendsFile(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	resolvedRoot, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
-		t.Fatalf("resolve root: %v", err)
+		t.Fatalf("resolve workspace root: %v", err)
 	}
 
 	initialRaw, _ := json.Marshal(map[string]any{
 		"filePath": "a.txt",
 		"content":  "hello",
 	})
-	if _, err := runWriteFileTool(context.Background(), initialRaw); err != nil {
+	if _, err := runWriteFileTool(ctx, initialRaw); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -90,7 +92,7 @@ func TestWriteFileTool_AppendsFile(t *testing.T) {
 		"content":  "\nworld\n",
 		"append":   true,
 	})
-	gotAny, err := runWriteFileTool(context.Background(), appendRaw)
+	gotAny, err := runWriteFileTool(ctx, appendRaw)
 	if err != nil {
 		t.Fatalf("append file: %v", err)
 	}
@@ -126,19 +128,20 @@ func TestWriteFileTool_AppendsFile(t *testing.T) {
 func TestWriteFileTool_TruncatesLargeContent(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	resolvedRoot, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
-		t.Fatalf("resolve root: %v", err)
+		t.Fatalf("resolve workspace root: %v", err)
 	}
 
 	raw, _ := json.Marshal(map[string]any{
 		"filePath": "a.txt",
 		"content":  strings.Repeat("a", maxWriteFileRunesPerCall+10),
 	})
-	gotAny, err := runWriteFileTool(context.Background(), raw)
+	gotAny, err := runWriteFileTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

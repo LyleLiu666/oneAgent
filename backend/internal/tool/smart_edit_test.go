@@ -14,16 +14,13 @@ import (
 func TestSmartEditTool_AppliesEdits(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
-	if err != nil {
-		t.Fatalf("resolve root: %v", err)
-	}
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
 
-	fileA := filepath.Join(resolvedRoot, "a.txt")
-	fileB := filepath.Join(resolvedRoot, "b.txt")
+	fileA := filepath.Join(root, "a.txt")
+	fileB := filepath.Join(root, "b.txt")
 	if err := os.WriteFile(fileA, []byte("hello\nworld\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -47,7 +44,7 @@ func TestSmartEditTool_AppliesEdits(t *testing.T) {
 		},
 	})
 
-	gotAny, err := runSmartEditTool(context.Background(), raw)
+	gotAny, err := runSmartEditTool(ctx, raw)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -116,14 +113,12 @@ func TestSmartEditTool_RejectsTooManyEdits(t *testing.T) {
 func TestSmartEditTool_RejectsLargeOldString(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
-	config.AppConfig = &config.Config{BashRootDir: root}
+	config.AppConfig = &config.Config{}
 	t.Cleanup(func() { config.AppConfig = prevCfg })
 
-	resolvedRoot, err := resolveSmartEditRoot()
-	if err != nil {
-		t.Fatalf("resolve root: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(resolvedRoot, "a.txt"), []byte("hello\n"), 0o644); err != nil {
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
@@ -137,7 +132,7 @@ func TestSmartEditTool_RejectsLargeOldString(t *testing.T) {
 		},
 	})
 
-	if _, err := runSmartEditTool(context.Background(), raw); err == nil {
+	if _, err := runSmartEditTool(ctx, raw); err == nil {
 		t.Fatalf("expected error")
 	}
 }

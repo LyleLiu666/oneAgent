@@ -28,6 +28,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/model"
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
+	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
@@ -99,6 +101,7 @@ type ChatRequest struct {
 	ModelID      string   `json:"model_id,omitempty"`
 	ToolIDs      []string `json:"tool_ids,omitempty"`
 	ToolProtocol string   `json:"tool_protocol,omitempty"` // "json" (default) or "xml"
+	Workspace    string   `json:"workspace,omitempty"`
 }
 
 // StreamEvent represents a Server-Sent Event.
@@ -204,6 +207,26 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 
+	workspaceFromReq := strings.TrimSpace(req.Workspace)
+	workspaceSet := workspaceFromReq != ""
+	workspaceValue := workspaceFromReq
+	if !workspaceSet {
+		if stored, ok := extractWorkspace(session.Metadata); ok {
+			workspaceValue = stored
+		}
+	}
+	workspaceValue = strings.TrimSpace(workspaceValue)
+
+	workspaceRoot := ""
+	if workspaceValue != "" {
+		normalized, err := scope.NormalizeWorkspaceRoot(workspaceValue)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		workspaceRoot = normalized
+	}
+
 	selectedModelID := strings.TrimSpace(req.ModelID)
 	if selectedModelID == "" && session.Metadata != nil {
 		if raw, ok := session.Metadata["model_id"]; ok {
@@ -245,7 +268,14 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		messages = append(messages, buildLLMHistoryFromMessages(persistedMessages, toolProtocol)...)
 	}
 
-	// Add current user message
+	// TurnContext (volatile): dynamic per-turn context MUST NOT be injected into the stable prefix.
+	// This is intentionally appended after persisted history and excluded from cache selection.
+	turnContext := ""
+	if msg, ok := llm.BuildTurnContextMessage(turnContext); ok {
+		messages = append(messages, msg)
+	}
+
+	// Add current user message (always last)
 	messages = append(messages, llm.BuildUserMessage(req.Message))
 
 	toolDefs, err := tool.Mount(selectedToolIDs)
@@ -266,33 +296,80 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 
 	if resolvedModel.ModelID != "" {
-		metadata := session.Metadata
-		if metadata == nil {
-			metadata = model.JSONB{}
+		sessionMetadata := session.Metadata
+		if sessionMetadata == nil {
+			sessionMetadata = model.JSONB{}
+		}
+
+		epoch := extractPromptCacheEpoch(sessionMetadata)
+
+		prevSystemPrompt, _ := sessionMetadata["system_prompt"].(string)
+		prevModelID, _ := sessionMetadata["model_id"].(string)
+		prevToolIDs, prevToolIDsOK := extractToolIDs(sessionMetadata)
+		prevToolProtocol, prevToolProtocolOK := extractToolProtocol(sessionMetadata)
+
+		needsEpochBump := false
+		if strings.TrimSpace(req.SystemPrompt) != "" && strings.TrimSpace(prevSystemPrompt) != "" && prevSystemPrompt != systemPrompt {
+			needsEpochBump = true
+		}
+		if strings.TrimSpace(req.ModelID) != "" && strings.TrimSpace(prevModelID) != "" && prevModelID != resolvedModel.ModelID {
+			needsEpochBump = true
+		}
+		if toolIDsSet && prevToolIDsOK && !equalStringSlices(prevToolIDs, selectedToolIDs) {
+			needsEpochBump = true
+		}
+		if toolProtocolSet && prevToolProtocolOK && prevToolProtocol != toolProtocol {
+			needsEpochBump = true
 		}
 
 		shouldUpdate := false
-		if _, ok := metadata["system_prompt"]; !ok || req.SystemPrompt != "" {
-			metadata["system_prompt"] = systemPrompt
+		if workspaceSet {
+			if existing, ok := sessionMetadata["workspace"].(string); ok && strings.TrimSpace(existing) != "" && existing != workspaceRoot {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot change workspace for an existing session"})
+				return
+			}
+			if workspaceRoot != "" {
+				sessionMetadata["workspace"] = workspaceRoot
+				shouldUpdate = true
+			}
+		}
+		if _, ok := sessionMetadata["system_prompt"]; !ok || req.SystemPrompt != "" {
+			sessionMetadata["system_prompt"] = systemPrompt
 			shouldUpdate = true
 		}
-		if _, ok := metadata["model_id"]; !ok || req.ModelID != "" {
-			metadata["model_id"] = resolvedModel.ModelID
+		if _, ok := sessionMetadata["model_id"]; !ok || req.ModelID != "" {
+			sessionMetadata["model_id"] = resolvedModel.ModelID
 			shouldUpdate = true
 		}
 		if toolIDsSet {
-			metadata["tool_ids"] = selectedToolIDs
+			sessionMetadata["tool_ids"] = selectedToolIDs
 			shouldUpdate = true
 		}
 		if toolProtocolSet {
-			metadata["tool_protocol"] = toolProtocol
+			sessionMetadata["tool_protocol"] = toolProtocol
+			shouldUpdate = true
+		}
+
+		if needsEpochBump {
+			epoch++
+		}
+		if needsEpochBump || sessionMetadata["prompt_cache_epoch"] == nil {
+			sessionMetadata["prompt_cache_epoch"] = epoch
 			shouldUpdate = true
 		}
 
 		if shouldUpdate {
-			_ = h.rt.Sessions.UpdateSessionMetadata(sessionID, metadata)
+			_ = h.rt.Sessions.UpdateSessionMetadata(sessionID, sessionMetadata)
 		}
+
+		session.Metadata = sessionMetadata
 	}
+
+	sessionMetadataForEpoch := session.Metadata
+	if sessionMetadataForEpoch == nil {
+		sessionMetadataForEpoch = model.JSONB{}
+	}
+	cacheEpoch := extractPromptCacheEpoch(sessionMetadataForEpoch)
 
 	// Set headers for SSE
 	c.Writer.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -377,6 +454,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						Data: fmt.Sprintf("Context compressed: %d → %d", before, after),
 					})
 					messages = compressedMessages
+
+					// Compression rewrites the stable prefix; bump prompt cache epoch for prompt_cache_key providers.
+					cacheEpoch++
+					sessionMetadataForEpoch["prompt_cache_epoch"] = cacheEpoch
+					_ = h.rt.Sessions.UpdateSessionMetadata(sessionID, sessionMetadataForEpoch)
 				}
 			}
 
@@ -482,18 +564,32 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			ctx := context.Background() // Use background context so generation survives request cancellation
 			ctx = tool.ContextWithUserID(ctx, userID)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
+			ctx = tool.ContextWithWorkspace(ctx, tool.WorkspaceConfig{
+				Enabled: strings.TrimSpace(workspaceRoot) != "",
+				Root:    workspaceRoot,
+			})
 
 			opts := &llm.ChatCompletionOptions{
 				Trace: traceCallback,
 			}
+			if toolProtocol == "json" && len(toolDefs) > 0 {
+				opts.Tools = tool.ToolsForLLM(toolDefs)
+			}
 			if resolvedModel.EnableKVCache {
 				opts.EnablePromptCache = true
 				if llm.SupportsPromptCacheKey(resolvedModel.ProviderType) {
-					opts.PromptCacheKey = sessionID
+					key, keyErr := llm.BuildPromptCacheKey(llm.PromptCacheKeyInput{
+						SessionID:    sessionID,
+						Epoch:        cacheEpoch,
+						Model:        resolvedModel.ModelName,
+						ToolProtocol: toolProtocol,
+						Messages:     messages,
+						Tools:        opts.Tools,
+					})
+					if keyErr == nil {
+						opts.PromptCacheKey = key
+					}
 				}
-			}
-			if toolProtocol == "json" && len(toolDefs) > 0 {
-				opts.Tools = tool.ToolsForLLM(toolDefs)
 			}
 
 			llmCallID := uuid.NewString()
@@ -504,11 +600,26 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				Model:              resolvedModel.ModelName,
 				Provider:           resolvedModel.ProviderType,
 				CreatedAt:          time.Now(),
-				Request:            map[string]any{"messages": messages, "tool_protocol": toolProtocol},
+				Request: map[string]any{
+					"messages":                messages,
+					"tool_protocol":           toolProtocol,
+					"tool_ids":                selectedToolIDs,
+					"cacheable_message_indexes": llm.CacheableMessageIndexes(messages),
+				},
 				PromptCacheEnabled: opts.EnablePromptCache,
+				PromptCacheEpoch:   cacheEpoch,
 			}
 			if opts.EnablePromptCache && strings.TrimSpace(opts.PromptCacheKey) != "" {
 				callRecord.PromptCacheKeyHash = sha256Hex(opts.PromptCacheKey)
+			}
+
+			if opts.EnablePromptCache {
+				msg := "KV cache: enabled=true"
+				if callRecord.PromptCacheKeyHash != "" {
+					msg += " key_hash=" + callRecord.PromptCacheKeyHash
+				}
+				msg += fmt.Sprintf(" epoch=%d", cacheEpoch)
+				broadcaster.Broadcast(StreamEvent{Type: "trace", Data: msg})
 			}
 
 			var err error
@@ -766,8 +877,17 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			callRecord.Response = fullContent
+			callRecord.PromptCacheEnabled = opts.EnablePromptCache
+			callRecord.PromptCacheDowngraded = opts.PromptCacheDowngraded
+			callRecord.PromptCacheDowngradeReason = strings.TrimSpace(opts.PromptCacheDowngradeReason)
 			if err != nil {
 				callRecord.Error = err.Error()
+			}
+			if callRecord.PromptCacheDowngraded && callRecord.PromptCacheDowngradeReason != "" {
+				broadcaster.Broadcast(StreamEvent{
+					Type: "trace",
+					Data: "KV cache downgraded: " + callRecord.PromptCacheDowngradeReason,
+				})
 			}
 			logPath := h.rt.LLMLog.PathForCall(time.Now(), sessionID, llmCallID)
 			if writeErr := h.rt.LLMLog.WriteCall(logPath, callRecord); writeErr != nil {
@@ -778,6 +898,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			if h.rt.Config.EnableTrace && len(traceEntries) > 0 {
 				traceEntries[0].Metadata["llm_log_path"] = logPath
 				traceEntries[0].Metadata["prompt_cache_enabled"] = opts.EnablePromptCache
+				traceEntries[0].Metadata["prompt_cache_epoch"] = cacheEpoch
+				traceEntries[0].Metadata["prompt_cache_downgraded"] = opts.PromptCacheDowngraded
+				if strings.TrimSpace(opts.PromptCacheDowngradeReason) != "" {
+					traceEntries[0].Metadata["prompt_cache_downgrade_reason"] = strings.TrimSpace(opts.PromptCacheDowngradeReason)
+				}
 				if callRecord.PromptCacheKeyHash != "" {
 					traceEntries[0].Metadata["prompt_cache_key_hash"] = callRecord.PromptCacheKeyHash
 				}
@@ -1456,6 +1581,73 @@ func extractToolProtocol(metadata model.JSONB) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+func extractWorkspace(metadata model.JSONB) (string, bool) {
+	if metadata == nil {
+		return "", false
+	}
+	raw, ok := metadata["workspace"]
+	if !ok {
+		return "", false
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	return value, true
+}
+
+func extractPromptCacheEpoch(metadata model.JSONB) int {
+	if metadata == nil {
+		return 0
+	}
+	raw, ok := metadata["prompt_cache_epoch"]
+	if !ok || raw == nil {
+		return 0
+	}
+
+	switch v := raw.(type) {
+	case int:
+		if v < 0 {
+			return 0
+		}
+		return v
+	case int64:
+		if v < 0 {
+			return 0
+		}
+		return int(v)
+	case float64:
+		if v < 0 {
+			return 0
+		}
+		return int(v)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func filterKnownToolIDs(ids []string) []string {
