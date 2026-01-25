@@ -1,9 +1,26 @@
 # 任务列表 (Tasks)
 
-- [ ] 创建 `internal/skill` 包用于技能发现 <!-- id: 1 -->
-- [ ] 实现 `GetSystemSkillsDir()` 以解析 `~/.oneagent/skills` <!-- id: 2 -->
-- [ ] 实现 `LoadSystemSkills()` 以扫描系统目录 <!-- id: 3 -->
-- [ ] 更新 `backend/internal/handler/chat.go` 以使用 `SkillLoader` <!-- id: 4 -->
-- [ ] 更新提示词构建逻辑，以**中文**追加技能列表 <!-- id: 5 -->
-    - [ ] 创建提示词模板: "## 可用技能..." <!-- id: 6 -->
-- [ ] 使用模拟的系统技能进行端到端 (E2E) 验证 <!-- id: 7 -->
+- [ ] 定义技能来源：`<workspace>/.oneagent/skills`、`~/.claude/skills`、`~/.codex/skills`（三者默认启用；取并集后按 name 去重；同名冲突按稳定规则消解） <!-- id: 1 -->
+- [ ] 创建 `internal/skill`：扫描技能目录包（目录内 `SKILL.md`）并解析元数据（frontmatter + 回退策略） <!-- id: 2 -->
+- [ ] 支持目录 symlink：扫描时跟随 symlink 目录，且避免循环引用 <!-- id: 3 -->
+- [ ] 创建 `internal/skillindex`：使用 SQLite FTS 建立本地技能索引（支持增量更新） <!-- id: 4 -->
+- [ ] 创建独立的技能召回/挑选组件：
+  - [ ] 召回：Top-8（固定） <!-- id: 5 -->
+  - [ ] 选择器：用 Selector Prompt（复用主对话模型）在 Top-8 中选出 `selected_skill` 或 `none`（可配置关闭/降级为 Top-1） <!-- id: 6 -->
+  - [ ] CLI：`oneagent skills search`（返回 Top-8）+ `oneagent skills select`（返回推荐技能） <!-- id: 7 -->
+- [ ] 在 `backend/internal/handler/chat.go` 集成：
+  - [ ] 支持“语义显式指定技能名称”（不依赖特殊语法）：当用户明确表示要用某个技能时，解析/命中该技能并作为推荐技能（可跳过召回/选择或作为 override） <!-- id: 8 -->
+  - [ ] 否则：每次聊天前调用召回+选择得到推荐技能 <!-- id: 9 -->
+- [ ] 更新系统提示词构建逻辑：以**中文**注入“推荐技能摘要”（而非 Top-8 全列表），并明确“主 agent 自行判断是否使用” <!-- id: 10 -->
+- [ ] 单元测试：
+  - [ ] frontmatter 解析与回退策略 <!-- id: 11 -->
+  - [ ] 多来源合并与优先级覆盖 <!-- id: 12 -->
+  - [ ] symlink 跟随与循环检测 <!-- id: 13 -->
+  - [ ] FTS 召回排序与 Top-8 截断（稳定顺序） <!-- id: 14 -->
+  - [ ] Selector Prompt 输出结构与解析（选中/none） <!-- id: 15 -->
+  - [ ] 显式技能名解析与命中 <!-- id: 16 -->
+- [ ] E2E 验证：
+  - [ ] `~/.claude/skills` 为 symlink 目录时仍可正常发现并召回 <!-- id: 17 -->
+  - [ ] 同时存在 `~/.codex`、`~/.claude` 与 `<workspace>/.oneagent` skills 时能取并集并按 name 去重（同名冲突规则生效） <!-- id: 18 -->
+  - [ ] 用户语义显式指定技能名时可正确命中并绕过召回/选择流程（或作为 override） <!-- id: 19 -->
+  - [ ] 模拟 1000+ skills 时仍保持可用（不把全量塞进 prompt，召回+选择仍可完成） <!-- id: 20 -->
