@@ -3,7 +3,11 @@
 ## ADDED Requirements
 
 ### Requirement: 默认生成本地访问令牌（不过期）
-系统必须 (MUST) 支持 `AUTH_MODE=token` 作为默认认证模式，并在未显式配置 token 值时于启动时自动生成一个高强度随机 token（不过期），并持久化到 `ONEAGENT_HOME`（例如 `ONEAGENT_HOME/config/auth_token`）。
+系统必须 (MUST) 支持 `AUTH_MODE=token` 作为默认认证模式，并在未显式配置 token 值时于启动时自动生成一个随机 token（不过期）。
+
+该 token 只是一个本地访问凭证（opaque string），系统不得 (MUST NOT) 要求其满足 JWT 结构或包含过期声明。
+
+系统必须 (MUST) 将 token 以固定文件路径持久化到 `ONEAGENT_HOME/config/auth_token`（若文件不存在则生成并写入；若存在则复用）。
 
 为兼容历史配置，系统应该 (SHOULD) 继续接受 `AUTH_MODE=password` 作为 `token` 的别名（行为一致）。
 
@@ -12,6 +16,15 @@
 - **THEN** 系统默认使用 `AUTH_MODE=token`
 - **WHEN** 用户以 `dev` profile 启动且未显式设置 `AUTH_MODE`
 - **THEN** 系统默认使用 `AUTH_MODE=token`
+
+#### Scenario: token 文件缺失时自动生成
+- **GIVEN** `ONEAGENT_HOME/config/auth_token` 不存在
+- **WHEN** 服务启动
+- **THEN** 系统生成 token 并写入该文件
+
+#### Scenario: doctor 提示 token 文件路径
+- **WHEN** 用户执行 `oneagent doctor`
+- **THEN** 输出包含 `ONEAGENT_HOME/config/auth_token` 的路径提示（而不是明文 token）
 
 ### Requirement: Token 模式下 API 必须携带访问令牌
 系统必须 (MUST) 在 `AUTH_MODE=token` 时要求所有受保护 API 请求携带访问令牌；token 错误或缺失时应拒绝请求。
@@ -38,7 +51,7 @@
 
 #### Scenario: none 模式需要显式开启
 - **WHEN** 用户未显式设置 `AUTH_MODE=none`
-- **THEN** 系统不得在无认证模式下启动（默认仍为 password）
+- **THEN** 系统不得在无认证模式下启动（默认仍为 token）
 - **WHEN** 用户显式设置 `AUTH_MODE=none` 并启动
 - **THEN** 系统启动日志中包含“无认证风险提示”
 

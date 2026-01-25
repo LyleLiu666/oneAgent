@@ -29,13 +29,12 @@
 这是一个新的“通用底座能力”：把复杂任务的分解与验收固化为 `PLAN.md`，并在标记 done 时自动引入 observer 做交付件校验，未达标则拒绝推进并要求重试；它同时为未来并发 subagent 提供 scope 分工与越界拦截的抓手（先分区再并发，而不是靠全局锁等待），也能让主 Agent 的工作流更接近 TDD（先写验收标准→干活→校验通过才能进入下一步）；关键未定点集中在计划文件格式（Markdown vs frontmatter）、observer 的默认工具权限（纯只读 vs 允许执行验收命令）、以及 scope 表达方式（目录前缀 vs glob）。
 
 ## 已确认的方向（来自补充约束）
-1) **home vs workspace**：`ONEAGENT_HOME` 存 db/log/cache；workspace 对应 project，可选启用/复用；默认仅允许修改 workspace 内文件，workspace 外“必要时可读，尽量不写”。  
+1) **home vs workspace**：`ONEAGENT_HOME` 存 db/log/cache；workspace 对应 project，可选启用/复用；默认仅允许修改 workspace 内文件；workspace 外允许读取任意绝对路径，但原则上不写。  
 2) **跨平台优先**：尽量避免把关键能力绑定到特定 OS/依赖（尤其是 SQLite/FTS 与路径处理）。  
-3) **认证**：启动默认生成不过期本地访问令牌（Bearer token），登录页明确“仅建议局域网/公网风险大”。  
+3) **认证**：启动默认生成不过期本地访问令牌（Bearer token）；token 固定写入 `ONEAGENT_HOME/config/auth_token`，并通过 `doctor` 提示路径；登录页明确“仅建议局域网/公网风险大”。  
 4) **网络**：支持 IPv6、尊重反代；“内网使用”不靠 IP 禁止，而靠 token 认证与使用约定。  
 5) **权限与限制**：默认可用全部文件操作工具；subagent 默认限制应偏大（例如 max_steps>=200、max_runtime>=1h）；并发应依赖 plan+scope 分区优先规避锁等待。
 
 ## 仍需尽快拍板/澄清的问题（跨特性）
-1) **SQLite driver/FTS5**：是否接受 CGO？若不接受，FTS5 如何跨平台落地（尤其 Windows）？  
-2) **workspace 外“只读”**：是否真的需要允许 agent 读取 workspace 外任意文件？若需要，走“显式只读工具/显式授权”的哪种交互？  
-3) **token 的获取与轮换**：token 首次生成后如何让用户获取且不泄露？是否提供 `oneagent auth reset`？  
+1) **跨平台现状核查（bash 工具链）**：当前 `bash/run_command` 基础设施依赖 POSIX 进程组（例如 `syscall.SysProcAttr{Setpgid:true}`、`SIGKILL`），因此 Windows 目前无法直接编译/运行；如果短期不做 Windows，则 SQLite/FTS5 可以优先选择在 macOS/Linux 上可用且实现最稳的方案（允许 CGO）。  
+2) **SQLite driver/FTS5（macOS/Linux 优先）**：在不强求 Windows 的前提下，是选 CGO 的 `go-sqlite3`（FTS5 成熟）还是纯 Go driver（需确认 FTS5/性能/稳定性）？

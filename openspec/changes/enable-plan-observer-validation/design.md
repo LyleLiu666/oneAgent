@@ -22,10 +22,14 @@ Plan 是一个文件化的任务清单，每个任务至少包含：
 ### 2) Observer（观察者）
 Observer 是一次独立的校验执行单元：
 - 输入：单个任务（description + acceptance + scope + workspace_root）
-- 工具：默认只读（读文件/搜索/列目录）；可选允许执行验收命令（仅来自 acceptance 列表）
+- 工具：默认只读（读文件/搜索/列目录），并且必须允许执行验收命令（仅来自 acceptance 列表）
 - 输出：`pass|fail` + 原因（fail 必须可操作）
 
 Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 trace/log；它只看交付件。
+
+验收命令（commands）约束：
+- observer 只能执行来自该任务 acceptance 列表中的 commands
+- commands 默认在 workspace 根目录下执行，并遵守 scope（若提供）
 
 ## Plan 文件格式 (MVP)
 优先采用“可读 + 易解析”的 Markdown 结构，类似现有 `tasks.md`：
@@ -76,4 +80,3 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 如果仍出现资源冲突：
 - 优先拒绝并发（提示 scope 重叠）
 - 锁作为最后手段：只允许短时间文件级锁，避免长等待拖垮体验
-

@@ -44,7 +44,6 @@
 
 ## 开放问题 (Open Questions)
 1. 计划文件格式：纯 Markdown 还是 Markdown + YAML frontmatter？任务/验收标准如何结构化且便于解析？
-2. 观察者工具权限：默认只读文件是否足够？是否允许按验收标准执行有限命令（例如 `go test`）？
+2. 观察者执行命令的边界：commands 是否仅允许来自 `acceptance.commands` 清单？是否需要对命令做额外 allowlist（例如只允许 `go test`/`pnpm test` 等）？
 3. scope 表达：是目录前缀集合，还是 glob 规则，还是两者都支持？
 4. 并发策略：若两个任务 scope 重叠，是拒绝并发、还是引入文件级锁（以及锁等待上限）？
-

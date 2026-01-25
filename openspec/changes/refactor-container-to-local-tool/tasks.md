@@ -17,7 +17,7 @@
 
 ## 3.5 Workspace（Project）与工具作用域
 - [ ] 明确定义 workspace：新建会话时可选择/复用 workspace；不启用 workspace 时默认只对话不改文件 <!-- id: 26 -->
-- [ ] 将文件类工具的默认可写范围对齐到 workspace（workspace 外仅允许只读；越界写/改/删返回清晰错误） <!-- id: 27 -->
+- [ ] 将文件类工具的默认可写范围对齐到 workspace（workspace 外允许读取任意绝对路径，但默认不允许写/改/删；越界写/改/删返回清晰错误） <!-- id: 27 -->
 - [ ] 重新定义 `BASH_ROOT_DIR`：默认对齐到当前会话的 workspace（并保留 env/flag 覆盖能力） <!-- id: 28 -->
 
 ## 4. 存储层本地化（SQLite 默认；Postgres 可选兼容）

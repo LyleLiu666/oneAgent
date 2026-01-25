@@ -42,7 +42,7 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 建议目录：
 - macOS：`~/Library/Application Support/oneagent/`
 - Linux：`~/.local/share/oneagent/`（或遵循 XDG）
-- Windows：`%APPDATA%\\oneagent\\`
+- Windows（若未来支持）：`%APPDATA%\\oneagent\\`
 
 目录下建议结构：
 ```
@@ -63,7 +63,7 @@ oneagent/
 ### 2.5) Workspace（Project）与工具作用域
 容器时代的“工作目录”主要由 volume 与容器文件系统决定；本地工具需要一个更明确的 project 边界。本提案将 `workspace` 定义为“本次会话/任务的项目根目录”：
 - 用户在新建会话时可选择是否启用 workspace，并可复用已存在的 workspace（更像 coding 场景下的 project 选择）
-- 默认仅允许修改 workspace 内文件；workspace 外尽量只读（必要时可读取，但原则上避免写入）
+- 默认仅允许修改 workspace 内文件；workspace 外允许读取任意绝对路径，但原则上避免写入
 - 文件类工具/搜索类工具/命令执行工具应默认对齐到 workspace（并支持按子目录进一步收敛为 scope，以支持未来并发 subagent）
 
 ### 3) 配置层级与兼容策略
@@ -95,7 +95,7 @@ oneagent/
 
 推荐方案：Token Auth（本地访问令牌）
 - `AUTH_MODE=token`（默认）：
-  - 后端在启动时读取/生成一个本地访问令牌（不过期），并持久化到 `ONEAGENT_HOME`（例如 `ONEAGENT_HOME/config/auth_token`）
+  - 后端在启动时读取/生成一个本地访问令牌（不过期、随机字符串，不要求 JWT 结构），并持久化到固定路径 `ONEAGENT_HOME/config/auth_token`
   - 前端首次访问时输入 token，并将其保存为“访问凭证”（例如存储到本地并在每个请求中带上 `Authorization: Bearer <token>`）
   - 登录页面必须明确提示：仅建议在可信局域网内使用；将服务暴露到公网风险极大
   - 后端在中间件中验证 token 后放行请求，并注入一个固定的单用户身份（例如 `user_id="local"`），以复用现有数据模型与 Settings/Session 存储逻辑
@@ -118,6 +118,7 @@ Keycloak/OAuth 相关能力：
 - 关键二进制：`git`、`rg`、`jq`、`bash`、（可选）`pandoc`、`ffmpeg`、`wkhtmltopdf`
 - 端口占用检测：默认端口是否可用
 - 存储可用性：SQLite 文件是否可创建/是否可写；Postgres URL 是否可连通（可选）
+- 认证：输出 token 文件路径（例如 `ONEAGENT_HOME/config/auth_token`），但不输出明文 token
 
 ### 7) 发布与构建流水线
 当前 Dockerfile 负责“构建前端 + 构建后端 + 打包系统依赖”。本地工具需要新的 pipeline：
@@ -151,9 +152,9 @@ Keycloak/OAuth 相关能力：
 - **本地安全**：`bash` 工具在宿主机上运行风险更高；需要更清晰的沙箱策略与默认限制（例如只允许在 `BASH_ROOT_DIR` 内运行、限制命令、限制资源）。
 - **发布复杂度**：从 Docker build 转为多平台 release，需要新增 CI 产物、签名与版本治理。
 - **支持成本**：本地环境的差异会带来更多问题（依赖缺失、权限、路径、编码、字体等）。
+- **Windows 支持现状**：当前 `bash/run_command` 基础设施依赖 POSIX 进程组（Setpgid/SIGKILL），Windows 需要单独实现 shell runner（例如 PowerShell/Job Object 或要求 WSL/Git Bash）；因此 Windows 作为后置目标更合理。
 
 ## 开放问题 (Open Questions)
 - “工具形应用”的核心交互是否仍以 Web UI 为主？是否需要增加纯 CLI 模式（例如 `oneagent chat`）？
-- 本地访问令牌的呈现与轮换机制：token 是否仅首次启动输出一次？是否提供 `oneagent auth reset` 用于轮换？
 - 反向代理支持：是否需要 `TRUST_PROXY`/`BASE_URL`/`X-Forwarded-*` 处理来改善反代下的 URL 与日志体验？
 - SQLite 数据库中落盘的 API Key 是否需要加密（例如 password 派生密钥），还是仅依赖本机文件权限即可？

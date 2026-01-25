@@ -60,7 +60,7 @@
 
 ### 阶段 3: 交付与升级体验（工具化完成度）
 - 引入发布流水线（例如 GoReleaser）：
-  - 产出 macOS/Linux/Windows 的可执行文件
+  - 产出 macOS/Linux 的可执行文件（Windows 取决于 shell/tooling 支持情况，后置）
   - 产出校验与版本信息
   - 产出可选的 Homebrew/Scoop 安装方式（可后置）
 - 引入 `oneagent upgrade`（可选）或文档化升级流程。
@@ -97,7 +97,6 @@
 
 ## 开放问题 (Open Questions)
 为避免“想当然”，在进入实现前需要明确以下关键决策（可在评审时一并敲定）：
-1. **本地访问令牌的呈现与轮换**：token 如何让用户获取（启动日志提示/doctor/配置文件读取）？是否提供 `oneagent auth reset` 用于轮换？
-2. **反向代理与 IPv6**：默认监听策略（`0.0.0.0`/`::`）如何做得跨平台且可预期？是否需要 `TRUST_PROXY`/`BASE_URL` 等配置来改善反代体验？
+1. **反向代理与 IPv6**：默认监听策略（`0.0.0.0`/`::`）如何做得跨平台且可预期？是否需要 `TRUST_PROXY`/`BASE_URL` 等配置来改善反代体验？
 3. **Postgres 兼容的取舍**：在 server profile 废弃后，是否仍保留 `DATABASE_URL`=Postgres 的兼容路径（用于迁移/高级用户），还是直接移除以简化实现？
 4. **敏感 token 的落盘策略**：Settings 中配置的 API Key 是否需要“落盘加密”（如用 password 派生密钥），还是仅依赖本机文件权限即可？

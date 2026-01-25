@@ -33,6 +33,21 @@
 - **WHEN** 观察者对某个任务执行校验
 - **THEN** 观察者的输入不包含主/子 Agent 的完整对话上下文（仅包含该任务信息与必要引用）
 
+### Requirement: 观察者可执行验收命令（仅限清单）
+系统必须 (MUST) 支持在任务验收标准中声明 `commands`，并允许观察者执行这些命令以决定任务是否达标。
+
+系统必须 (MUST) 限制观察者仅能执行该任务 `acceptance.commands` 列表中的命令；任何不在清单中的命令不得 (MUST NOT) 被执行。
+
+#### Scenario: 执行 acceptance.commands
+- **GIVEN** 任务 T1 的验收标准包含 commands：`go test ./...`
+- **WHEN** 观察者对 T1 执行校验
+- **THEN** 观察者执行 `go test ./...` 并依据退出码/输出决定 pass 或 fail
+
+#### Scenario: 清单外命令不得执行
+- **GIVEN** 任务 T1 的验收标准不包含 commands：`rm -rf /`
+- **WHEN** 观察者对 T1 执行校验
+- **THEN** 系统不得执行该命令，并返回可理解的失败原因
+
 ### Requirement: 任务可声明 scope 并用于约束写入范围
 系统必须 (MUST) 支持在计划任务中声明可编辑范围（scope，workspace 的子目录集合），并在执行该任务的 agent/subagent 文件写操作时强制执行越界拦截。
 
