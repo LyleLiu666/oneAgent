@@ -1,6 +1,7 @@
 ---
 description: Scaffold a new OpenSpec change and validate strictly.
 ---
+
 <!-- OPENSPEC:START -->
 **Guardrails**
 - Favor straightforward, minimal implementations first and add complexity only when it is requested or clearly required.
@@ -22,4 +23,5 @@ description: Scaffold a new OpenSpec change and validate strictly.
 - Use `openspec show <id> --json --deltas-only` or `openspec show <spec> --type spec` to inspect details when validation fails.
 - Search existing requirements with `rg -n "Requirement:|Scenario:" openspec/specs` before writing new ones.
 - Explore the codebase with `rg <keyword>`, `ls`, or direct file reads so proposals align with current implementation realities.
+- 用户是中文母语者，输出文档使用中文，以便查阅和修改
 <!-- OPENSPEC:END -->
