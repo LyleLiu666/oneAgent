@@ -40,11 +40,19 @@
 - **THEN** 系统按 `local` profile 行为启动（或直接拒绝启动并给出明确错误）
 
 ### Requirement: 规范化本地 Home/Data 目录
-系统必须 (MUST) 采用一个统一的 “ONEAGENT_HOME” 目录来承载本地配置、数据、日志与工具沙箱目录，并允许通过环境变量或 CLI 参数覆盖。
+系统必须 (MUST) 采用一个统一的 “ONEAGENT_HOME” 目录作为 **agent 可修改文件的最大范围**，并允许通过环境变量或 CLI 参数覆盖。
+
+系统必须 (MUST) 将 oneAgent 的可变状态统一存放在 `ONEAGENT_HOME/.oneagent/` 下（例如 `config/ data/ logs/ tmp/`），避免把内部文件散落到 workspace 根目录。
 
 #### Scenario: 显式指定 ONEAGENT_HOME
 - **WHEN** 用户设置环境变量 `ONEAGENT_HOME=/tmp/oneagent-home` 并启动 `oneagent serve`
-- **THEN** 系统使用该目录作为 home，并在首次启动时创建必要的子目录（config/data/sandbox/logs/tmp）
+- **THEN** 系统使用该目录作为 home（agent 可写范围）
+- **THEN** 系统在首次启动时创建必要的子目录（`ONEAGENT_HOME/.oneagent/config`、`ONEAGENT_HOME/.oneagent/data`、`ONEAGENT_HOME/.oneagent/logs`、`ONEAGENT_HOME/.oneagent/tmp`）
+
+#### Scenario: 未指定时使用默认 home
+- **GIVEN** 用户未设置 `ONEAGENT_HOME` 且未通过 CLI 指定 `--home`
+- **WHEN** 用户启动 `oneagent serve`
+- **THEN** 系统默认使用 `~/.oneagent_default` 作为 `ONEAGENT_HOME`
 
 ### Requirement: 不依赖 Docker 即可运行（本地工具路径）
 系统必须 (MUST) 支持在不安装 Docker 的情况下完成启动与基础功能使用（在本地 profile 下）。
@@ -58,4 +66,4 @@
 
 #### Scenario: 诊断信息可用于排障
 - **WHEN** 用户执行 `oneagent doctor`
-- **THEN** 输出包含：版本、profile、AUTH_MODE、监听地址与端口、ONEAGENT_HOME、数据库模式（sqlite/postgres/none）、关键二进制是否可用（git/rg/jq/bash）
+- **THEN** 输出包含：版本、profile、AUTH_MODE、监听地址与端口、ONEAGENT_HOME、Settings 存储位置（例如 `ONEAGENT_HOME/.oneagent/settings.db`）、关键二进制是否可用（git/rg/jq/bash）

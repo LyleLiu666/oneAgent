@@ -14,7 +14,7 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 - 提供“本地默认可用”的运行画像（local profile），并以局域网（LAN）为默认使用场景。
 - `server` profile 作为**废弃画像**处理：不再提供面向公网/多用户的生产化能力。
 - 提供更明确的配置与数据目录规范，便于运维与排障。
-- 保留 Settings 中配置 token 的操作，并确保在本地 SQLite 下可持久化。
+- 保留 Settings 中配置 token 的操作，并确保 Settings 可持久化（SQLite），其它状态使用文件存储。
 
 ### Non-Goals
 - 不做大型 UI/UX 重做（除适配本地登录/配置所需页面/流程）。
@@ -27,7 +27,7 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 - `local`（默认）：面向本机单用户/家庭或办公室局域网使用。
   - 默认监听 `0.0.0.0`（便于同网段设备访问）
   - 默认不依赖“按客户端 IP 阻断公网访问”的策略（IPv6/反代场景下不可靠），而是默认启用本地访问令牌认证，并在 UI 中明确风险提示
-  - 默认使用本地数据目录，默认 SQLite 持久化
+  - 默认使用文件存储保存会话/trace 等状态（不依赖数据库）；Settings 单独使用 SQLite 持久化
   - 默认使用本地访问令牌（自动生成、不过期）作为访问控制（不再依赖 OAuth/Keycloak）
 - `dev`：开发模式（前后端分离、热更新、可选 mock）。
 - `server`：**废弃**（不再作为目标画像；CLI 可选择保留兼容入口但仅输出废弃提示并按 local 处理）。
@@ -39,26 +39,30 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
 ### 2) 数据目录（Data Dir）与可变状态管理
 容器时代通过 volume 挂载实现“可变状态外置”。本地工具需要一个一致的目录布局。
 
-建议目录：
-- macOS：`~/Library/Application Support/oneagent/`
-- Linux：`~/.local/share/oneagent/`（或遵循 XDG）
-- Windows（若未来支持）：`%APPDATA%\\oneagent\\`
+约定：
+- **默认 home**：`~/.oneagent_default`（仅 macOS/Linux；本阶段不支持 Windows）
+- **选择 workspace 时**：`home = <workspace>/`（即“home = agent 可修改文件的最大范围”）
+- oneAgent 的可变状态统一存放在 `<home>/.oneagent/` 下，避免把 `config/ logs/ data/` 直接散落在 workspace 根目录。
 
-目录下建议结构：
+目录结构建议：
 ```
-oneagent/
-  config/            # 配置（用户可编辑）
-    config.yaml
-  data/              # 数据（数据库、索引、缓存）
-    oneagent.db      # SQLite（若启用）
-  logs/              # 日志
-  tmp/               # 临时文件（可清理）
+<home>/
+  .oneagent/
+    config/                 # 配置（用户可编辑）
+      config.yaml
+      auth_token            # 本地访问令牌（opaque string）
+    settings.db             # SQLite：仅用于 Settings（API keys 等）
+    data/                   # 文件存储：会话/消息/索引等（具体格式后续定）
+    logs/                   # 日志（含 subagent trace）
+    tmp/                    # 临时文件（可清理）
+    skills/                 # 项目私有 skills（若使用）
+    PLAN.md                 # 计划文件（若启用 plan 模块）
 ```
 
 关键点：
-- **不要**默认把数据落在当前工作目录，避免污染用户 repo。
-- 允许通过 `ONEAGENT_HOME` 或 `--home` 显式覆盖（便于便携/多实例）。
-- `doctor` 输出当前实际 home 路径与关键子路径。
+- **home = agent 可修改文件的最大范围**：任何写/改/删必须在 `<home>/` 内。
+- 允许通过 `--home` 或 `ONEAGENT_HOME` 显式覆盖；若选择了 workspace 且未显式指定 `--home`，则以 workspace 作为 home。
+- `doctor` 输出当前实际 home 路径与关键子路径（但不得输出明文 token）。
 
 ### 2.5) Workspace（Project）与工具作用域
 容器时代的“工作目录”主要由 volume 与容器文件系统决定；本地工具需要一个更明确的 project 边界。本提案将 `workspace` 定义为“本次会话/任务的项目根目录”：
@@ -66,12 +70,14 @@ oneagent/
 - 默认仅允许修改 workspace 内文件；workspace 外允许读取任意绝对路径，但原则上避免写入
 - 文件类工具/搜索类工具/命令执行工具应默认对齐到 workspace（并支持按子目录进一步收敛为 scope，以支持未来并发 subagent）
 
+> 已知限制（MVP）：`bash/run_command` 可能绕过文件工具层的 home/scope 校验；本阶段仅在提示词中约束“禁止使用 bash 修改文件”，暂不做强制拦截。
+
 ### 3) 配置层级与兼容策略
 现状主要依赖环境变量。工具化后应提供配置文件，同时保留 env 兼容。
 
 建议优先级（从高到低）：
-1. CLI flags（`--port` / `--db` / `--auth-mode` / `--home`）
-2. 环境变量（现有 `PORT`/`DATABASE_URL`/`KEYCLOAK_*` 等继续支持）
+1. CLI flags（`--port` / `--bind` / `--auth-mode` / `--home`）
+2. 环境变量（现有 `PORT`/`KEYCLOAK_*` 等继续支持；`DATABASE_URL` 在本阶段不再支持）
 3. 配置文件（`config.yaml`）
 4. 内置默认值
 
@@ -79,23 +85,25 @@ oneagent/
 - 现有环境变量键名尽量不变。
 - 新增配置项时，同时提供 env 对应（例如 `AUTH_MODE`、`ONEAGENT_HOME`）。
 
-### 4) 存储：默认 SQLite + 可选 Postgres（推荐）
-容器默认提供 Postgres，但本地工具如果仍强依赖 Postgres，会显著降低“开箱即用”。
+### 4) 存储：Settings 用 SQLite，其余用文件存储（推荐）
+本阶段不再支持 Postgres，也不以 SQLite 作为“通用持久化”。原则是：
+- **SQLite 只用于 Settings**（例如 LLM Provider API Key、搜索 API Key 等敏感配置的持久化与 `has_*` 查询）。
+- **其它状态一律走文件存储**（例如会话/消息/trace/subagent logs），落在 `<home>/.oneagent/data/` 与 `<home>/.oneagent/logs/`。
 
-建议：
-- 默认：SQLite（本地文件）作为本地 profile 的默认持久化。
-- 可选：当设置 `DATABASE_URL`（或 `--database-url`）时，使用 Postgres，作为迁移/高级用户路径（不再绑定 server profile 语义）。
+好处：
+- 降低交付复杂度（不引入外部数据库，也避免跨平台 SQLite driver/FTS 兼容的额外负担）。
+- 更符合“工具形应用”的直觉：大部分产物（日志、trace、findings）天然就是文件。
 
 实现注意：
-- 当前模型使用 `jsonb` 等 Postgres 特性（GORM `type:jsonb`），需要评估 SQLite 兼容或改造（例如统一为 `TEXT` 存 JSON）。
-- 迁移策略：优先做到“SQLite 与 Postgres 均可跑通 + 自动迁移”，至于“跨库数据迁移”可后置为增强项。
+- Settings SQLite 的 schema 要尽量简单、可迁移（避免依赖数据库高级特性）。
+- 文件存储需要确定：目录结构、文件命名（按 session_id/run_id）、并发写入策略、以及向后兼容/迁移策略。
 
 ### 5) 认证：新增 Local Auth（避免强依赖 Keycloak）
 当前 OAuth 流程依赖 Keycloak，且前端需要 Keycloak 配置进行跳转。为满足“本地工具 + 局域网默认可访问”的体验，本提案采用**本地访问令牌**作为访问控制，替代登录体系。
 
 推荐方案：Token Auth（本地访问令牌）
 - `AUTH_MODE=token`（默认）：
-  - 后端在启动时读取/生成一个本地访问令牌（不过期、随机字符串，不要求 JWT 结构），并持久化到固定路径 `ONEAGENT_HOME/config/auth_token`
+  - 后端在启动时读取/生成一个本地访问令牌（不过期、随机字符串，不要求 JWT 结构），并持久化到固定路径 `ONEAGENT_HOME/.oneagent/config/auth_token`
   - 前端首次访问时输入 token，并将其保存为“访问凭证”（例如存储到本地并在每个请求中带上 `Authorization: Bearer <token>`）
   - 登录页面必须明确提示：仅建议在可信局域网内使用；将服务暴露到公网风险极大
   - 后端在中间件中验证 token 后放行请求，并注入一个固定的单用户身份（例如 `user_id="local"`），以复用现有数据模型与 Settings/Session 存储逻辑
@@ -117,8 +125,8 @@ Keycloak/OAuth 相关能力：
 - 运行环境：OS/Arch、版本号、数据目录路径、profile
 - 关键二进制：`git`、`rg`、`jq`、`bash`、（可选）`pandoc`、`ffmpeg`、`wkhtmltopdf`
 - 端口占用检测：默认端口是否可用
-- 存储可用性：SQLite 文件是否可创建/是否可写；Postgres URL 是否可连通（可选）
-- 认证：输出 token 文件路径（例如 `ONEAGENT_HOME/config/auth_token`），但不输出明文 token
+- 存储可用性：`<home>/.oneagent/settings.db` 是否可创建/是否可写；`<home>/.oneagent/data/` 是否可写
+- 认证：输出 token 文件路径（例如 `<home>/.oneagent/config/auth_token`），但不输出明文 token
 
 ### 7) 发布与构建流水线
 当前 Dockerfile 负责“构建前端 + 构建后端 + 打包系统依赖”。本地工具需要新的 pipeline：
@@ -128,7 +136,7 @@ Keycloak/OAuth 相关能力：
   - `go build` 将 `frontend/dist` 复制到 `backend/cmd/server/static` 或类似目录后 embed
 - Release 构建：
   - CI 内完成前端构建
-  - 产出多平台二进制
+  - 产出 macOS/Linux 二进制（本阶段不支持 Windows）
   - 产出 `checksums.txt` 与版本信息
 
 建议引入：
@@ -139,20 +147,19 @@ Keycloak/OAuth 相关能力：
 ### 迁移路径 A（过渡期）：继续使用 Docker（不阻断老用户）
 - 对已有 Docker 用户，在过渡期内保留 `docker-compose.yml` 路径。
 
-### 迁移路径 B（推荐目标）：本地工具默认 SQLite + Token Auth（LAN 优先）
-- 新用户：默认 SQLite + 本地访问令牌（自动生成、不过期），开箱即用；局域网可访问并明确提示不要暴露到公网（不做 IP 阻断）。
-- 老用户：可以选择继续使用 Postgres（仅作为迁移/高级用户路径），不强制迁移；后续再提供“导入/导出”工具。
+### 迁移路径 B（推荐目标）：本地工具默认文件存储 + Settings SQLite + Token Auth（LAN 优先）
+- 新用户：默认文件存储（会话/trace/logs 等）+ Settings SQLite（仅配置）+ 本地访问令牌（自动生成、不过期），开箱即用；局域网可访问并明确提示不要暴露到公网（不做 IP 阻断）。
+- 老用户：在过渡期内继续使用 Docker 路径；若需要迁移历史数据，后续以“导入/导出（文件）”的形式提供，而不是保留 Postgres 运行路径。
 
 回滚策略：
 - 保留 Docker 运行方式（至少一个过渡期）。
-- 保留 Postgres 作为可选后端存储。
+- 不提供 Postgres 作为可选后端存储（以保持交付与维护成本可控）。
 
 ## 风险与权衡 (Risks / Trade-offs)
-- **SQLite 兼容性**：当前模型包含 Postgres 特性，需要兼容层或模型调整。
 - **本地安全**：`bash` 工具在宿主机上运行风险更高；需要更清晰的沙箱策略与默认限制（例如只允许在 `BASH_ROOT_DIR` 内运行、限制命令、限制资源）。
 - **发布复杂度**：从 Docker build 转为多平台 release，需要新增 CI 产物、签名与版本治理。
 - **支持成本**：本地环境的差异会带来更多问题（依赖缺失、权限、路径、编码、字体等）。
-- **Windows 支持现状**：当前 `bash/run_command` 基础设施依赖 POSIX 进程组（Setpgid/SIGKILL），Windows 需要单独实现 shell runner（例如 PowerShell/Job Object 或要求 WSL/Git Bash）；因此 Windows 作为后置目标更合理。
+- **文件存储的演进成本**：一旦文件目录结构/命名被用户依赖，未来迁移会更难；需要尽早确定约定并尽量保持兼容。
 
 ## 开放问题 (Open Questions)
 - “工具形应用”的核心交互是否仍以 Web UI 为主？是否需要增加纯 CLI 模式（例如 `oneagent chat`）？

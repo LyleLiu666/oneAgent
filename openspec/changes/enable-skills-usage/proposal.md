@@ -38,26 +38,25 @@
 
 若未提供 frontmatter，则回退到文件名/目录名作为 `name`，并截取首段文本作为 `description`（安全截断）。
 
-### 3) 技能索引（Index）
-为支持上千技能规模，系统维护一个本地索引（建议 SQLite + FTS）：
-- 由“技能召回工具”负责构建/更新索引（可增量更新）
-- 索引默认存储在 `ONEAGENT_HOME` 下（避免污染 workspace/repo），并按 workspace 做隔离（例如 `ONEAGENT_HOME/cache/skills/<workspace_id>/skill-index.sqlite`）
+### 3) 不引入持久化索引：基于 grep/ripgrep 的召回
+为支持上千技能规模，本阶段不引入 SQLite FTS 索引，而是采用“扫描 + grep”：
+- 由技能召回工具在本地扫描三处来源得到 `SKILL.md` 列表（含 metadata）
+- 对 query 使用 `rg`（ripgrep）在 `SKILL.md` 上做匹配计分，返回 Top-8（稳定排序）
 
-### 4) 独立的技能召回/挑选工具（Skill Recall Tool）
+> 说明：不支持 Windows 的前提下，`rg` 在 macOS/Linux 性能与可用性更好；若 `rg` 缺失，可由 `doctor` 提示安装。
+
+### 4) 独立的技能召回工具（Skill Recall Tool）
 新增一个独立组件（可作为可执行工具或内部库 + CLI）：
 - 输入：本轮任务描述（用户消息）与可选上下文（例如系统提示词、会话摘要）
 - 输出：Top-8 技能候选（`id/name/description/path/score`），并可带上简短“命中原因”（可选）
-- 召回策略：先做可解释的关键词/FTS（MVP），后续可扩展 embedding / rerank
+- 召回策略：基于 metadata + `rg` 匹配计分（MVP），后续可扩展 embedding / rerank
 
-并且在“召回 Top-8”之后，引入第二阶段的**选择器**（Selector）：
-- 将 Top-8 候选封装为一个“选择提示词”（Selector Prompt）
-- 由选择器运行一次独立的 LLM 调用（默认复用主对话模型）在 Top-8 中选出“最合适的一条”或返回 `none`
-- 输出返回给主 agent：主 agent 决定是否真的使用该技能（例如是否去读取 `SKILL.md` 并执行）
+> 本阶段不引入“Selector Prompt + 二次 LLM 调用”的选择器；推荐技能直接取 Top-1（或无推荐）。
 
 ### 5) 提示词注入（Injection）
 `ChatHandler` 在构建 system prompt 时：
-- 调用技能召回工具召回 Top-8，并运行选择器得到 `selected_skill`（或 `none`）
-- 仅将“选择器输出（推荐技能摘要）”以中文形式追加到 system prompt（避免注入全量或大列表）
+- 调用技能召回工具召回 Top-8，并取 Top-1 作为推荐技能（或 `none`）
+- 仅将“推荐技能摘要”以中文形式追加到 system prompt（避免注入全量或大列表）
 - 提示 agent：如需使用某技能，需先读取对应 `SKILL.md` 并遵循其操作协议
 
 ### 6) 保留“指定技能名称”的使用方式（Explicit Skill）

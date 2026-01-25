@@ -5,6 +5,8 @@
 ### Requirement: Workspace 是可选的“项目根目录”
 系统必须 (MUST) 支持一个可选的 `workspace` 概念：它是一个本地目录路径，对应 coding 场景下的 project 根目录。
 
+当会话启用 workspace 时，系统必须 (MUST) 将 `ONEAGENT_HOME` 设为 `<workspace>/`，作为 **agent 可修改文件的最大范围**（即 “home = workspace”）。
+
 当用户开启一个新会话时，系统必须 (MUST) 允许用户：
 - 不启用 workspace（仅对话，不进行文件改动）
 - 选择一个已存在的 workspace
@@ -15,23 +17,23 @@
 - **WHEN** 用户选择某个本地目录作为 workspace
 - **THEN** 该会话被标记为“启用 workspace”，并保存 workspace 根目录路径
 
-### Requirement: 默认仅允许修改 workspace 内的文件
-系统必须 (MUST) 默认仅允许对 `workspace` 根目录内的文件进行写/改/删操作（包括但不限于 `write_file` / `edit` / 删除文件等）。
+### Requirement: 默认仅允许修改 ONEAGENT_HOME 内的文件
+系统必须 (MUST) 默认仅允许对 `ONEAGENT_HOME` 根目录内的文件进行写/改/删操作（包括但不限于 `write_file` / `edit` / 删除文件等）。
 
 系统必须 (MUST) 支持读取 workspace 之外的文件，并且必须允许读取任意绝对路径（例如 `/path/to/file`）。读取必须以“只读”方式进行，且系统不得 (MUST NOT) 默认提供对 workspace 外文件的写入能力。
 
 #### Scenario: 写入 workspace 外文件被拒绝
 - **GIVEN** 会话已启用 workspace，根目录为 `<workspace>/`
-- **WHEN** 工具尝试写入或编辑 `<workspace>/` 之外的路径
-- **THEN** 系统拒绝该操作并返回清晰错误（例如 “path is outside workspace”）
+- **WHEN** 工具尝试写入或编辑 `ONEAGENT_HOME` 之外的路径
+- **THEN** 系统拒绝该操作并返回清晰错误（例如 “path is outside home”）
 
 #### Scenario: 读取任意绝对路径被允许
 - **GIVEN** 会话已启用 workspace，根目录为 `<workspace>/`
 - **WHEN** 工具尝试读取一个 `<workspace>/` 之外的绝对路径文件（例如 `/path/to/file`）
 - **THEN** 系统允许该读取并返回文件内容（只读）
 
-### Requirement: 工具默认作用域对齐 workspace
-系统必须 (MUST) 将“文件工具/搜索工具/命令执行工具”的默认作用域对齐到当前会话的 workspace（例如将工具沙箱根目录指向 workspace）。
+### Requirement: 工具默认作用域对齐 ONEAGENT_HOME
+系统必须 (MUST) 将“文件工具/搜索工具/命令执行工具”的默认作用域对齐到当前会话的 `ONEAGENT_HOME`。
 
 #### Scenario: 搜索默认在 workspace 内进行
 - **GIVEN** 会话已启用 workspace，根目录为 `<workspace>/`

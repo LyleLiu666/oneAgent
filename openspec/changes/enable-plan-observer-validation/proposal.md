@@ -16,7 +16,7 @@
 ## 建议方案 (Proposed Solution)
 ### 1) 计划文件（Plan File）
 默认在 workspace 下生成项目私有计划文件：
-- 路径建议：`<workspace>/.oneagent/PLAN.md`（不进入 git）
+- 路径建议：`ONEAGENT_HOME/.oneagent/PLAN.md`（不进入 git；当启用 workspace 时 `ONEAGENT_HOME=<workspace>/`）
 - 计划内容包含：任务列表、每个任务的验收标准（acceptance criteria）、可选的编辑范围（scope）
 
 ### 2) Plan 工具（Plan Tool）
@@ -29,11 +29,11 @@
 当任务被标记 done 时：
 - 系统以“独立角色”运行观察者（独立于主 Agent/子 Agent 上下文）
 - 观察者只接收：任务描述 + 验收标准 + workspace 根目录（以及可选的 scope/交付件路径）
-- 观察者只校验交付件（主要是文件内容/结构，必要时可运行验收命令），不与主/子 Agent 交互
+- 观察者只校验交付件（主要是文件内容/结构；MVP 不执行命令验收），不与主/子 Agent 交互
 - 若未达标，返回 `【plan中某个任务标记done失败】` + 原因，任务保持未完成
 
 ### 4) 与 subagent 的联动（为并发做准备）
-- 计划任务可声明 `scope`（workspace 子目录集合）
+- 计划任务可声明 `scope`（glob 规则，限定允许修改的文件范围）
 - subagent 启动时由系统传入 scope，并在文件工具层强制越界写/改/删失败（促使 subagent 重试/调整计划）
 - 如果 subagent 标记任务 done，系统将“校验结果”自动拼接到 subagent 的 handoff 汇报中（不依赖提示词约束）
 
@@ -44,6 +44,6 @@
 
 ## 开放问题 (Open Questions)
 1. 计划文件格式：纯 Markdown 还是 Markdown + YAML frontmatter？任务/验收标准如何结构化且便于解析？
-2. 观察者执行命令的边界：commands 是否仅允许来自 `acceptance.commands` 清单？是否需要对命令做额外 allowlist（例如只允许 `go test`/`pnpm test` 等）？
-3. scope 表达：是目录前缀集合，还是 glob 规则，还是两者都支持？
+2. scope 表达：glob 的语法范围与匹配规则是否需要进一步限制（例如是否允许 `**`、是否大小写敏感、是否允许否定模式）？
+3. 未来是否需要支持“命令验收”：在需要运行测试时（如 `go test`）是否要引入可选的 commands，并如何定义其边界？
 4. 并发策略：若两个任务 scope 重叠，是拒绝并发、还是引入文件级锁（以及锁等待上限）？

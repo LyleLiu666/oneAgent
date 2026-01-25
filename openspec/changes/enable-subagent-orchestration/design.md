@@ -54,7 +54,7 @@ findings 文件中包含两类核心信息：
 
 ### 4) 观测与存储（Trace / 可选 Session）
 MVP 推荐：
-- **完整痕迹落日志文件**，数据库仅保存摘要与指针，降低未来 SQLite 的压力：
+- **完整痕迹落日志文件**；系统 trace 仅保存摘要与指针（例如 log 文件路径、run_id），避免把大体量内容写入 Settings SQLite：
   - `trace_log_path`：记录子 Agent 的完整过程（消息、工具调用/结果、错误、时间等）
   - `findings_path`：记录交付件（流水账 + Findings + 修改文件列表）
 - 在主会话的 trace 中记录 `TraceTypeSubAgent` 条目，包含摘要与文件指针：
@@ -63,8 +63,8 @@ MVP 推荐：
   - metadata：parent_session_id、run_id、depth、model、tool_ids、耗时等
 
 建议目录结构（仅示意，可配置）：
-- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
-- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
+- `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
+- `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
 
 ## 交接格式 (Handoff Format)
 子 Agent 的交付以**文件**为主，而不是把所有信息塞回 tool result 文本。
@@ -110,7 +110,7 @@ MVP 推荐：
 ## 并发与文件作用域 (Concurrency & File Scope)
 MVP 推荐先实现**串行** subagent（避免并发编辑同一资源带来的锁与长等待）。
 
-如果未来需要并发 subagent，建议依赖一个“计划/分工”模块，在启动并发 subagent 前先划定每个 subagent 的可编辑范围（scope，通常是 workspace 的子目录集合），并在文件工具层强制校验：
+如果未来需要并发 subagent，建议依赖一个“计划/分工”模块，在启动并发 subagent 前先划定每个 subagent 的可编辑范围（scope，glob 规则，基于 `ONEAGENT_HOME` 的相对路径），并在文件工具层强制校验：
 - 子 Agent 只能对 scope 内文件做写/改/删；越界则返回可理解错误，促使其重试或调整计划
 - 通过“分区”优先规避全局锁；锁仅作为最后手段（例如短时间文件级锁）
 

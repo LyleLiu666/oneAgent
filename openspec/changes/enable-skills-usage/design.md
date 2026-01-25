@@ -34,36 +34,38 @@
 - `name`: 文件夹名或文件名
 - `description`: 取首段文本（做长度截断）
 
-### 3) 技能索引（`internal/skillindex`）
-为支持“几千个技能”的场景，引入本地索引层（建议 SQLite + FTS5）：
-- 索引位置：默认存放在 `ONEAGENT_HOME`（避免污染 repo），并按 workspace 做隔离（例如 `ONEAGENT_HOME/cache/skills/<workspace_id>/skill-index.sqlite`）
-- 索引字段：`skill_id/name/description/tags/source/path/mtime/hash`
-- 更新策略（MVP）：启动时或首次请求时“增量构建/更新”
-  - 可用 `mtime+size` 或内容 hash 判断变更
-  - 后续可扩展 fsnotify 监听
+### 3) 技能召回：基于 grep/ripgrep（不引入持久化索引）
+本阶段不引入 SQLite FTS 索引（避免把 SQLite 扩展成“通用存储/索引”，也降低发布复杂度）。技能召回采用“扫描 + grep”方式即可覆盖 1000+ skills：
+- `internal/skill` 负责发现三处来源的 `SKILL.md` 并解析元数据（name/description/tags/path/source）。
+- `internal/skillrecall` 负责对 query 做召回与排序：
+  - **优先使用 `rg`**（ripgrep）对候选 `SKILL.md` 做内容匹配计分（可跟随 symlink；并发/超时可控）。
+  - 若 `rg` 不可用，可降级为 `grep -R` 或 Go 递归扫描（MVP 可先只做 `rg` + 明确提示）。
+  - 排序必须稳定（score 相同用 `skill_id` 或 `path` 做 tie-break），避免 prompt 抖动。
 
-### 4) 独立的技能召回/挑选工具（`cmd/skill-recall` 或 `internal/skillrecall`）
-新增一个独立组件负责“从索引中召回 Top-8 技能 + 从 Top-8 中选择最合适的技能”，其目标是：
+> 评估：`go-memdb` 更适合结构化查询与内存索引，但对“全文召回”帮助有限（仍需自己实现倒排/分词/权重），复杂度与收益不匹配；`rg` 在 macOS/Linux 下性能极佳且实现成本最低，因此本阶段选择 `rg` 方案。
+
+### 4) 独立的技能召回工具（`cmd/skill-recall` 或 `internal/skillrecall`）
+新增一个独立组件负责“从技能集合中召回 Top-8 技能”，其目标是：
 - **独立于主 agent**：技能筛选流程独立于主对话 LLM（避免把“选技能”混进主对话上下文）
-- **可解释/可测试**：召回阶段可复现；选择阶段可输出结构化结果与可选理由
+- **可解释/可测试**：召回结果可复现（同一输入同一输出顺序）
 
 建议提供两种入口（同一逻辑复用）：
 - **CLI**：`oneagent skills search --query "..."`
 - **库接口**：供 `ChatHandler` 直接调用（避免频繁 fork 进程）
 
 召回策略（MVP，Top-8 固定）：
-- 使用 FTS/关键词匹配，返回 Top-8 + score
-- 可选：对 name/tags 提升权重
+- 对 name/description/tags 做基础匹配计分
+- 使用 `rg` 对 `SKILL.md` 内容做补充计分（可选，但建议）
+- 返回 Top-8 + score（稳定排序）
 
-选择策略（第二阶段，Selector）：
-- 将 Top-8 候选（仅元数据：name/description/tags/path/source/score）封装为“选择提示词”（Selector Prompt）
-- 由选择器执行一次**独立的 LLM 调用（复用主对话模型）**，在 Top-8 中选出 `selected_skill` 或 `none`
-- 输出结构化结果：`selected_skill_id`, `selected_skill_name`, `confidence`, `reason`（可选）
-
-> 说明：召回阶段不依赖外部网络；选择阶段可能依赖 LLM（可配置关闭/降级为 Top-1）。
+> 本阶段不引入“Selector Prompt + 二次 LLM 调用”的选择器；推荐技能仅以 Top-1 摘要形式注入到 TurnContext（volatile），不得破坏 Stable Prefix（见 `optimize-kv-cache`）。
 
 ### 5) 上下文注入（`internal/handler`）
-修改 `ChatHandler` 的 system prompt 构建逻辑：不再注入“全部技能”，而是注入“选择器输出（推荐技能）”。
+修改 `ChatHandler` 的 prompt 构建逻辑：不再把“技能信息”拼进稳定 system prompt，而是在 **Stable Prefix 之后**追加一个 TurnContext（volatile）消息，写入“推荐技能摘要”（Top-1 或 none）。
+
+该 TurnContext 必须被视为动态上下文：
+- 不得被 cache selector 选为 cacheable（当 provider 需要显式 cache 标记时）
+- 不得导致稳定前缀发生变化（不得回写/编辑 system message）
 
 提示词模板（中文）示例：
 ```text
@@ -82,18 +84,16 @@
 - 当用户在自然语言中明确表达“希望使用某个技能”（通常会提到技能名称）时，系统应优先解析该技能名并作为推荐技能（可跳过召回/选择，或作为 override）。
 
 ## 数据流 (Data Flow)
-1. **启动 / 首次请求**：构建/更新技能索引（从 `<workspace>/.oneagent`、`~/.claude`、`~/.codex` 扫描；取并集后按 name 去重）。
+1. **启动 / 首次请求**：扫描技能来源（从 `<workspace>/.oneagent`、`~/.claude`、`~/.codex` 扫描；取并集后按 name 去重）。
 2. **聊天请求**：`ChatHandler` 获取用户输入（以及可选上下文，如系统提示词/会话摘要）。
 3. **显式技能解析（可选）**：若用户语义上明确指定技能名称，则解析为 `selected_skill`（可作为 override）。
-4. **召回（无显式指定时）**：调用召回工具 `Search(query)` 得到 Top-8 候选。
-5. **选择（Selector）**：用 Selector Prompt 在 Top-8 中选出 `selected_skill` 或 `none`。
-6. **提示词构建**：将“中文技能建议（推荐技能摘要）”追加到 `SystemPrompt`。
-7. **Agent 行动**：主对话 LLM 看到推荐技能后，自行判断是否需要使用；若需要，通过现有工具读取 `SKILL.md` 并按协议执行。
+4. **召回（无显式指定时）**：调用召回工具 `Search(query)` 得到 Top-8 候选（基于 metadata + `rg` 计分）。
+5. **提示词构建**：将“中文技能建议（Top-1 推荐技能摘要）”写入 TurnContext（volatile）消息（不得注入全量列表、不得修改 stable system prompt）。
+6. **Agent 行动**：主对话 LLM 看到推荐技能后，自行判断是否需要使用；若需要，通过现有工具读取 `SKILL.md` 并按协议执行。
 
 ## 权衡 (Trade-offs)
-- **扫描 vs 索引**：直接扫描文件夹简单但不适合几千技能；索引增加复杂度但换来性能与可控性。
-- **FTS vs Embedding**：FTS 可解释、无外部依赖；Embedding 召回质量可能更好，但需要模型/成本与隐私权衡。建议先 FTS（MVP），后续再扩展。
-- **目录兼容性**：`.claude` 的真实组织结构可能存在差异；设计上应允许通过配置扩展扫描规则。
+- **grep vs 自建索引**：`rg` 方案实现成本低、性能高、无需引入持久化索引；代价是每次召回需要跑一次搜索（可通过缓存与 Top-K 限制控制）。
+- **目录兼容性**：`.claude` / `.codex` 的真实组织结构可能存在差异；扫描需支持 symlink 且避免循环。
 
 ## 开放问题 (Open Questions)
 1. 召回 query 的构成：仅用“用户最后一句”，还是包含系统提示词/会话摘要/最近 N 轮？

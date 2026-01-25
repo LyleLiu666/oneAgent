@@ -44,39 +44,42 @@
 
 ### 阶段 1: 本地工具 MVP（最小可用）
 - 增加 `oneagent` CLI 入口（或将现有 `cmd/server` 扩展为多子命令）。
-- 引入“本地数据目录”概念（例如 `~/.oneagent/` 或平台标准配置目录），统一存放：
-  - 配置文件（如 `config.yaml`/`config.toml`）
-  - 数据库文件（若采用 SQLite）
-  - bash-root（工具沙箱根目录）
-  - 日志与缓存
+- 引入“home 目录”概念（默认 `~/.oneagent_default/`；选择 workspace 时 `home=<workspace>/`），作为 **agent 可修改文件的最大范围**。
+- oneAgent 的可变状态统一存放在 `<home>/.oneagent/` 下，包含：
+  - 配置文件（如 `config.yaml`）
+  - 本地访问令牌（`config/auth_token`）
+  - Settings SQLite（仅用于 Settings，例如 API keys）
+  - 其它状态的文件存储（会话/trace/logs 等）
 - 默认以本机进程运行后端（并继续内嵌前端静态文件），通过 `oneagent serve` 启动；默认以 LAN 可访问方式启动，但不默认开放公网。
 - 默认以“本地访问令牌（自动生成、不过期）”作为访问控制（替代 Keycloak/OAuth 登录）。
 - 为“外部依赖”提供 `oneagent doctor` 自检（例如检查 `rg`/`git`/`jq` 等可选工具是否存在，并输出建议）。
 
 ### 阶段 2: 存储与认证的本地化（提升“零依赖”程度）
-- 存储方案：引入 **SQLite 作为默认本地持久化**（自动创建/迁移），并确保 Settings 中配置 token 的能力在 SQLite 下可用且可持久化。
+- 存储方案：
+  - **SQLite 仅用于 Settings 持久化**（自动创建/迁移；Provider API Key 等敏感配置仅以 `has_*` 形式对外暴露）。
+  - 其它状态（会话/消息/trace/subagent logs 等）走文件存储，落在 `<home>/.oneagent/data/` 与 `<home>/.oneagent/logs/`。
 - 认证方案：引入 `AUTH_MODE=token`（默认），启动时自动生成一个不过期 token 并持久化到 `ONEAGENT_HOME`；可选 `AUTH_MODE=none` 仅用于开发/离线极简场景（需显式开启）。
-- （兼容）可选保留 `DATABASE_URL` 指向 Postgres 的能力，用于迁移/高级用户场景，但不再作为“server/生产画像”主路径。
+- 本阶段不再支持 Postgres / `DATABASE_URL` 路径，以降低交付与维护成本。
 
 ### 阶段 3: 交付与升级体验（工具化完成度）
 - 引入发布流水线（例如 GoReleaser）：
-  - 产出 macOS/Linux 的可执行文件（Windows 取决于 shell/tooling 支持情况，后置）
+  - 产出 macOS/Linux 的可执行文件（本阶段不支持 Windows）
   - 产出校验与版本信息
-  - 产出可选的 Homebrew/Scoop 安装方式（可后置）
+  - 产出可选的 Homebrew 安装方式（可后置）
 - 引入 `oneagent upgrade`（可选）或文档化升级流程。
 - 明确 Docker 相关内容的定位：仅用于 CI 构建或“服务化部署参考”，而不是默认运行方式。
 
 ## 破坏性变更 (Breaking Changes / Risks)
 该提案可能引入以下破坏性变化（具体以阶段划分控制风险）：
 - **运行方式变化**：主推荐路径从 `docker-compose up` 变为 `oneagent serve`。
-- **默认存储变化（若启用 SQLite）**：`DATABASE_URL` 不再是“必须项”；默认会落在本地文件数据库。
+- **默认存储变化**：本阶段不再支持 `DATABASE_URL`/Postgres；默认使用文件存储（会话/trace/logs）+ Settings SQLite（仅配置）。
 - **默认认证变化（本地访问令牌）**：不再使用 Keycloak/OAuth 登录；前端需要以 token 方式进行访问控制（对齐现有 `Authorization` header 的使用方式）。
 - **运行画像变化（server 废弃）**：不再提供面向公网/多用户的 server 画像；默认面向局域网场景。
-- **数据目录与权限**：需要明确 bash-root 与数据目录的权限与隔离策略，避免越权读写。
+- **home 目录与权限**：home=agent 可修改文件的最大范围；超出 home 的写/改/删必须被拒绝，避免越权读写。
 
 ## Impact
 - 代码：
-  - 后端：启动入口、配置加载、数据库连接层、认证层、工具依赖检查
+  - 后端：启动入口、配置加载、Settings 持久化层（SQLite）与文件存储层、认证层、工具依赖检查
   - 前端：登录流程与配置获取流程可能需要适配新的 auth mode
   - 构建：本地构建脚本与 CI 发布流程
 - 文档：
@@ -98,5 +101,5 @@
 ## 开放问题 (Open Questions)
 为避免“想当然”，在进入实现前需要明确以下关键决策（可在评审时一并敲定）：
 1. **反向代理与 IPv6**：默认监听策略（`0.0.0.0`/`::`）如何做得跨平台且可预期？是否需要 `TRUST_PROXY`/`BASE_URL` 等配置来改善反代体验？
-3. **Postgres 兼容的取舍**：在 server profile 废弃后，是否仍保留 `DATABASE_URL`=Postgres 的兼容路径（用于迁移/高级用户），还是直接移除以简化实现？
-4. **敏感 token 的落盘策略**：Settings 中配置的 API Key 是否需要“落盘加密”（如用 password 派生密钥），还是仅依赖本机文件权限即可？
+2. **文件存储约定**：会话/消息/trace 的文件目录结构与命名（按 session_id/run_id？）以及并发写入策略如何定义，才能尽量少返工且便于排障？
+3. **敏感 token 的落盘策略**：Settings 中配置的 API Key 是否需要“落盘加密”（如用 password 派生密钥），还是仅依赖本机文件权限即可？

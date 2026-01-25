@@ -7,7 +7,7 @@
 
 该 token 只是一个本地访问凭证（opaque string），系统不得 (MUST NOT) 要求其满足 JWT 结构或包含过期声明。
 
-系统必须 (MUST) 将 token 以固定文件路径持久化到 `ONEAGENT_HOME/config/auth_token`（若文件不存在则生成并写入；若存在则复用）。
+系统必须 (MUST) 将 token 以固定文件路径持久化到 `ONEAGENT_HOME/.oneagent/config/auth_token`（若文件不存在则生成并写入；若存在则复用）。
 
 为兼容历史配置，系统应该 (SHOULD) 继续接受 `AUTH_MODE=password` 作为 `token` 的别名（行为一致）。
 
@@ -18,13 +18,13 @@
 - **THEN** 系统默认使用 `AUTH_MODE=token`
 
 #### Scenario: token 文件缺失时自动生成
-- **GIVEN** `ONEAGENT_HOME/config/auth_token` 不存在
+- **GIVEN** `ONEAGENT_HOME/.oneagent/config/auth_token` 不存在
 - **WHEN** 服务启动
 - **THEN** 系统生成 token 并写入该文件
 
 #### Scenario: doctor 提示 token 文件路径
 - **WHEN** 用户执行 `oneagent doctor`
-- **THEN** 输出包含 `ONEAGENT_HOME/config/auth_token` 的路径提示（而不是明文 token）
+- **THEN** 输出包含 `ONEAGENT_HOME/.oneagent/config/auth_token` 的路径提示（而不是明文 token）
 
 ### Requirement: Token 模式下 API 必须携带访问令牌
 系统必须 (MUST) 在 `AUTH_MODE=token` 时要求所有受保护 API 请求携带访问令牌；token 错误或缺失时应拒绝请求。

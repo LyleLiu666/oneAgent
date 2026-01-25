@@ -1,0 +1,16 @@
+# 任务列表 (Tasks)
+
+- [ ] 定义“缓存友好 Prompt 构建”规范：Stable Prefix vs Volatile Context，并给出推荐注入位置（为 skills/plan/subagent 提供约束） <!-- id: 1 -->
+- [ ] 引入可复用的 cache policy 抽象（capability matrix + cache selector），并为各 provider 明确默认策略 <!-- id: 2 -->
+- [ ] 优化长会话压缩后的缓存命中：让 summary 进入显式缓存集合（或采用等价机制） <!-- id: 3 -->
+- [ ] 完善 Claude(Anthropic) 工具调用场景的缓存覆盖：支持对 tool_use/tool_result block 注入 cache_control（或可配置） <!-- id: 4 -->
+- [ ] 统一 `prompt_cache_key` 策略与回退机制：
+  - [ ] key 计算纳入 model/tool/system_prompt 变化（避免不必要 miss 或潜在碰撞） <!-- id: 5 -->
+  - [ ] 上游返回“不支持字段/参数”时自动降级并提示 <!-- id: 6 -->
+- [ ] 增加缓存可观测性：
+  - [ ] 在 trace/DB 中记录 cache enabled、cache key（脱敏/哈希）、cached tokens（若可得） <!-- id: 7 -->
+  - [ ] 前端最小展示（Trace 或 Settings 面板） <!-- id: 8 -->
+- [ ] 测试与验证：
+  - [ ] 单元测试：cache selector 在典型消息序列（含压缩摘要、含工具消息）下输出稳定 <!-- id: 9 -->
+  - [ ] 集成测试（mock provider）：确保各 provider 的请求 payload 注入符合 capability matrix <!-- id: 10 -->
+

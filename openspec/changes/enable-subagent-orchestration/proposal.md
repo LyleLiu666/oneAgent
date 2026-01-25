@@ -45,13 +45,13 @@
 ### 5) 可观测性
 子 Agent 执行应被记录为可观测事件：
 - **必须留下完整痕迹**以便回溯：包括子 Agent 的消息、工具调用、工具结果、关键中间产物等
-- 考虑到未来从 Postgres 迁移到 SQLite 可能带来的存储压力，建议将“完整痕迹”落在**日志文件**中，而不是全部塞进数据库
+- 考虑到“完整痕迹”体量较大且天然更适合文件形态，建议将其落在**日志文件**中，而不是写入 Settings SQLite。
   - 按日期与 session_id 分类存放（类似日志按日期切分）
-  - 数据库中的 trace 只存“摘要 + 指针”（例如 log 文件路径、run_id）
+  - 系统的 trace 元信息只存“摘要 + 指针”（例如 log 文件路径、run_id）
 
 示例目录（仅示意，可配置）：
-- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
-- `ONEAGENT_HOME/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
+- `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/trace.jsonl`
+- `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/FINDINGS.md`
 
 ## 影响范围 (Impact)
 - 后端：新增子 Agent 运行组件与工具；需要接入现有 tool-loop、trace 与（可选）会话/消息持久化

@@ -38,8 +38,8 @@
 - **WHEN** 系统加载技能目录
 - **THEN** 技能列表中包含该技能（不得因 symlink 而漏掉）
 
-### Requirement: 召回 + 选择式技能推荐 (Recall + Select Recommendation)
-系统必须 (MUST) 在聊天开始前使用“技能召回/挑选工具”从全量技能中召回 Top-8，然后使用选择器（Selector Prompt）在 Top-8 中选出“最合适的技能”或 `none`，并将选择结果作为“推荐技能”提供给主 agent。
+### Requirement: 召回式技能推荐 (Recall Recommendation)
+系统必须 (MUST) 在聊天开始前使用“技能召回工具”从全量技能中召回 Top-8，并从中选择 Top-1 作为“推荐技能”（或无推荐），提供给主 agent。
 
 #### Scenario: 海量技能时仅召回 Top-8 且不注入全量列表
 - **GIVEN** 可用技能数量为 1000+
@@ -47,8 +47,8 @@
 - **THEN** 技能召回阶段只处理 Top-8 候选（固定为 8）
 - **THEN** system prompt 不得出现“全量技能列表”或“把所有技能都列出”的行为
 
-#### Scenario: 选择器返回 none 时不注入推荐技能
-- **GIVEN** 技能召回工具返回空结果或选择器返回 `none`
+#### Scenario: 无推荐技能时不注入推荐块
+- **GIVEN** 技能召回工具返回空结果（无候选）
 - **WHEN** 生成本轮 system prompt
 - **THEN** system prompt 不包含“## 技能建议”块（或包含但明确说明无推荐技能）
 
@@ -64,13 +64,13 @@
 系统必须 (MUST) 使用中文提示词注入“推荐技能摘要”，以符合用户偏好，并引导 agent 在使用前先读取技能文件。
 
 #### Scenario: 中文提示词标题 (Scenario: Chinese Prompt Header)
-- **GIVEN** 选择器返回一个推荐技能
+- **GIVEN** 系统产生一个推荐技能
 - **WHEN** 生成系统提示词时
 - **THEN** 它**必须**包含 "## 技能建议"
 - **THEN** 它**必须**包含 "你需要先读取" 或等价表述（强调先读技能文件再执行）
 
 #### Scenario: 列表中的技能描述 (Scenario: Skill Description in List)
-- **GIVEN** 选择器返回技能 "Translator"，描述为 "Expert in translation"
+- **GIVEN** 系统推荐技能 "Translator"，描述为 "Expert in translation"
 - **WHEN** 生成系统提示词时
 - **THEN** 它**必须**包含 "- Translator: Expert in translation"
 - **THEN** 它**必须**包含该技能的来源与路径信息（至少能定位到 `SKILL.md`）

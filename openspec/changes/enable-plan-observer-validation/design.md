@@ -17,19 +17,19 @@ Plan 是一个文件化的任务清单，每个任务至少包含：
 - `scope`（可选）：允许修改的目录范围（用于 subagent 分工与越界拦截）
 
 默认路径（项目私有、避免进 git）：
-- `<workspace>/.oneagent/PLAN.md`
+- `ONEAGENT_HOME/.oneagent/PLAN.md`（当启用 workspace 时 `ONEAGENT_HOME=<workspace>/`）
 
 ### 2) Observer（观察者）
 Observer 是一次独立的校验执行单元：
 - 输入：单个任务（description + acceptance + scope + workspace_root）
-- 工具：默认只读（读文件/搜索/列目录），并且必须允许执行验收命令（仅来自 acceptance 列表）
+- 工具：默认只读（读文件/搜索/列目录）；MVP 不允许执行命令验收（仅基于文件内容/结构判定）
 - 输出：`pass|fail` + 原因（fail 必须可操作）
 
 Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 trace/log；它只看交付件。
 
-验收命令（commands）约束：
-- observer 只能执行来自该任务 acceptance 列表中的 commands
-- commands 默认在 workspace 根目录下执行，并遵守 scope（若提供）
+验收策略（MVP）：
+- observer 仅基于 `acceptance.files` 与可选的“文件内容断言”（例如 `acceptance.must_contain`）判定 pass/fail
+- 所有验收涉及的文件路径必须位于 `ONEAGENT_HOME` 内；若 task 声明了 `scope`，则还必须匹配 `scope`（glob）
 
 ## Plan 文件格式 (MVP)
 优先采用“可读 + 易解析”的 Markdown 结构，类似现有 `tasks.md`：
@@ -39,38 +39,50 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 
 ## 1. Backend API
 - [ ] 实现 /api/foo <!-- id: 1 -->
-  - scope: backend/
+  - scope:
+    - backend/**
   - acceptance:
     - files:
       - backend/internal/foo/foo.go
-    - commands:
-      - go test ./backend/...
+    - must_contain:
+      - backend/internal/foo/foo.go: "func"
 ```
 
 解析规则（MVP）：
 - 任务行用 `- [ ]` / `- [x]` 表示状态
 - `<!-- id: ... -->` 提供稳定 id
 - `scope:`、`acceptance:` 作为语义块（缩进的子项）
+- `scope` 使用 glob（相对 `ONEAGENT_HOME` 的相对路径），用于约束该任务允许写入/修改的范围
+
+### Scope（glob）规则（MVP）
+- scope 是一个 glob 列表（允许 `*`、`?`、`**`），匹配对象为“相对 `ONEAGENT_HOME` 的相对路径”，路径分隔符统一使用 `/`。
+- glob 不得是绝对路径（不得以 `/` 开头），不得包含 `..` 片段；发现非法 scope 时必须直接报错。
+- 判断某个文件是否可写时，系统必须同时满足：
+  1) 目标路径解析后位于 `ONEAGENT_HOME` 内（防止 `..` 与 symlink 越界）
+  2) 若 scope 非空，则目标相对路径至少匹配一个 glob
+- MVP 不支持否定模式（例如 `!foo/**`）；如需排除规则，后续通过单独变更引入。
 
 ## 工具接口 (API Sketch)
 
 ### plan tool（供主 Agent/子 Agent 调用）
-- `plan.init(workspace_root, template?)` → 创建默认 `PLAN.md`
-- `plan.get(workspace_root)` → 返回任务列表（id/title/status/scope/acceptance 摘要）
-- `plan.mark_done(workspace_root, task_id)` → 触发 observer 校验；通过则写回 `PLAN.md`，失败则返回失败原因并不写回
+- `plan.init(oneagent_home, template?)` → 创建默认 `PLAN.md`
+- `plan.get(oneagent_home)` → 返回任务列表（id/title/status/scope/acceptance 摘要）
+- `plan.mark_done(oneagent_home, task_id)` → 触发 observer 校验；通过则写回 `PLAN.md`，失败则返回失败原因并不写回
 
 ### observer runner（系统内部）
-- `observer.validate(workspace_root, task)` → `{pass, reason, evidence?}`
+- `observer.validate(oneagent_home, task)` → `{pass, reason, evidence?}`
 
 关键约束：
 - `plan.mark_done` 必须是“原子操作”：要么校验通过并写回，要么失败且不更改状态
 - 校验失败要返回可供 agent 重试的明确原因
 
 ## 与 subagent 的集成
-- subagent 执行某个任务时，可携带该任务的 `scope`（目录范围）
+- subagent 执行某个任务时，可携带该任务的 `scope`（glob）
 - 文件工具层对写/改/删强制校验 scope（越界直接报错）
 - subagent 若调用 `plan.mark_done`：
   - 结果必须自动拼接进 subagent handoff（summary/findings）中，便于主 Agent 了解任务是否真正验收通过
+
+> 已知限制（MVP）：`bash/run_command` 可能绕过文件工具层的 scope 校验；本阶段仅在提示词中约束“禁止使用 bash 修改文件”，暂不做强制拦截。
 
 ## 并发策略（后置）
 并发 subagent 的必要条件：
