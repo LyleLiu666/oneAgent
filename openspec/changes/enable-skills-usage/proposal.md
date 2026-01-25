@@ -57,7 +57,7 @@
 `ChatHandler` 在构建 prompt 时：
 - 调用技能召回工具召回 Top-8，并取 Top-1 作为推荐技能（或 `none`）
 - 将“推荐技能摘要”以中文形式写入 TurnContext（volatile）消息（避免注入全量或大列表；不得回写稳定 system prompt，避免破坏 KV cache）
-- 提示 agent：如需使用某技能，需先读取对应 `SKILL.md` 并遵循其操作协议
+- 技能生效方式：如需使用某技能，agent 必须先通过 skill 读取工具（`skill.read`）按技能名称读取对应 `SKILL.md`；该内容作为工具调用输出（tool output）进入对话上下文，agent 在后续思考与回复中遵循其操作协议
 
 ### 6) 保留“指定技能名称”的使用方式（Explicit Skill）
 除“召回 + 选择”路径外，系统仍需保留“按技能名称指定”的使用方式：

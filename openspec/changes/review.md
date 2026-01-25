@@ -15,6 +15,7 @@
 该特性目标是“从海量技能里挑少量相关技能注入 prompt”，避免把全量技能塞进上下文。
 - **来源**：`<workspace>/.oneagent/skills/**/SKILL.md`、`~/.claude/skills/**/SKILL.md`、`~/.codex/skills/**/SKILL.md`；取并集后按 name 去重（.oneagent > .claude > .codex），必须支持目录 symlink 且避免循环。
 - **召回方案已调整**：本阶段不引入 SQLite FTS/索引；采用 `rg`（ripgrep）对 `SKILL.md` 匹配计分并返回 Top-8（稳定排序），TurnContext（volatile）仅注入 Top-1 推荐技能摘要（不回写稳定 system prompt，保持 KV cache 友好）。
+- **生效方式**：agent 仅凭技能名称调用 `skill.read` 读取对应 `SKILL.md`，其内容以 tool output 进入对话上下文，后续推理遵循其中指令。
 - **为什么不用 go-memdb**：memdb 更偏结构化内存索引，做全文召回仍要自建倒排/分词/权重；相比之下 `rg` 在 macOS/Linux 性能更好、实现成本最低。
 
 主要风险在于：`rg` 缺失时的降级策略（MVP 可先 doctor 提示安装）、扫描边界（避免误扫超大目录/设置超时与输出上限）、以及 symlink 循环处理。
