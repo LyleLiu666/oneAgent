@@ -97,15 +97,21 @@ func TestRunLoop_SelfHeal_ParseToolDataError(t *testing.T) {
 	}
 }
 
-func TestBuildToolResultMessage_EscapesCDATAEndMarker(t *testing.T) {
+func TestBuildToolResultMessage_EscapesXMLText(t *testing.T) {
 	msg := buildToolResultMessage([]ToolResult{{
 		ToolName:   "bash",
 		ToolCallID: "xml_0_0",
 		OK:         false,
-		OutputJSON: `{"out":"]]> inside"}`,
-		Error:      `bad ]]> error`,
+		OutputJSON: `{"out":"<x>&"}`,
+		Error:      `bad <error> & value`,
 	}})
-	if !strings.Contains(msg, "]]]]><![CDATA[>") {
-		t.Fatalf("expected CDATA escape sequence, got %q", msg)
+	if strings.Contains(msg, "<![CDATA[") {
+		t.Fatalf("expected message to not contain CDATA, got %q", msg)
+	}
+	if !strings.Contains(msg, "&lt;x>") {
+		t.Fatalf("expected output to escape '<', got %q", msg)
+	}
+	if !strings.Contains(msg, "&amp;") {
+		t.Fatalf("expected output to escape '&', got %q", msg)
 	}
 }

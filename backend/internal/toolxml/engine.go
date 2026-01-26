@@ -383,14 +383,14 @@ func buildToolResultMessage(results []ToolResult) string {
 		}
 		b.WriteString("</ok>\n")
 		if r.Error != "" {
-			b.WriteString("    <error><![CDATA[")
-			b.WriteString(escapeCDATA(r.Error))
-			b.WriteString("]]></error>\n")
+			b.WriteString("    <error>")
+			b.WriteString(escapeXMLText(r.Error))
+			b.WriteString("</error>\n")
 		}
 		if r.OutputJSON != "" {
-			b.WriteString("    <output><![CDATA[")
-			b.WriteString(escapeCDATA(r.OutputJSON))
-			b.WriteString("]]></output>\n")
+			b.WriteString("    <output>")
+			b.WriteString(escapeXMLText(r.OutputJSON))
+			b.WriteString("</output>\n")
 		}
 		b.WriteString("  </call>\n")
 	}
@@ -398,20 +398,10 @@ func buildToolResultMessage(results []ToolResult) string {
 	return b.String()
 }
 
-func escapeCDATA(value string) string {
-	if value == "" {
-		return ""
-	}
-	return strings.ReplaceAll(value, "]]>", "]]]]><![CDATA[>")
-}
-
 func escapeXMLText(value string) string {
 	replacer := strings.NewReplacer(
 		"&", "&amp;",
 		"<", "&lt;",
-		">", "&gt;",
-		"\"", "&quot;",
-		"'", "&apos;",
 	)
 	return replacer.Replace(value)
 }

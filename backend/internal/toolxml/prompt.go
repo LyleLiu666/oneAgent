@@ -82,11 +82,11 @@ func SystemPrompt(defs []tool.Definition) string {
 		case "multiedit":
 			b.WriteString("- multiedit（edit 的别名：批量模糊替换，兼容旧提示词）：\n")
 			b.WriteString("  <tool_name>multiedit</tool_name>\n")
-			b.WriteString("  <edits><![CDATA[\n")
+			b.WriteString("  <edits>\n")
 			b.WriteString("  [\n")
 			b.WriteString("    {\"filePath\":\"path/to/file\",\"oldString\":\"...\",\"newString\":\"...\",\"replaceAll\":true}\n")
 			b.WriteString("  ]\n")
-			b.WriteString("  ]]></edits>\n")
+			b.WriteString("  </edits>\n")
 			b.WriteString("  <replaceAll>true</replaceAll>（可选；对所有 edits 生效）\n")
 		case "rg":
 			b.WriteString("- rg（ripgrep，本地高速搜索，支持正则）：\n")
@@ -101,14 +101,12 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("  <tool_name>subagent</tool_name>\n")
 			b.WriteString("  <task>...</task>\n")
 			b.WriteString("  <context_summary>...</context_summary>（可选；前序步骤短总结 + findings/trace 引用）\n")
-			b.WriteString("  <scope><![CDATA[[\"backend/**\"]]]></scope>（可选；可写范围 glob，JSON 数组或逗号分隔列表）\n")
-			b.WriteString("  <tool_ids><![CDATA[[\"edit\",\"write_file\",\"rg\"]]]></tool_ids>（可选；允许工具 ID 列表；默认继承主工具集但不含 subagent）\n")
-			b.WriteString("  <skill_ids><![CDATA[[\"translator\"]]]></skill_ids>（可选；显式注入的技能 ID 列表）\n")
+			b.WriteString("  <scope>backend/**</scope>（可选；可写范围 glob；支持逗号分隔多个）\n")
+			b.WriteString("  <tool_ids>edit,write_file,rg</tool_ids>（可选；允许工具 ID 列表；默认继承主工具集但不含 subagent）\n")
+			b.WriteString("  <skill_ids>translator</skill_ids>（可选；显式注入的技能 ID 列表；支持逗号分隔多个）\n")
 			b.WriteString("  <k_skills>3</k_skills>（可选；自动召回并注入的技能 Top-K，0=不注入，默认 3）\n")
 			b.WriteString("  <max_steps>200</max_steps>（可选；默认 200）\n")
 			b.WriteString("  <max_runtime_seconds>3600</max_runtime_seconds>（可选；默认 3600）\n")
-			//todo 为什么日志会出现在提示词里，这些难道不应该做在代码工程里吗
-			b.WriteString("  <max_log_bytes>67108864</max_log_bytes>（可选；trace.jsonl 日志软上限，默认 64MiB）\n")
 			b.WriteString("  说明：默认禁止递归（子 Agent 不挂载 subagent 工具本身）。\n")
 		default:
 			if strings.TrimSpace(name) != "" {
