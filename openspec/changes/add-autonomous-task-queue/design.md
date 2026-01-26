@@ -42,6 +42,9 @@
 - Decision: 失败任务支持断点接续（resume）
   - Task 以 “attempt” 作为执行尝试的边界：每次 attempt 产生独立的 run_id/findings/trace，并保留历史。
   - resume 会启动一个新的 attempt，并以“上一次 attempt 的 summary + findings/trace 引用”作为输入上下文，最大化复用已完成工作与证据。
+- Decision: 服务重启后的恢复采用“等待用户 resume”
+  - 重启后将 running attempt 标记为 `interrupted`，不自动启动新的 attempt。
+  - 由用户显式触发 resume 继续（避免无意消耗资源与造成不可控改动）。
 
 ## API Sketch (non-normative)
 - `POST /api/tasks`：创建任务（workspace、title、prompt、model_id、limits）
@@ -67,4 +70,4 @@
   - v1 以“基于上一次 attempt 的产物与上下文摘要的 resume”实现近似断点续跑（不要求精确恢复到同一 LLM 节点）
 
 ## Open Questions
-- 服务重启恢复策略：running 任务在重启后应标记为 `interrupted` 并允许一键 resume，还是自动 resume（可选配置）？
+- （已决定）服务重启后的恢复默认等待用户 resume；未来如需自动恢复，作为可选配置再引入。

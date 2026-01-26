@@ -17,6 +17,7 @@
 - **GIVEN** 任务 attempt 处于 `running`
 - **WHEN** oneAgent 服务重启
 - **THEN** 该 attempt 被标记为 `interrupted`
+- **THEN** 系统不自动创建新的 attempt（等待用户显式 resume）
 - **THEN** 该任务可通过 resume 启动新的 attempt 继续推进
 
 ### Requirement: Task 以 workspace 为隔离边界
