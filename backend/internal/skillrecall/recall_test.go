@@ -89,6 +89,57 @@ func TestSearch_UsesRgWhenAvailable(t *testing.T) {
 	}
 }
 
+func TestSearch_TokenizesMultiWordQuery(t *testing.T) {
+	root := t.TempDir()
+	apple := filepath.Join(root, "apple-notes", "SKILL.md")
+	bear := filepath.Join(root, "bear-notes", "SKILL.md")
+	for _, p := range []string{apple, bear} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	if err := os.WriteFile(apple, []byte("---\nname: apple-notes\ndescription: Manage Apple Notes via memo\n---\nUse memo notes\n"), 0o644); err != nil {
+		t.Fatalf("write apple: %v", err)
+	}
+	if err := os.WriteFile(bear, []byte("---\nname: bear-notes\ndescription: Manage Bear notes\n---\n"), 0o644); err != nil {
+		t.Fatalf("write bear: %v", err)
+	}
+
+	cat := &skill.Catalog{
+		Skills: []skill.Skill{
+			{ID: "apple-notes", Name: "apple-notes", Description: "Manage Apple Notes via memo", Path: apple, Source: skill.SourceClaude},
+			{ID: "bear-notes", Name: "bear-notes", Description: "Manage Bear notes", Path: bear, Source: skill.SourceClaude},
+		},
+	}
+
+	fakeDir := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(fakeDir, 0o700); err != nil {
+		t.Fatalf("mkdir fake bin: %v", err)
+	}
+	fakeRg := writeFakeCountBinary(t, filepath.Join(fakeDir, "rg"))
+
+	lookPath := func(name string) (string, error) {
+		if name == "rg" {
+			return fakeRg, nil
+		}
+		return "", errors.New("not found")
+	}
+
+	res, err := Search(context.Background(), cat, "apple notes memo", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res.Candidates) == 0 || res.Candidates[0].Skill.ID != "apple-notes" {
+		t.Fatalf("expected top candidate apple-notes, got %+v", res.Candidates)
+	}
+	if res.Candidates[0].Score <= 0 {
+		t.Fatalf("expected score > 0, got %+v", res.Candidates[0])
+	}
+	if res.Candidates[0].MetadataScore <= 0 && res.Candidates[0].ContentScore <= 0 {
+		t.Fatalf("expected metadata or content score > 0, got %+v", res.Candidates[0])
+	}
+}
+
 func TestSearch_FallsBackToGrepWhenRgMissing(t *testing.T) {
 	root := t.TempDir()
 	a := filepath.Join(root, "a", "SKILL.md")
@@ -234,13 +285,19 @@ func writeFakeCountBinary(t *testing.T, path string) string {
 	t.Helper()
 
 	script := `#!/bin/sh
-pattern=""
+patterns=""
 while [ $# -gt 0 ]; do
   if [ "$1" = "--" ]; then
     shift
-    pattern="$1"
-    shift
     break
+  fi
+  if [ "$1" = "-e" ]; then
+    shift
+    if [ $# -gt 0 ]; then
+      patterns="$patterns $1"
+      shift
+    fi
+    continue
   fi
   shift
 done
@@ -250,9 +307,15 @@ for f in "$@"; do
   if [ ! -f "$f" ]; then
     continue
   fi
-  c=$(grep -oiF "$pattern" "$f" 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$c" -gt 0 ]; then
-    echo "$f:$c"
+  total=0
+  for p in $patterns; do
+    c=$(grep -oiF "$p" "$f" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$c" -gt 0 ]; then
+      total=$((total + c))
+    fi
+  done
+  if [ "$total" -gt 0 ]; then
+    echo "$f:$total"
     found=1
   fi
 done

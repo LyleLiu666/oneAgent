@@ -38,6 +38,35 @@ type Options struct {
 type LookPathFunc func(string) (string, error)
 
 var tokenRe = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9_-]{2,}`)
+var stopwordSet = map[string]struct{}{
+	"and":     {},
+	"are":     {},
+	"but":     {},
+	"can":     {},
+	"could":   {},
+	"for":     {},
+	"from":    {},
+	"help":    {},
+	"how":     {},
+	"into":    {},
+	"please":  {},
+	"should":  {},
+	"skill":   {},
+	"skills":  {},
+	"that":    {},
+	"the":     {},
+	"then":    {},
+	"this":    {},
+	"use":     {},
+	"using":   {},
+	"what":    {},
+	"when":    {},
+	"why":     {},
+	"with":    {},
+	"would":   {},
+	"you":     {},
+	"your":    {},
+}
 
 func ParseExplicitSkill(catalog *skill.Catalog, query string) (skill.Skill, bool) {
 	if catalog == nil || len(catalog.Skills) == 0 {
@@ -87,6 +116,8 @@ func Search(ctx context.Context, catalog *skill.Catalog, query string, opts Opti
 		return Result{Backend: "none", Candidates: nil}, nil
 	}
 
+	tokens := extractQueryTokens(query, 8)
+
 	maxResults := opts.MaxResults
 	if maxResults <= 0 {
 		maxResults = 8
@@ -108,7 +139,7 @@ func Search(ctx context.Context, catalog *skill.Catalog, query string, opts Opti
 
 	meta := make(map[string]int, len(catalog.Skills))
 	for _, s := range catalog.Skills {
-		meta[s.ID] = scoreByMetadata(s, query)
+		meta[s.ID] = scoreByMetadata(s, query, tokens)
 	}
 
 	paths := make([]string, 0, len(catalog.Skills))
@@ -116,7 +147,7 @@ func Search(ctx context.Context, catalog *skill.Catalog, query string, opts Opti
 		paths = append(paths, s.Path)
 	}
 
-	content, backend, reason := countMatches(ctx, query, paths, timeout, lookPath)
+	content, backend, reason := countMatches(ctx, tokens, paths, timeout, lookPath)
 
 	cands := make([]Candidate, 0, len(catalog.Skills))
 	for _, s := range catalog.Skills {
@@ -153,7 +184,94 @@ func Search(ctx context.Context, catalog *skill.Catalog, query string, opts Opti
 	}, nil
 }
 
-func scoreByMetadata(s skill.Skill, query string) int {
+func extractQueryTokens(query string, maxTokens int) []string {
+	query = truncateRunes(strings.ToLower(strings.TrimSpace(query)), 200)
+	if query == "" {
+		return nil
+	}
+
+	raw := tokenRe.FindAllString(query, -1)
+	if len(raw) == 0 {
+		return []string{query}
+	}
+
+	type tokenMeta struct {
+		token    string
+		hasSep   bool
+		hasDigit bool
+		length   int
+	}
+
+	seen := make(map[string]struct{}, len(raw))
+	collected := make([]tokenMeta, 0, len(raw))
+	add := func(tok string) {
+		tok = strings.ToLower(strings.TrimSpace(tok))
+		if tok == "" {
+			return
+		}
+		if _, ok := stopwordSet[tok]; ok {
+			return
+		}
+		if _, ok := seen[tok]; ok {
+			return
+		}
+		seen[tok] = struct{}{}
+
+		meta := tokenMeta{
+			token:  tok,
+			hasSep: strings.ContainsAny(tok, "-_"),
+			length: len(tok),
+		}
+		for _, r := range tok {
+			if r >= '0' && r <= '9' {
+				meta.hasDigit = true
+				break
+			}
+		}
+		collected = append(collected, meta)
+	}
+
+	for _, tok := range raw {
+		add(tok)
+		if strings.ContainsAny(tok, "-_") {
+			parts := strings.FieldsFunc(tok, func(r rune) bool { return r == '-' || r == '_' })
+			for _, part := range parts {
+				if len(part) < 3 {
+					continue
+				}
+				add(part)
+			}
+		}
+	}
+
+	sort.SliceStable(collected, func(i, j int) bool {
+		if collected[i].hasSep != collected[j].hasSep {
+			return collected[i].hasSep
+		}
+		if collected[i].hasDigit != collected[j].hasDigit {
+			return collected[i].hasDigit
+		}
+		if collected[i].length != collected[j].length {
+			return collected[i].length > collected[j].length
+		}
+		return collected[i].token < collected[j].token
+	})
+
+	if maxTokens <= 0 {
+		maxTokens = 8
+	}
+	if len(collected) > maxTokens {
+		collected = collected[:maxTokens]
+	}
+
+	out := make([]string, 0, len(collected))
+	for _, m := range collected {
+		out = append(out, m.token)
+	}
+	return out
+}
+
+func scoreByMetadata(s skill.Skill, query string, tokens []string) int {
 	q := strings.ToLower(query)
 	score := 0
 
@@ -161,35 +279,68 @@ func scoreByMetadata(s skill.Skill, query string) int {
 	if name != "" && strings.Contains(q, name) {
 		score += 80
 	}
-	if s.ID != "" && strings.Contains(q, s.ID) {
+	id := strings.ToLower(s.ID)
+	if id != "" && strings.Contains(q, id) {
 		score += 120
 	}
 
-	desc := strings.ToLower(s.Description)
-	if desc != "" && strings.Contains(desc, q) {
-		score += 30
+	for _, tok := range tokens {
+		if tok == "" {
+			continue
+		}
+		if id != "" && strings.Contains(id, tok) {
+			score += 50
+		}
+		if name != "" && strings.Contains(name, tok) {
+			score += 35
+		}
+		if len(tok) >= 5 {
+			desc := strings.ToLower(s.Description)
+			if desc != "" && strings.Contains(desc, tok) {
+				score += 10
+			}
+		}
 	}
 
 	for _, tag := range s.Tags {
 		tagLower := strings.ToLower(strings.TrimSpace(tag))
-		if tagLower != "" && strings.Contains(q, tagLower) {
-			score += 20
+		if tagLower == "" {
+			continue
+		}
+		if strings.Contains(q, tagLower) {
+			score += 25
+			continue
+		}
+		for _, tok := range tokens {
+			if tok != "" && strings.Contains(tagLower, tok) {
+				score += 15
+				break
+			}
 		}
 	}
 	for _, kw := range s.Keywords {
 		kwLower := strings.ToLower(strings.TrimSpace(kw))
-		if kwLower != "" && strings.Contains(q, kwLower) {
-			score += 20
+		if kwLower == "" {
+			continue
+		}
+		if strings.Contains(q, kwLower) {
+			score += 25
+			continue
+		}
+		for _, tok := range tokens {
+			if tok != "" && strings.Contains(kwLower, tok) {
+				score += 15
+				break
+			}
 		}
 	}
 
 	return score
 }
 
-func countMatches(ctx context.Context, query string, files []string, timeout time.Duration, lookPath LookPathFunc) (map[string]int, string, string) {
+func countMatches(ctx context.Context, tokens []string, files []string, timeout time.Duration, lookPath LookPathFunc) (map[string]int, string, string) {
 	out := make(map[string]int, 64)
-	query = truncateRunes(strings.TrimSpace(query), 200)
-	if query == "" || len(files) == 0 {
+	if len(tokens) == 0 || len(files) == 0 {
 		return out, "none", ""
 	}
 
@@ -208,7 +359,7 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 		if err != nil {
 			continue
 		}
-		if n := countFixedStringFold(string(data), query, 50); n > 0 {
+		if n := countFixedStringsFold(string(data), tokens, 50, 200); n > 0 {
 			out[f] = n
 		}
 	}
@@ -222,7 +373,7 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 
 	rgReason := ""
 	if rgPath, err := lookPath("rg"); err == nil && strings.TrimSpace(rgPath) != "" {
-		if counts, err := runCountMatches(contentCtx, rgPath, rgArgsPrefix(), query, diskFiles); err == nil {
+		if counts, err := runCountMatches(contentCtx, rgPath, rgArgsPrefix(), tokens, diskFiles); err == nil {
 			for p, n := range counts {
 				out[p] += n
 			}
@@ -236,7 +387,7 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 
 	grepReason := ""
 	if grepPath, err := lookPath("grep"); err == nil && strings.TrimSpace(grepPath) != "" {
-		if counts, err := runCountMatches(contentCtx, grepPath, grepArgsPrefix(), query, diskFiles); err == nil {
+		if counts, err := runCountMatches(contentCtx, grepPath, grepArgsPrefix(), tokens, diskFiles); err == nil {
 			for p, n := range counts {
 				out[p] += n
 			}
@@ -271,7 +422,7 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 		if err != nil {
 			continue
 		}
-		if n := countFixedStringFold(string(data), query, 50); n > 0 {
+		if n := countFixedStringsFold(string(data), tokens, 50, 200); n > 0 {
 			out[f] += n
 		}
 	}
@@ -308,6 +459,26 @@ func countFixedStringFold(haystack string, needle string, maxCount int) int {
 	return count
 }
 
+func countFixedStringsFold(haystack string, needles []string, maxCountPerNeedle int, maxTotal int) int {
+	if haystack == "" || len(needles) == 0 {
+		return 0
+	}
+
+	total := 0
+	for _, needle := range needles {
+		if total >= maxTotal && maxTotal > 0 {
+			break
+		}
+		n := countFixedStringFold(haystack, needle, maxCountPerNeedle)
+		total += n
+	}
+
+	if maxTotal > 0 && total > maxTotal {
+		return maxTotal
+	}
+	return total
+}
+
 func rgArgsPrefix() []string {
 	return []string{
 		"--count-matches",
@@ -315,7 +486,6 @@ func rgArgsPrefix() []string {
 		"--fixed-strings",
 		"--ignore-case",
 		"--max-count", "50",
-		"--",
 	}
 }
 
@@ -326,11 +496,10 @@ func grepArgsPrefix() []string {
 		"-F",
 		"-i",
 		"--binary-files=without-match",
-		"--",
 	}
 }
 
-func runCountMatches(ctx context.Context, exe string, prefix []string, query string, files []string) (map[string]int, error) {
+func runCountMatches(ctx context.Context, exe string, prefix []string, patterns []string, files []string) (map[string]int, error) {
 	out := make(map[string]int, 64)
 
 	const chunkSize = 200
@@ -347,9 +516,16 @@ func runCountMatches(ctx context.Context, exe string, prefix []string, query str
 		}
 		chunk := files[start:end]
 
-		args := make([]string, 0, len(prefix)+1+len(chunk))
+		args := make([]string, 0, len(prefix)+2+len(patterns)*2+len(chunk))
 		args = append(args, prefix...)
-		args = append(args, query)
+		for _, pat := range patterns {
+			pat = strings.TrimSpace(pat)
+			if pat == "" {
+				continue
+			}
+			args = append(args, "-e", pat)
+		}
+		args = append(args, "--")
 		args = append(args, chunk...)
 
 		cmd := exec.CommandContext(ctx, exe, args...)

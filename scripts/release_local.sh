@@ -67,7 +67,7 @@ resolve_portable_git_url() {
   fi
 
   curl -sSL --fail "https://api.github.com/repos/git-for-windows/git/releases/latest" | \
-    python3 -c 'import json, re, sys; data=json.load(sys.stdin); pat=re.compile("^PortableGit-.*-64-bit\\\\.7z\\\\.exe$"); assets=data.get("assets", []); print(next((a.get("browser_download_url","") for a in assets if pat.match(a.get("name","") or "")), ""))'
+    python3 -c 'import json, re, sys; data=json.load(sys.stdin); pat=re.compile("^PortableGit-.*-64-bit\\.7z\\.exe$"); assets=data.get("assets", []); print(next((a.get("browser_download_url","") for a in assets if pat.match(a.get("name","") or "")), ""))'
 }
 
 ensure_portable_git_downloaded() {

@@ -26,6 +26,9 @@ type Config struct {
 	Port string
 
 	Home string
+	// DefaultWorkspace is the server-provided default workspace for UI auto-fill.
+	// It may be overridden by per-session workspace metadata (and client localStorage).
+	DefaultWorkspace string
 
 	AuthMode string
 
@@ -47,6 +50,7 @@ type LoadOptions struct {
 	Profile string
 	Bind    string
 	Port    string
+	DefaultWorkspace string
 
 	AuthMode string
 
@@ -124,6 +128,7 @@ type configFile struct {
 	Profile *string `yaml:"profile"`
 	Bind    *string `yaml:"bind"`
 	Port    *string `yaml:"port"`
+	DefaultWorkspace *string `yaml:"default_workspace"`
 
 	AuthMode *string `yaml:"auth_mode"`
 
@@ -158,6 +163,9 @@ func loadConfigFile(cfg *Config) error {
 	if parsed.Port != nil {
 		cfg.Port = *parsed.Port
 	}
+	if parsed.DefaultWorkspace != nil {
+		cfg.DefaultWorkspace = *parsed.DefaultWorkspace
+	}
 	if parsed.AuthMode != nil {
 		cfg.AuthMode = *parsed.AuthMode
 	}
@@ -186,6 +194,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("PORT")); v != "" {
 		cfg.Port = v
+	}
+	if v := strings.TrimSpace(os.Getenv("DEFAULT_WORKSPACE")); v != "" {
+		cfg.DefaultWorkspace = v
 	}
 	if v := strings.TrimSpace(os.Getenv("AUTH_MODE")); v != "" {
 		cfg.AuthMode = v
@@ -217,6 +228,9 @@ func applyOptions(cfg *Config, opts LoadOptions) {
 	if v := strings.TrimSpace(opts.Port); v != "" {
 		cfg.Port = v
 	}
+	if v := strings.TrimSpace(opts.DefaultWorkspace); v != "" {
+		cfg.DefaultWorkspace = v
+	}
 	if v := strings.TrimSpace(opts.AuthMode); v != "" {
 		cfg.AuthMode = v
 	}
@@ -238,6 +252,7 @@ func normalize(cfg *Config) {
 	cfg.Bind = strings.TrimSpace(cfg.Bind)
 	cfg.Port = strings.TrimSpace(cfg.Port)
 	cfg.BashRootDir = strings.TrimSpace(cfg.BashRootDir)
+	cfg.DefaultWorkspace = strings.TrimSpace(cfg.DefaultWorkspace)
 
 	if cfg.AuthMode == "password" {
 		cfg.AuthMode = "token"
@@ -268,6 +283,13 @@ func normalize(cfg *Config) {
 		}
 	}
 
+	if cfg.DefaultWorkspace != "" {
+		expanded, err := expandPath(cfg.DefaultWorkspace)
+		if err == nil {
+			cfg.DefaultWorkspace = expanded
+		}
+	}
+
 	if cfg.LogRetentionDays <= 0 {
 		cfg.LogRetentionDays = 30
 	}
@@ -288,6 +310,13 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Port == "" {
 		return errors.New("PORT is required")
+	}
+	if cfg.DefaultWorkspace != "" {
+		normalized, err := scope.NormalizeWorkspaceRoot(cfg.DefaultWorkspace)
+		if err != nil {
+			return fmt.Errorf("invalid default workspace: %w", err)
+		}
+		cfg.DefaultWorkspace = normalized
 	}
 	return nil
 }
