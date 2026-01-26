@@ -1,0 +1,54 @@
+# system-plan-validation Specification
+
+## Purpose
+TBD - created by archiving change enable-plan-observer-validation. Update Purpose after archive.
+## Requirements
+### Requirement: 支持计划文件（Plan File）
+系统必须 (MUST) 支持在启用 workspace 的情况下创建并维护一个计划文件，用于承载复杂任务的分解、验收标准与进度。
+
+#### Scenario: 默认创建计划文件
+- **GIVEN** 会话启用 workspace，根目录为 `<workspace>/`
+- **WHEN** 系统初始化计划
+- **THEN** 在 `<workspace>/.oneagent/PLAN.md` 创建计划文件
+
+### Requirement: 标记 done 需要观察者校验（TDD）
+系统必须 (MUST) 在任务被标记为 done 时引入观察者校验：只有当观察者判定任务达标时，该任务才会被真正写为 done；否则必须拒绝标记并返回原因。
+
+#### Scenario: 未达标时 done 失败
+- **GIVEN** 计划中存在任务 T1，且其验收标准尚未满足
+- **WHEN** 主 Agent 或子 Agent 尝试将 T1 标记为 done
+- **THEN** 系统返回 `【plan中某个任务标记done失败】` 与原因
+- **THEN** 计划文件中 T1 仍保持未完成状态
+
+#### Scenario: 达标时 done 成功并写回
+- **GIVEN** 计划中存在任务 T1，且其验收标准已满足
+- **WHEN** 主 Agent 或子 Agent 尝试将 T1 标记为 done
+- **THEN** 系统将 T1 写为 done
+- **THEN** 系统返回成功结果
+
+### Requirement: 观察者独立于主/子 Agent 上下文
+系统必须 (MUST) 将观察者作为独立执行单元运行：观察者不得依赖主/子 Agent 的对话上下文，仅根据“任务描述 + 验收标准 + 交付件”做判断。
+
+#### Scenario: 观察者不读取对话上下文
+- **GIVEN** 主 Agent 与子 Agent 在执行中产生了大量对话与 trace
+- **WHEN** 观察者对某个任务执行校验
+- **THEN** 观察者的输入不包含主/子 Agent 的完整对话上下文（仅包含该任务信息与必要引用）
+
+### Requirement: 观察者仅基于文件内容/结构验收
+系统必须 (MUST) 在任务验收标准中支持基于文件的验收方式，并允许观察者通过“读取文件/搜索/列目录”等只读能力决定任务是否达标。
+
+系统不得 (MUST NOT) 依赖命令执行来完成验收（例如 `go test`），避免扩大执行面；如未来需要命令验收，应以单独变更引入。
+
+#### Scenario: 文件验收未达标时 done 失败
+- **GIVEN** 任务 T1 的验收标准要求某文件存在且包含关键文本
+- **WHEN** 观察者执行验收发现文件缺失或内容不满足
+- **THEN** `plan.mark_done` 失败并返回可操作的失败原因
+
+### Requirement: 任务可声明 scope 并用于约束写入范围
+系统必须 (MUST) 支持在计划任务中声明可编辑范围（scope，glob 规则，基于 `<workspace>/` 的相对路径），并在执行该任务的 agent/subagent 文件写操作时强制执行越界拦截。
+
+#### Scenario: scope 越界写入被拒绝
+- **GIVEN** 任务 T1 的 scope 为 `backend/**`
+- **WHEN** 执行 T1 的 subagent 尝试修改 `frontend/App.vue`
+- **THEN** 系统拒绝该写/改/删操作并返回清晰错误
+
