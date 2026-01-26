@@ -11,5 +11,5 @@
   - [x] 在 trace/log 中记录 cache enabled、cache key（脱敏/哈希）、cached tokens（若可得）；每次 LLM 调用完整 request/response（含 messages）写入 log 文件，trace 仅保存摘要与指针 <!-- id: 7 -->
   - [x] 前端最小展示（Trace 或 Settings 面板） <!-- id: 8 -->
 - [ ] 测试与验证：
-  - [ ] 单元测试：cache selector 在典型消息序列（含压缩摘要、含工具消息）下输出稳定 <!-- id: 9 -->
-  - [ ] 集成测试（mock provider）：确保各 provider 的请求 payload 注入符合 capability matrix <!-- id: 10 -->
+  - [x] 单元测试：cache selector 在典型消息序列（含压缩摘要、含工具消息）下输出稳定 <!-- id: 9 -->
+  - [x] 集成测试（mock provider）：确保各 provider 的请求 payload 注入符合 capability matrix <!-- id: 10 -->
