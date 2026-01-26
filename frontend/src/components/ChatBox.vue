@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { Send, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
-import { streamChat, getSessions, getSession, truncateSession, getModels, getTools } from '@/api/client'
+import { streamChat, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir } from '@/api/client'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -26,6 +26,8 @@ const models = ref<ModelOption[]>([])
 const toolsLoading = ref(false)
 const tools = ref<ToolOption[]>([])
 const workspacePath = ref(localStorage.getItem('oneagent-workspace') || '')
+const workspaceChoosing = ref(false)
+const workspaceChooseError = ref('')
 
 interface ModelOption {
   id: string
@@ -394,6 +396,26 @@ const handleScroll = () => {
   if (messagesContainer.value) {
     const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value
     showScrollButton.value = scrollHeight - scrollTop - clientHeight > 100
+  }
+}
+
+const chooseWorkspace = async () => {
+  if (workspaceChoosing.value) return
+  workspaceChoosing.value = true
+  workspaceChooseError.value = ''
+  try {
+    const res: any = await chooseWorkspaceDir()
+    if (res && typeof res === 'object' && res.canceled) return
+    const path = res?.path
+    if (typeof path === 'string' && path.trim()) {
+      workspacePath.value = path
+    }
+  } catch (error) {
+    const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to choose workspace folder.'
+    workspaceChooseError.value = String(msg)
+    console.error('Failed to choose workspace:', error)
+  } finally {
+    workspaceChoosing.value = false
   }
 }
 
@@ -881,6 +903,19 @@ onMounted(async () => {
                 placeholder="Workspace path (server)"
                 title="Workspace path on the server machine. File tools will be scoped to this directory."
               />
+              <button
+                type="button"
+                :class="[
+                  'bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed',
+                  workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
+                ]"
+                :disabled="workspaceChoosing"
+                :title="workspaceChooseError || 'Choose workspace folder (server)'"
+                @click="chooseWorkspace"
+              >
+                <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
+                <span v-else>Browse</span>
+              </button>
             </div>
             <div v-if="tools.length > 0" class="flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-surface-400" />

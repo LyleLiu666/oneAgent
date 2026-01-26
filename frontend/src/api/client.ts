@@ -269,6 +269,10 @@ export async function getTools() {
     return api('/api/tools')
 }
 
+export async function chooseWorkspaceDir() {
+    return api('/api/workspace/choose', { method: 'POST' })
+}
+
 export async function createModel(payload: {
     provider_id: string
     name: string

@@ -71,6 +71,9 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Tool metadata.
 		api.GET("/tools", handler.ListTools)
 
+		// Workspace helpers (local-tool mode).
+		api.POST("/workspace/choose", handler.ChooseWorkspace)
+
 		// Bocha search services.
 		api.GET("/bocha/settings", bocha.GetSettingsHandler)
 		api.PUT("/bocha/settings", bocha.UpdateSettingsHandler)
