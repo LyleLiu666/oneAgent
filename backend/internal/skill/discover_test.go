@@ -56,6 +56,64 @@ Body.
 	}
 }
 
+func TestParseSkill_RequiresAndInstall(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "apple-notes", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	content := `---
+name: apple-notes
+description: Manage Apple Notes via memo
+requires:
+  os: darwin
+  bins:
+    - memo
+  any_bins: [rg, grep]
+  env: OPENAI_API_KEY
+install:
+  - kind: brew
+    formula: antoniorodr/memo/memo
+    bins: memo
+---
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := parseSkill(path, SourceClaude)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	if got.Requires == nil {
+		t.Fatalf("expected requires to be parsed")
+	}
+	if len(got.Requires.OS) != 1 || got.Requires.OS[0] != "darwin" {
+		t.Fatalf("unexpected requires.os: %+v", got.Requires.OS)
+	}
+	if len(got.Requires.Bins) != 1 || got.Requires.Bins[0] != "memo" {
+		t.Fatalf("unexpected requires.bins: %+v", got.Requires.Bins)
+	}
+	if len(got.Requires.AnyBins) != 2 || got.Requires.AnyBins[0] != "rg" || got.Requires.AnyBins[1] != "grep" {
+		t.Fatalf("unexpected requires.any_bins: %+v", got.Requires.AnyBins)
+	}
+	if len(got.Requires.Env) != 1 || got.Requires.Env[0] != "OPENAI_API_KEY" {
+		t.Fatalf("unexpected requires.env: %+v", got.Requires.Env)
+	}
+
+	if len(got.Install) != 1 {
+		t.Fatalf("expected 1 install spec, got %+v", got.Install)
+	}
+	if got.Install[0].Kind != "brew" || got.Install[0].Formula != "antoniorodr/memo/memo" {
+		t.Fatalf("unexpected install spec: %+v", got.Install[0])
+	}
+	if len(got.Install[0].Bins) != 1 || got.Install[0].Bins[0] != "memo" {
+		t.Fatalf("unexpected install bins: %+v", got.Install[0].Bins)
+	}
+}
+
 func TestParseSkill_FallbackNameAndDescription(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "code-review", "SKILL.md")

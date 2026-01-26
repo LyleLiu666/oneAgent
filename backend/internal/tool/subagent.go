@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
 )
@@ -233,7 +234,8 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			}
 
 			if k > 0 {
-				res, err := skillrecall.Search(ctx, cat, task, skillrecall.Options{MaxResults: k, Timeout: 2 * time.Second}, nil)
+				eligibleCat := skill.FilterEligibleCatalog(cat, nil)
+				res, err := skillrecall.Search(ctx, eligibleCat, task, skillrecall.Options{MaxResults: k, Timeout: 2 * time.Second}, nil)
 				if err == nil && len(res.Candidates) > 0 {
 					for _, cand := range res.Candidates {
 						if cand.Score <= 0 {

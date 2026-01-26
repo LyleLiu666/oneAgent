@@ -13,6 +13,8 @@ type frontmatter struct {
 	Description string     `yaml:"description"`
 	Tags        stringList `yaml:"tags"`
 	Keywords    stringList `yaml:"keywords"`
+	Requires    *requiresFrontmatter      `yaml:"requires"`
+	Install     []installSpecFrontmatter  `yaml:"install"`
 }
 
 type stringList []string
@@ -80,6 +82,25 @@ func parseFrontmatter(markdown []byte) (frontmatter, []byte, bool) {
 	rest := bytes.Join(lines[end+1:], []byte("\n"))
 	rest = bytes.TrimLeft(rest, "\r\n")
 	return fm, rest, true
+}
+
+type requiresFrontmatter struct {
+	OS      stringList `yaml:"os"`
+	Bins    stringList `yaml:"bins"`
+	AnyBins stringList `yaml:"any_bins"`
+	Env     stringList `yaml:"env"`
+}
+
+type installSpecFrontmatter struct {
+	Kind    string     `yaml:"kind"`
+	Label   string     `yaml:"label"`
+	Formula string     `yaml:"formula"`
+	Module  string     `yaml:"module"`
+	Package string     `yaml:"package"`
+	URL     string     `yaml:"url"`
+	Command string     `yaml:"command"`
+	Bins    stringList `yaml:"bins"`
+	OS      stringList `yaml:"os"`
 }
 
 func firstParagraph(text string, maxRunes int) string {

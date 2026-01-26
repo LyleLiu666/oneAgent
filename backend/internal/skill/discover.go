@@ -186,12 +186,40 @@ func parseBuiltinSkill(relPath string) (Skill, error) {
 		return Skill{}, errors.New("invalid name")
 	}
 
+	var req *Requirements
+	if fm.Requires != nil {
+		req = normalizeRequirements(&Requirements{
+			OS:      []string(fm.Requires.OS),
+			Bins:    []string(fm.Requires.Bins),
+			AnyBins: []string(fm.Requires.AnyBins),
+			Env:     []string(fm.Requires.Env),
+		})
+	}
+
+	install := make([]InstallSpec, 0, len(fm.Install))
+	for _, spec := range fm.Install {
+		install = append(install, InstallSpec{
+			Kind:    spec.Kind,
+			Label:   spec.Label,
+			Formula: spec.Formula,
+			Module:  spec.Module,
+			Package: spec.Package,
+			URL:     spec.URL,
+			Command: spec.Command,
+			Bins:    []string(spec.Bins),
+			OS:      []string(spec.OS),
+		})
+	}
+	install = normalizeInstallSpecs(install)
+
 	s := Skill{
 		ID:          id,
 		Name:        name,
 		Description: desc,
 		Tags:        []string(fm.Tags),
 		Keywords:    []string(fm.Keywords),
+		Requires:    req,
+		Install:     install,
 		Source:      SourceBuiltin,
 		Path:        builtinPath(relPath),
 	}
@@ -314,12 +342,40 @@ func parseSkill(path string, src Source) (Skill, error) {
 		return Skill{}, errors.New("invalid name")
 	}
 
+	var req *Requirements
+	if fm.Requires != nil {
+		req = normalizeRequirements(&Requirements{
+			OS:      []string(fm.Requires.OS),
+			Bins:    []string(fm.Requires.Bins),
+			AnyBins: []string(fm.Requires.AnyBins),
+			Env:     []string(fm.Requires.Env),
+		})
+	}
+
+	install := make([]InstallSpec, 0, len(fm.Install))
+	for _, spec := range fm.Install {
+		install = append(install, InstallSpec{
+			Kind:    spec.Kind,
+			Label:   spec.Label,
+			Formula: spec.Formula,
+			Module:  spec.Module,
+			Package: spec.Package,
+			URL:     spec.URL,
+			Command: spec.Command,
+			Bins:    []string(spec.Bins),
+			OS:      []string(spec.OS),
+		})
+	}
+	install = normalizeInstallSpecs(install)
+
 	s := Skill{
 		ID:          id,
 		Name:        name,
 		Description: desc,
 		Tags:        []string(fm.Tags),
 		Keywords:    []string(fm.Keywords),
+		Requires:    req,
+		Install:     install,
 		Source:      src,
 		Path:        path,
 	}

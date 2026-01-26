@@ -6,7 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/exec"
+	stdRuntime "runtime"
 	"strings"
 	"time"
 
@@ -77,6 +80,8 @@ func runServe(args []string) {
 	profile := fs.String("profile", "", "profile: local|dev (server is deprecated alias)")
 	bind := fs.String("bind", "", "bind address (default: local=0.0.0.0, dev=127.0.0.1)")
 	port := fs.String("port", "", "port (default: 8080)")
+	openBrowser := fs.Bool("open", false, "open UI in default browser after server starts (best-effort)")
+	defaultWorkspace := fs.String("workspace", "", "default workspace for UI auto-fill")
 	authMode := fs.String("auth-mode", "", "auth mode: token|none (default: token)")
 	bashRootDir := fs.String("bash-root-dir", "", "BASH_ROOT_DIR (default: ONEAGENT_HOME)")
 	logRetentionDays := fs.Int("log-retention-days", 0, "log retention days (default: 30)")
@@ -99,6 +104,7 @@ func runServe(args []string) {
 		Profile:          *profile,
 		Bind:             *bind,
 		Port:             *port,
+		DefaultWorkspace: *defaultWorkspace,
 		AuthMode:         *authMode,
 		EnableTrace:      enableTracePtr,
 		BashRootDir:      *bashRootDir,
@@ -116,7 +122,22 @@ func runServe(args []string) {
 		_ = rt.Close()
 	}()
 
-	if err := server.Serve(rt); err != nil {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(rt)
+	}()
+
+	if *openBrowser {
+		baseURL := fmt.Sprintf("http://localhost:%s", cfg.Port)
+		if err := waitForServerHealthy(baseURL, errCh, 5*time.Second); err != nil {
+			log.Fatalf("Server exited with error: %v", err)
+		}
+		if err := openURL(baseURL); err != nil {
+			log.Printf("WARNING: failed to open browser: %v (open manually: %s)", err, baseURL)
+		}
+	}
+
+	if err := <-errCh; err != nil {
 		log.Fatalf("Server exited with error: %v", err)
 	}
 }
@@ -181,11 +202,60 @@ serve flags:
   --home <path>
   --bind <addr>
   --port <port>
+  --open
+  --workspace <path>
   --auth-mode token|none
   --bash-root-dir <path>
   --log-retention-days <n>
   --enable-trace true|false
 `)
+}
+
+func openURL(url string) error {
+	switch stdRuntime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
+}
+
+func waitForServerHealthy(baseURL string, errCh <-chan error, timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer deadline.Stop()
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case <-ticker.C:
+			if checkServerHealthy(baseURL) {
+				return nil
+			}
+		case <-deadline.C:
+			return nil
+		}
+	}
+}
+
+func checkServerHealthy(baseURL string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = res.Body.Close()
+	return res.StatusCode == http.StatusOK
 }
 
 func runSkills(args []string) {

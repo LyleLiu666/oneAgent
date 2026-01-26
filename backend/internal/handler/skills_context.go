@@ -26,11 +26,16 @@ func buildSkillSuggestionTurnContext(ctx context.Context, manager *skill.Manager
 		return ""
 	}
 
-	if explicit, ok := skillrecall.ParseExplicitSkill(catalog, userMessage); ok {
+	eligibleCatalog := skill.FilterEligibleCatalog(catalog, nil)
+	if eligibleCatalog == nil || len(eligibleCatalog.Skills) == 0 {
+		return ""
+	}
+
+	if explicit, ok := skillrecall.ParseExplicitSkill(eligibleCatalog, userMessage); ok {
 		return formatSkillSuggestion(explicit)
 	}
 
-	result, err := skillrecall.Search(loadCtx, catalog, userMessage, skillrecall.Options{MaxResults: 8, Timeout: 2 * time.Second}, nil)
+	result, err := skillrecall.Search(loadCtx, eligibleCatalog, userMessage, skillrecall.Options{MaxResults: 8, Timeout: 2 * time.Second}, nil)
 	if err != nil || len(result.Candidates) == 0 {
 		return ""
 	}
@@ -67,4 +72,3 @@ func formatSkillSuggestion(s skill.Skill) string {
 	b.WriteString("  - 使用方式: 调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`，再遵循其中指令执行\n")
 	return b.String()
 }
-

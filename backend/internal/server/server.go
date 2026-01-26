@@ -51,6 +51,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 	// API routes.
 	api := router.Group("/api")
 	{
+		api.GET("/config", handler.GetRuntimeConfig)
+
 		chatHandler := handler.NewChatHandler(rt)
 		api.POST("/chat", chatHandler.StreamChat)
 		api.GET("/sessions", chatHandler.GetSessions)

@@ -21,6 +21,8 @@ type Skill struct {
 	Description string   `json:"description"`
 	Tags        []string `json:"tags,omitempty"`
 	Keywords    []string `json:"keywords,omitempty"`
+	Requires    *Requirements `json:"requires,omitempty"`
+	Install     []InstallSpec `json:"install,omitempty"`
 	Source      Source   `json:"source"`
 	Path        string   `json:"path"`
 }

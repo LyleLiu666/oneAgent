@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"gopkg.in/yaml.v3"
 )
 
@@ -46,10 +47,10 @@ type Config struct {
 }
 
 type LoadOptions struct {
-	Home    string
-	Profile string
-	Bind    string
-	Port    string
+	Home             string
+	Profile          string
+	Bind             string
+	Port             string
 	DefaultWorkspace string
 
 	AuthMode string
@@ -125,9 +126,9 @@ func defaultConfig() *Config {
 }
 
 type configFile struct {
-	Profile *string `yaml:"profile"`
-	Bind    *string `yaml:"bind"`
-	Port    *string `yaml:"port"`
+	Profile          *string `yaml:"profile"`
+	Bind             *string `yaml:"bind"`
+	Port             *string `yaml:"port"`
 	DefaultWorkspace *string `yaml:"default_workspace"`
 
 	AuthMode *string `yaml:"auth_mode"`
