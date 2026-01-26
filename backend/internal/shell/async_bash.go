@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -356,7 +355,7 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		"TEMP":          tmpDir,
 		"BASH_ENV":      "",
 	})
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setupCmdForProcessGroup(cmd)
 
 	notifyCh := make(chan struct{}, 1)
 	stdoutLog, err := newRingLog(filepath.Join(jobDir, "stdout.log"), asyncLogCapacityBytes, notifyCh)
@@ -425,7 +424,7 @@ func (job *asyncBashJob) wait(m *asyncBashManager) {
 		// completed
 	case <-timer.C:
 		timedOut = true
-		killProcessGroup(job.cmd.Process)
+		killProcessTree(job.cmd.Process)
 		waitErr = <-waitCh
 	}
 
@@ -474,7 +473,7 @@ func (m *asyncBashManager) cancel(jobID string) error {
 	proc := job.cmd.Process
 	job.mu.Unlock()
 
-	killProcessGroup(proc)
+	killProcessTree(proc)
 	select {
 	case job.notifyCh <- struct{}{}:
 	default:

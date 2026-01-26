@@ -24,7 +24,7 @@ type Candidate struct {
 }
 
 type Result struct {
-	Backend            string      `json:"backend"` // "rg" | "grep" | "none"
+	Backend            string      `json:"backend"` // "rg" | "grep" | "go" | "none"
 	NotAvailableReason string      `json:"not_available_reason,omitempty"`
 	Candidates         []Candidate `json:"candidates"`
 	DurationMs         int64       `json:"duration_ms"`
@@ -234,17 +234,49 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 		rgReason = err.Error()
 	}
 
+	grepReason := ""
 	if grepPath, err := lookPath("grep"); err == nil && strings.TrimSpace(grepPath) != "" {
 		if counts, err := runCountMatches(contentCtx, grepPath, grepArgsPrefix(), query, diskFiles); err == nil {
 			for p, n := range counts {
 				out[p] += n
 			}
 			return out, "grep", rgReason
+		} else {
+			grepReason = err.Error()
 		}
-		return out, "grep", rgReason
+	} else if err != nil {
+		grepReason = err.Error()
 	}
 
-	return out, "none", rgReason
+	reasonParts := make([]string, 0, 2)
+	if strings.TrimSpace(rgReason) != "" {
+		reasonParts = append(reasonParts, "rg not available ("+rgReason+")")
+	} else {
+		reasonParts = append(reasonParts, "rg not available")
+	}
+	if strings.TrimSpace(grepReason) != "" {
+		reasonParts = append(reasonParts, "grep not available ("+grepReason+")")
+	} else {
+		reasonParts = append(reasonParts, "grep not available")
+	}
+	reason := strings.Join(reasonParts, "; ")
+
+	for _, f := range diskFiles {
+		select {
+		case <-contentCtx.Done():
+			return out, "go", reason
+		default:
+		}
+		data, err := skill.ReadSkillFile(f, 512*1024)
+		if err != nil {
+			continue
+		}
+		if n := countFixedStringFold(string(data), query, 50); n > 0 {
+			out[f] += n
+		}
+	}
+
+	return out, "go", reason
 }
 
 func countFixedStringFold(haystack string, needle string, maxCount int) int {

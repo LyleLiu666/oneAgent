@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -344,43 +343,6 @@ type UnsafeCommandError struct {
 
 func (e *UnsafeCommandError) Error() string {
 	return e.Reason
-}
-
-// ResolveBashPath finds a usable bash binary on macOS/Linux.
-func ResolveBashPath() (string, error) {
-	if runtime.GOOS == "windows" {
-		return "", errors.New("bash is not supported on windows")
-	}
-
-	if explicit := strings.TrimSpace(os.Getenv("LYLE_BASH_PATH")); explicit != "" {
-		if err := assertShellNotBlacklisted(explicit); err != nil {
-			return "", err
-		}
-		if !isExecutable(explicit) {
-			return "", fmt.Errorf("bash not found at: %s", explicit)
-		}
-		return explicit, nil
-	}
-
-	if bashPath, err := exec.LookPath("bash"); err == nil {
-		return bashPath, nil
-	}
-
-	var candidates []string
-	switch runtime.GOOS {
-	case "darwin":
-		candidates = []string{"/bin/bash", "/usr/bin/bash", "/opt/homebrew/bin/bash"}
-	default:
-		candidates = []string{"/bin/bash", "/usr/bin/bash", "/usr/local/bin/bash"}
-	}
-
-	for _, candidate := range candidates {
-		if isExecutable(candidate) {
-			return candidate, nil
-		}
-	}
-
-	return "", errors.New("bash not found on this system")
 }
 
 // ResolveBashRoot returns the sandbox root directory and ensures it exists.
@@ -1193,7 +1155,7 @@ func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir
 		"TEMP":          tmpDir,
 		"BASH_ENV":      "",
 	})
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setupCmdForProcessGroup(cmd)
 
 	stdoutBuf := &limitedBuffer{limit: maxOutputBytes}
 	stderrBuf := &limitedBuffer{limit: maxOutputBytes}
@@ -1206,7 +1168,7 @@ func RunBash(ctx context.Context, command string, timeout time.Duration, rootDir
 
 	timedOut := runCtx.Err() == context.DeadlineExceeded
 	if timedOut {
-		killProcessGroup(cmd.Process)
+		killProcessTree(cmd.Process)
 	}
 
 	exitCode := 0
@@ -1280,14 +1242,10 @@ func isExecutable(path string) bool {
 	if err != nil || info.IsDir() {
 		return false
 	}
-	return info.Mode()&0111 != 0
-}
-
-func killProcessGroup(proc *os.Process) {
-	if proc == nil {
-		return
+	if runtime.GOOS == "windows" {
+		return true
 	}
-	_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
+	return info.Mode()&0111 != 0
 }
 
 type limitedBuffer struct {

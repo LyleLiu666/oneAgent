@@ -11,12 +11,14 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/buildinfo"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
+	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
 
 type BinaryCheck struct {
 	Name      string
 	Available bool
 	Path      string
+	Source    string // system|bundled|explicit
 	Required  bool
 	Hint      string
 }
@@ -38,6 +40,8 @@ type Report struct {
 	DataDir          string
 	LogsDir          string
 	LogRetentionDays int
+	BashSource       string
+	GitSource        string
 	Checks           []BinaryCheck
 	Notes            []string
 }
@@ -79,9 +83,43 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 		report.Status = health.Status
 	}
 
+	bashCheck := checkBinary(lookPath, "bash", true)
+	gitCheck := checkBinary(lookPath, "git", true)
+
+	if stdruntime.GOOS == "windows" {
+		if resolved, err := shell.ResolveBashBinaryNoInstall(); err == nil && strings.TrimSpace(resolved.Path) != "" {
+			bashCheck.Available = true
+			bashCheck.Path = resolved.Path
+			bashCheck.Source = string(resolved.Source)
+			bashCheck.Hint = ""
+			report.BashSource = string(resolved.Source)
+		} else if shell.PortableGitArchivePath() != "" {
+			bashCheck.Hint = "PortableGit archive detected; bash will be available after extraction"
+		}
+
+		if resolved, err := shell.ResolveGitBinaryNoInstall(); err == nil && strings.TrimSpace(resolved.Path) != "" {
+			gitCheck.Available = true
+			gitCheck.Path = resolved.Path
+			gitCheck.Source = string(resolved.Source)
+			gitCheck.Hint = ""
+			report.GitSource = string(resolved.Source)
+		} else if shell.PortableGitArchivePath() != "" {
+			gitCheck.Hint = "PortableGit archive detected; git will be available after extraction"
+		}
+	} else {
+		if bashCheck.Available {
+			bashCheck.Source = "system"
+			report.BashSource = "system"
+		}
+		if gitCheck.Available {
+			gitCheck.Source = "system"
+			report.GitSource = "system"
+		}
+	}
+
 	report.Checks = append(report.Checks,
-		checkBinary(lookPath, "bash", true),
-		checkBinary(lookPath, "git", true),
+		bashCheck,
+		gitCheck,
 		checkBinary(lookPath, "jq", false),
 		checkBinary(lookPath, "rg", false),
 		checkBinary(lookPath, "pandoc", false),
@@ -94,7 +132,7 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 			continue
 		}
 		if report.Checks[i].Name == "rg" {
-			report.Notes = append(report.Notes, "`rg` not found: skills recall and `rg` tool will fall back to `grep -R` (slower).")
+			report.Notes = append(report.Notes, "`rg` not found: skills recall and `rg` tool will fall back to a slower search backend (grep/go).")
 		}
 		if report.Checks[i].Required {
 			report.Status = "degraded"
@@ -146,11 +184,17 @@ func Format(report Report) string {
 	fmt.Fprintf(&b, "data_dir=%s\n", report.DataDir)
 	fmt.Fprintf(&b, "logs_dir=%s (retention_days=%d)\n", report.LogsDir, report.LogRetentionDays)
 	fmt.Fprintf(&b, "status=%s\n", report.Status)
+	fmt.Fprintf(&b, "bash_source=%s\n", formatBinarySource(report.BashSource))
+	fmt.Fprintf(&b, "git_source=%s\n", formatBinarySource(report.GitSource))
 
 	fmt.Fprintln(&b, "\nBinaries:")
 	for _, check := range report.Checks {
 		if check.Available {
-			fmt.Fprintf(&b, "  - %s: OK (%s)\n", check.Name, check.Path)
+			src := ""
+			if strings.TrimSpace(check.Source) != "" {
+				src = " source=" + check.Source
+			}
+			fmt.Fprintf(&b, "  - %s: OK (%s)%s\n", check.Name, check.Path, src)
 			continue
 		}
 		hint := check.Hint
@@ -168,4 +212,12 @@ func Format(report Report) string {
 	}
 
 	return b.String()
+}
+
+func formatBinarySource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "missing"
+	}
+	return source
 }

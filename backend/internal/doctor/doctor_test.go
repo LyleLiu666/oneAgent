@@ -46,7 +46,7 @@ func TestDoctor_ReportIncludesRgFallbackNote(t *testing.T) {
 	if !strings.Contains(formatted, "listen=127.0.0.1:0") {
 		t.Fatalf("expected listen address in report, got:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "skills recall and `rg` tool will fall back to `grep -R`") {
+	if !strings.Contains(formatted, "skills recall and `rg` tool will fall back to a slower search backend (grep/go)") {
 		t.Fatalf("expected fallback note, got:\n%s", formatted)
 	}
 	if strings.Contains(formatted, rt.AuthToken) {

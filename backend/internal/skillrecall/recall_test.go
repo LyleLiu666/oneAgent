@@ -134,6 +134,44 @@ func TestSearch_FallsBackToGrepWhenRgMissing(t *testing.T) {
 	}
 }
 
+func TestSearch_FallsBackToGoWhenRgAndGrepMissing(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(a), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(a, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cat := &skill.Catalog{
+		Skills: []skill.Skill{
+			{ID: "a", Name: "a", Description: "a", Path: a, Source: skill.SourceClaude},
+		},
+	}
+
+	lookPath := func(name string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	res, err := Search(context.Background(), cat, "hello", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if res.Backend != "go" {
+		t.Fatalf("expected backend=go, got %+v", res)
+	}
+	if res.NotAvailableReason == "" {
+		t.Fatalf("expected not_available_reason to mention rg/grep missing")
+	}
+	if len(res.Candidates) == 0 || res.Candidates[0].Skill.ID != "a" {
+		t.Fatalf("expected top candidate a, got %+v", res.Candidates)
+	}
+	if res.Candidates[0].ContentScore <= 0 {
+		t.Fatalf("expected content score > 0, got %+v", res.Candidates[0])
+	}
+}
+
 func TestSearch_WithManySkills_ReturnsTop8(t *testing.T) {
 	skills := make([]skill.Skill, 0, 1200)
 	for i := 0; i < 1200; i++ {

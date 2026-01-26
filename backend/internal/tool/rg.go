@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -57,7 +60,7 @@ type RgMatch struct {
 type RgToolResult struct {
 	Available          bool      `json:"available"`
 	NotAvailableReason string    `json:"not_available_reason,omitempty"`
-	Backend            string    `json:"backend,omitempty"` // "rg" | "grep"
+	Backend            string    `json:"backend,omitempty"` // "rg" | "grep" | "go"
 	Root               string    `json:"root"`
 	Path               string    `json:"path"`
 	Pattern            string    `json:"pattern"`
@@ -79,7 +82,7 @@ func rgDefinition() Definition {
 			Name: "rg",
 			Description: "优先使用 ripgrep (rg) 在沙箱根目录 $BASH_ROOT_DIR 内进行高速本地搜索（支持正则）。" +
 				"不经过 shell，因此允许 `$` 等正则符号；搜索路径必须在沙箱内。" +
-				"如果系统未安装 rg，将自动降级为 grep -R（更慢但可用）；并在结果中标注 backend。" +
+				"如果系统未安装 rg，将自动降级为 grep -R 或内置 Go 搜索（更慢但可用）；并在结果中标注 backend。" +
 				"参数：pattern(必填), path(可选, 默认 '.'), max_results(可选, 默认 50, 最大 200), fixed_strings(可选)。" +
 				"返回：匹配列表（相对 root 的文件路径、行号、行文本、submatches），并对单行/总输出做截断以避免返回过大内容。",
 			Parameters: map[string]any{
@@ -416,20 +419,8 @@ type grepFallbackOptions struct {
 func runGrepFallback(ctx context.Context, opts grepFallbackOptions) (any, error) {
 	grepPath, err := exec.LookPath(grepExecutableName)
 	if err != nil {
-		return RgToolResult{
-			Available:          false,
-			NotAvailableReason: fmt.Sprintf("rg not available (%s); grep not available (%s)", opts.notAvailableReason, err.Error()),
-			Backend:            "",
-			Root:               opts.root,
-			Path:               opts.target,
-			Pattern:            opts.pattern,
-			MaxResults:         opts.maxResults,
-			FixedStrings:       opts.fixedStrings,
-			MaxLineRunes:       opts.maxLineRunes,
-			MaxOutputBytes:     opts.maxOutputBytes,
-			Matches:            []RgMatch{},
-			DurationMs:         0,
-		}, nil
+		opts.notAvailableReason = fmt.Sprintf("rg not available (%s); grep not available (%s)", opts.notAvailableReason, err.Error())
+		return runGoFallback(ctx, opts)
 	}
 
 	args := []string{"-R", "-n", "-H", "-I"}
@@ -599,6 +590,234 @@ func runGrepFallback(ctx context.Context, opts grepFallbackOptions) (any, error)
 		TruncatedReason:    truncatedReason,
 		DurationMs:         duration.Milliseconds(),
 		Stderr:             strings.TrimSpace(stderrBuf.buf.String()),
+	}, nil
+}
+
+var errGoSearchTruncated = errors.New("go search truncated")
+
+func runGoFallback(ctx context.Context, opts grepFallbackOptions) (any, error) {
+	startedAt := time.Now()
+
+	matches := make([]RgMatch, 0, min(opts.maxResults, 32))
+	truncated := false
+	truncatedReason := ""
+	approxOutputBytes := 0
+
+	var re *regexp.Regexp
+	if !opts.fixedStrings {
+		compiled, err := regexp.Compile(opts.pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern: %w", err)
+		}
+		re = compiled
+	}
+
+	info, err := os.Stat(opts.target)
+	if err != nil {
+		return nil, err
+	}
+
+	addMatch := func(absPath string, lineNumber int, line string, submatches []RgSubmatch) error {
+		matchRelPath := absPath
+		if rel, err := filepath.Rel(opts.root, absPath); err == nil {
+			rel = filepath.Clean(rel)
+			if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				matchRelPath = rel
+			}
+		}
+		matchRelPath = filepath.ToSlash(matchRelPath)
+
+		truncatedLine, linesTruncated, originalLineRunes := truncateToRunes(line, opts.maxLineRunes)
+		if !linesTruncated {
+			originalLineRunes = 0
+		}
+
+		nextBytes := len(matchRelPath) + len(truncatedLine)
+		for _, sm := range submatches {
+			nextBytes += len(sm.Match)
+		}
+
+		if approxOutputBytes+nextBytes > opts.maxOutputBytes {
+			truncated = true
+			truncatedReason = "max_output_bytes"
+			return errGoSearchTruncated
+		}
+
+		matches = append(matches, RgMatch{
+			Path:              matchRelPath,
+			LineNumber:        lineNumber,
+			Lines:             truncatedLine,
+			LinesTruncated:    linesTruncated,
+			OriginalLineRunes: originalLineRunes,
+			Submatches:        submatches,
+		})
+		approxOutputBytes += nextBytes
+
+		if len(matches) >= opts.maxResults {
+			truncated = true
+			if truncatedReason == "" {
+				truncatedReason = "max_results"
+			}
+			return errGoSearchTruncated
+		}
+
+		return nil
+	}
+
+	processFile := func(absPath string) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		f, err := os.Open(absPath)
+		if err != nil {
+			return nil
+		}
+		defer func() { _ = f.Close() }()
+
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 0, 64*1024), maxRgStdoutLineBytes)
+
+		lineNo := 0
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			lineNo++
+			line := strings.TrimSuffix(scanner.Text(), "\n")
+			line = strings.TrimRight(line, "\r")
+
+			if strings.ContainsRune(line, '\x00') {
+				// Likely binary file; skip the rest.
+				return nil
+			}
+
+			var indices [][2]int
+			if opts.fixedStrings {
+				if opts.pattern == "" {
+					continue
+				}
+				for start := 0; start <= len(line); {
+					i := strings.Index(line[start:], opts.pattern)
+					if i < 0 {
+						break
+					}
+					s := start + i
+					e := s + len(opts.pattern)
+					indices = append(indices, [2]int{s, e})
+					start = e
+				}
+			} else {
+				locs := re.FindAllStringIndex(line, -1)
+				for _, loc := range locs {
+					if len(loc) != 2 {
+						continue
+					}
+					indices = append(indices, [2]int{loc[0], loc[1]})
+				}
+			}
+
+			if len(indices) == 0 {
+				continue
+			}
+
+			submatches := make([]RgSubmatch, 0, len(indices))
+			for _, loc := range indices {
+				if loc[0] < 0 || loc[1] < loc[0] || loc[1] > len(line) {
+					continue
+				}
+				matchText := line[loc[0]:loc[1]]
+				truncatedMatch, matchTruncated, originalMatchRunes := truncateToRunes(matchText, opts.maxSubmatchRunes)
+				if !matchTruncated {
+					originalMatchRunes = 0
+				}
+				submatches = append(submatches, RgSubmatch{
+					Match:              truncatedMatch,
+					Start:              loc[0],
+					End:                loc[1],
+					MatchTruncated:     matchTruncated,
+					OriginalMatchRunes: originalMatchRunes,
+				})
+			}
+
+			if err := addMatch(absPath, lineNo, line, submatches); err != nil {
+				return err
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			// Ignore token-too-long errors; treat as a non-fatal skip.
+			return nil
+		}
+
+		return nil
+	}
+
+	walkFn := func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if d == nil {
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			// Best-effort: avoid symlink loops.
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		return processFile(p)
+	}
+
+	if info.IsDir() {
+		if err := filepath.WalkDir(opts.target, walkFn); err != nil {
+			if errors.Is(err, errGoSearchTruncated) {
+				// Expected stop due to max_results / max_output_bytes.
+			} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// Context canceled; return partial results.
+			} else {
+				return nil, err
+			}
+		}
+	} else {
+		if err := processFile(opts.target); err != nil {
+			if !errors.Is(err, errGoSearchTruncated) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+		}
+	}
+
+	duration := time.Since(startedAt)
+
+	return RgToolResult{
+		Available:          true,
+		NotAvailableReason: opts.notAvailableReason,
+		Backend:            "go",
+		Root:               opts.root,
+		Path:               opts.target,
+		Pattern:            opts.pattern,
+		MaxResults:         opts.maxResults,
+		FixedStrings:       opts.fixedStrings,
+		MaxLineRunes:       opts.maxLineRunes,
+		MaxOutputBytes:     opts.maxOutputBytes,
+		Matches:            matches,
+		Truncated:          truncated,
+		TruncatedReason:    truncatedReason,
+		DurationMs:         duration.Milliseconds(),
 	}, nil
 }
 

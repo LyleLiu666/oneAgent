@@ -1,0 +1,12 @@
+This distribution may bundle Git for Windows (PortableGit) to provide `git.exe` and Git Bash (`bash.exe`) on Windows.
+
+Project:
+  - Git for Windows: https://gitforwindows.org/
+  - Source code: https://github.com/git-for-windows/git
+
+Licensing:
+  - Git itself is licensed under GPLv2.
+  - The PortableGit package includes additional open-source components under their respective licenses.
+
+If PortableGit is extracted on the target machine, license files are available inside the extracted directory.
+
