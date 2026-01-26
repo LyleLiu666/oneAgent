@@ -16,9 +16,11 @@ const (
 	ToolIDGlob       = "glob"
 	ToolIDLs         = "ls"
 	ToolIDMultiEdit  = "multiedit"
+	ToolIDPlan       = "plan"
 	ToolIDRg         = "rg"
 	ToolIDSearch     = "search"
 	ToolIDRunCommand = "run_command"
+	ToolIDSkillRead  = "skill_read"
 	ToolIDWriteFile  = "write_file"
 )
 
@@ -73,9 +75,11 @@ var registry = map[string]Definition{
 	ToolIDGlob:       globDefinition(),
 	ToolIDLs:         lsDefinition(),
 	ToolIDMultiEdit:  multiEditDefinition(),
+	ToolIDPlan:       planDefinition(),
 	ToolIDRg:         rgDefinition(),
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
+	ToolIDSkillRead:  skillReadDefinition(),
 	ToolIDWriteFile:  writeFileDefinition(),
 }
 

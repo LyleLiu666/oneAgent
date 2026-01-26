@@ -66,9 +66,10 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 ## 工具接口 (API Sketch)
 
 ### plan tool（供主 Agent/子 Agent 调用）
-- `plan.init(oneagent_home, template?)` → 创建默认 `PLAN.md`
-- `plan.get(oneagent_home)` → 返回任务列表（id/title/status/scope/acceptance 摘要）
-- `plan.mark_done(oneagent_home, task_id)` → 触发 observer 校验；通过则写回 `PLAN.md`，失败则返回失败原因并不写回
+以单一工具 `plan` 暴露多个动作（避免引入多个 tool id）：
+- `plan(action=init, template?, overwrite?)` → 创建默认 `PLAN.md`（路径固定为 `<workspace>/.oneagent/PLAN.md`）
+- `plan(action=get)` → 返回任务列表（id/title/status/scope/acceptance 摘要）
+- `plan(action=mark_done, task_id)` → 触发 observer 校验；通过则写回 `PLAN.md`，失败则返回失败原因并不写回
 
 ### observer runner（系统内部）
 - `observer.validate(oneagent_home, task)` → `{pass, reason, evidence?}`

@@ -261,6 +261,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 
+	toolDefs, err := tool.Mount(selectedToolIDs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
+
 	// Build conversation history (include persisted tool calls/results for KV cache and correctness).
 	messages := make([]llm.ChatMessage, 0, 1+len(persistedMessages)+1)
 	messages = append(messages, llm.BuildSystemMessage(systemPrompt))
@@ -271,19 +278,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	// TurnContext (volatile): dynamic per-turn context MUST NOT be injected into the stable prefix.
 	// This is intentionally appended after persisted history and excluded from cache selection.
 	turnContext := ""
+	for _, def := range toolDefs {
+		if def.ID == tool.ToolIDSkillRead {
+			turnContext = strings.TrimSpace(buildSkillSuggestionTurnContext(c.Request.Context(), h.rt.Skills, workspaceRoot, req.Message))
+			break
+		}
+	}
 	if msg, ok := llm.BuildTurnContextMessage(turnContext); ok {
 		messages = append(messages, msg)
 	}
 
 	// Add current user message (always last)
 	messages = append(messages, llm.BuildUserMessage(req.Message))
-
-	toolDefs, err := tool.Mount(selectedToolIDs)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
 
 	if toolProtocol == "xml" && len(toolDefs) > 0 && len(messages) > 0 && messages[0].Role == "system" {
 		messages[0].Content = strings.TrimSpace(messages[0].Content) + "\n\n" + toolxml.SystemPrompt(toolDefs)
@@ -564,6 +570,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			ctx := context.Background() // Use background context so generation survives request cancellation
 			ctx = tool.ContextWithUserID(ctx, userID)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
+			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
 			ctx = tool.ContextWithWorkspace(ctx, tool.WorkspaceConfig{
 				Enabled: strings.TrimSpace(workspaceRoot) != "",
 				Root:    workspaceRoot,

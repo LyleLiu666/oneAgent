@@ -10,6 +10,7 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/llmlog"
+	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 )
@@ -23,6 +24,7 @@ type Runtime struct {
 	Settings *settingsdb.DB
 	Sessions *sessionstore.Store
 	LLMLog   *llmlog.Writer
+	Skills   *skill.Manager
 }
 
 func Init(cfg *config.Config) (*Runtime, error) {
@@ -79,6 +81,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		Settings:  settings,
 		Sessions:  sessions,
 		LLMLog:    llmLogger,
+		Skills:    skill.NewManager(30 * time.Second),
 	}
 	return rt, nil
 }

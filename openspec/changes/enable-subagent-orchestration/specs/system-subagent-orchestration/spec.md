@@ -119,3 +119,11 @@
 - **WHEN** 子 Agent 执行结束
 - **THEN** 系统在 `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/`（或等价可配置目录）下生成可定位的日志文件（jsonl）
 - **THEN** 系统返回的 `trace_log_path` 指向该日志文件
+
+### Requirement: plan.mark_done 结果写入 handoff (Plan Mark Done in Handoff)
+系统必须 (MUST) 在子 Agent 调用 `plan.mark_done`（无论成功或失败）时，将“任务 id + done 成功/失败 + 失败原因（若有）”自动体现在其 handoff（summary/findings）中，便于主 Agent 决策下一步。
+
+#### Scenario: handoff 包含标记 done 的结果
+- **GIVEN** 子 Agent 执行完任务并尝试 `plan.mark_done`
+- **WHEN** 子 Agent 返回 handoff 给主 Agent
+- **THEN** handoff 中包含“任务 id + done 成功/失败 + 失败原因（若有）”的信息

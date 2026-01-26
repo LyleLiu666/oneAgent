@@ -641,6 +641,41 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		data, err := json.Marshal(payload)
 		return data, string(data), err
 
+	case "plan":
+		action := strings.ToLower(strings.TrimSpace(fields["action"]))
+		if action == "" {
+			return nil, "", errors.New("missing action")
+		}
+		payload := map[string]any{
+			"action": action,
+		}
+		if taskID := strings.TrimSpace(fields["task_id"]); taskID != "" {
+			payload["task_id"] = taskID
+		} else if taskID := strings.TrimSpace(fields["taskId"]); taskID != "" {
+			payload["task_id"] = taskID
+		}
+		if template := fields["template"]; strings.TrimSpace(template) != "" {
+			payload["template"] = template
+		}
+		if overwrite := parseBool(fields["overwrite"]); overwrite {
+			payload["overwrite"] = true
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
+	case "skill.read":
+		payload := map[string]any{}
+		if name := strings.TrimSpace(fields["name"]); name != "" {
+			payload["name"] = name
+		}
+		if id := strings.TrimSpace(fields["skill_id"]); id != "" {
+			payload["skill_id"] = id
+		} else if id := strings.TrimSpace(fields["id"]); id != "" {
+			payload["skill_id"] = id
+		}
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
 	default:
 		return nil, "", fmt.Errorf("unsupported tool: %s", toolName)
 	}

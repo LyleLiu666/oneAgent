@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -13,6 +14,9 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/doctor"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
+	"github.com/liu_y/oneAgent/backend/internal/scope"
+	"github.com/liu_y/oneAgent/backend/internal/skill"
+	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 	"github.com/liu_y/oneAgent/backend/internal/server"
 )
 
@@ -35,6 +39,9 @@ func main() {
 		return
 	case "doctor":
 		runDoctor(args[1:])
+		return
+	case "skills":
+		runSkills(args[1:])
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
@@ -166,6 +173,7 @@ func printUsage() {
 Usage:
   oneagent serve [flags]    Start the server (UI + API)
   oneagent doctor [flags]   Run diagnostics
+  oneagent skills search    Search skills (Top-K)
   oneagent --version        Print version
 
 serve flags:
@@ -177,5 +185,76 @@ serve flags:
   --bash-root-dir <path>
   --log-retention-days <n>
   --enable-trace true|false
+`)
+}
+
+func runSkills(args []string) {
+	if len(args) == 0 {
+		printSkillsUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "search":
+		runSkillsSearch(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown skills command: %s\n\n", args[0])
+		printSkillsUsage()
+		os.Exit(2)
+	}
+}
+
+func runSkillsSearch(args []string) {
+	fs := flag.NewFlagSet("skills search", flag.ExitOnError)
+	query := fs.String("query", "", "search query (required)")
+	workspace := fs.String("workspace", "", "workspace root (optional; enables <workspace>/.oneagent/skills)")
+	limit := fs.Int("limit", 8, "max results (default: 8)")
+	timeoutSeconds := fs.Int("timeout-seconds", 3, "timeout seconds (default: 3)")
+	_ = fs.Parse(args)
+
+	if strings.TrimSpace(*query) == "" {
+		fmt.Fprintln(os.Stderr, "missing --query")
+		printSkillsUsage()
+		os.Exit(2)
+	}
+
+	workspaceRoot := strings.TrimSpace(*workspace)
+	if workspaceRoot != "" {
+		normalized, err := scope.NormalizeWorkspaceRoot(workspaceRoot)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid --workspace: %v\n", err)
+			os.Exit(2)
+		}
+		workspaceRoot = normalized
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(*timeoutSeconds)*time.Second)
+	defer cancel()
+
+	manager := skill.NewManager(0)
+	cat, err := manager.Load(ctx, workspaceRoot)
+	if err != nil {
+		log.Fatalf("load skills: %v", err)
+	}
+
+	res, err := skillrecall.Search(ctx, cat, *query, skillrecall.Options{MaxResults: *limit, Timeout: time.Duration(*timeoutSeconds) * time.Second}, nil)
+	if err != nil {
+		log.Fatalf("skills search: %v", err)
+	}
+
+	data, err := json.MarshalIndent(res, "", "  ")
+	if err != nil {
+		log.Fatalf("marshal: %v", err)
+	}
+	fmt.Println(string(data))
+}
+
+func printSkillsUsage() {
+	fmt.Print(`oneagent skills
+
+Usage:
+  oneagent skills search --query "... " [--workspace <dir>] [--limit 8]
+
+Example:
+  oneagent skills search --query "review this PR" --limit 8
 `)
 }

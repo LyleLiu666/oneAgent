@@ -20,6 +20,9 @@
 .env.*
 !.env.example
 
+# oneAgent runtime state (when ONEAGENT_HOME points to workspace)
+.oneagent/
+
 # Go
 backend/server
 backend/debug
