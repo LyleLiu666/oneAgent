@@ -41,6 +41,7 @@ type RunRequest struct {
 
 	MaxSteps          int
 	MaxRuntimeSeconds int
+	MaxLogBytes       int
 }
 
 type RunResult struct {
@@ -111,7 +112,17 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 
 	started := time.Now()
 
-	logEvent(writer, map[string]any{
+	maxLogBytes := req.MaxLogBytes
+	if maxLogBytes <= 0 {
+		maxLogBytes = 64 * 1024 * 1024
+	}
+	if maxLogBytes > 512*1024*1024 {
+		maxLogBytes = 512 * 1024 * 1024
+	}
+
+	limiter := &logLimiter{MaxBytes: maxLogBytes}
+
+	logEvent(writer, limiter, true, map[string]any{
 		"type":       "start",
 		"run_id":     runID,
 		"session_id": req.ParentSessionID,
@@ -164,10 +175,33 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		combined strings.Builder
 		planDone []PlanMarkDoneRecord
 		changed  = make(map[string]struct{})
+		loopErr  error
 	)
 
+	normalizeChangedPath := func(p string) string {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return ""
+		}
+		p = filepath.Clean(p)
+
+		root := strings.TrimSpace(req.WorkspaceRoot)
+		if root != "" && filepath.IsAbs(p) {
+			if rel, err := filepath.Rel(root, p); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return filepath.ToSlash(rel)
+			}
+		}
+		return filepath.ToSlash(p)
+	}
+	recordChanged := func(p string) {
+		if normalized := normalizeChangedPath(p); normalized != "" {
+			changed[normalized] = struct{}{}
+		}
+	}
+
+	completed := false
 	for step := 0; step < maxSteps; step++ {
-		logEvent(writer, map[string]any{
+		logEvent(writer, limiter, false, map[string]any{
 			"type":  "llm_call",
 			"step":  step,
 			"input": messages,
@@ -175,15 +209,16 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 
 		result, err := callWithTools(ctx, req.Client, messages, opts, &combined)
 		if err != nil {
-			logEvent(writer, map[string]any{
+			logEvent(writer, limiter, true, map[string]any{
 				"type":  "error",
 				"step":  step,
 				"error": err.Error(),
 			})
+			loopErr = err
 			break
 		}
 
-		logEvent(writer, map[string]any{
+		logEvent(writer, limiter, false, map[string]any{
 			"type":   "llm_result",
 			"step":   step,
 			"output": result,
@@ -196,6 +231,7 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		})
 
 		if len(result.ToolCalls) == 0 {
+			completed = true
 			break
 		}
 
@@ -203,7 +239,7 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			toolName := strings.TrimSpace(call.Function.Name)
 			rawArgs := json.RawMessage(call.Function.Arguments)
 
-			logEvent(writer, map[string]any{
+			logEvent(writer, limiter, false, map[string]any{
 				"type":        "tool_call",
 				"step":        step,
 				"tool_name":   toolName,
@@ -252,14 +288,31 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			}
 
 			// Best-effort changed file tracking for common file tools.
-			if toolName == "write_file" {
+			switch toolName {
+			case "write_file":
 				var args struct {
 					FilePath string `json:"filePath"`
 				}
 				_ = json.Unmarshal(rawArgs, &args)
-				if strings.TrimSpace(args.FilePath) != "" {
-					changed[strings.TrimSpace(args.FilePath)] = struct{}{}
+				recordChanged(args.FilePath)
+			case "edit", "multiedit":
+				var batch struct {
+					Edits []struct {
+						FilePath string `json:"filePath"`
+					} `json:"edits"`
 				}
+				_ = json.Unmarshal(rawArgs, &batch)
+				if len(batch.Edits) > 0 {
+					for _, e := range batch.Edits {
+						recordChanged(e.FilePath)
+					}
+					break
+				}
+				var single struct {
+					FilePath string `json:"filePath"`
+				}
+				_ = json.Unmarshal(rawArgs, &single)
+				recordChanged(single.FilePath)
 			}
 
 			response, err := json.Marshal(payload)
@@ -267,7 +320,7 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 				response = []byte(fmt.Sprintf(`{"error":"failed to marshal tool response: %v"}`, err))
 			}
 
-			logEvent(writer, map[string]any{
+			logEvent(writer, limiter, false, map[string]any{
 				"type":        "tool_result",
 				"step":        step,
 				"tool_name":   toolName,
@@ -285,11 +338,26 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			})
 		}
 	}
+	if !completed && loopErr == nil {
+		loopErr = errors.New("max steps reached")
+	}
 
 	finalText := combined.String()
 	summary, timeline, findings, changedFiles := parseHandoffXML(finalText)
 	if strings.TrimSpace(summary) == "" {
 		summary = "subagent finished"
+	}
+	if loopErr != nil {
+		if strings.TrimSpace(findings) == "" {
+			findings = "## Findings\n- ERROR: " + loopErr.Error()
+		} else {
+			findings = strings.TrimSpace(findings) + "\n- ERROR: " + loopErr.Error()
+		}
+		if strings.TrimSpace(summary) == "" || summary == "subagent finished" {
+			summary = "subagent failed: " + loopErr.Error()
+		} else {
+			summary = strings.TrimSpace(summary) + " (error: " + loopErr.Error() + ")"
+		}
 	}
 
 	changedList := make([]string, 0, len(changed))
@@ -303,13 +371,16 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		return RunResult{}, fmt.Errorf("write findings: %w", err)
 	}
 
-	logEvent(writer, map[string]any{
+	logEvent(writer, limiter, true, map[string]any{
 		"type":          "complete",
 		"run_id":        runID,
 		"summary":       summary,
 		"findings_path": findingsPath,
 		"trace_log_path": tracePath,
 		"duration_ms":   time.Since(started).Milliseconds(),
+		"error":         errorString(loopErr),
+		"log_truncated": limiter.Truncated,
+		"log_max_bytes": limiter.MaxBytes,
 	})
 
 	return RunResult{
@@ -319,7 +390,7 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		TraceLogPath: tracePath,
 		DurationMs:   time.Since(started).Milliseconds(),
 		PlanMarkDone: planDone,
-	}, nil
+	}, loopErr
 }
 
 func callWithTools(ctx context.Context, client llm.Client, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, combined *strings.Builder) (llm.ChatCompletionResult, error) {
@@ -348,8 +419,17 @@ func callWithTools(ctx context.Context, client llm.Client, messages []llm.ChatMe
 	return result, err
 }
 
-func logEvent(w *bufio.Writer, payload map[string]any) {
+type logLimiter struct {
+	MaxBytes     int
+	WrittenBytes int
+	Truncated    bool
+}
+
+func logEvent(w *bufio.Writer, limiter *logLimiter, critical bool, payload map[string]any) {
 	if w == nil {
+		return
+	}
+	if limiter != nil && limiter.Truncated && !critical {
 		return
 	}
 	payload["ts"] = time.Now().Format(time.RFC3339Nano)
@@ -357,9 +437,17 @@ func logEvent(w *bufio.Writer, payload map[string]any) {
 	if err != nil {
 		return
 	}
+	n := len(b) + 1
+	if limiter != nil && limiter.MaxBytes > 0 && !critical && limiter.WrittenBytes+n > limiter.MaxBytes {
+		limiter.Truncated = true
+		return
+	}
 	_, _ = w.Write(b)
 	_, _ = w.WriteString("\n")
 	_ = w.Flush()
+	if limiter != nil {
+		limiter.WrittenBytes += n
+	}
 }
 
 func toolNames(tools []llm.Tool) []string {

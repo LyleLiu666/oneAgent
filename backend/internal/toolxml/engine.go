@@ -726,6 +726,11 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 				payload["max_runtime_seconds"] = maxRuntime
 			}
 		}
+		if rawMaxLogBytes := strings.TrimSpace(fields["max_log_bytes"]); rawMaxLogBytes != "" {
+			if maxLogBytes, err := strconv.Atoi(rawMaxLogBytes); err == nil && maxLogBytes > 0 {
+				payload["max_log_bytes"] = maxLogBytes
+			}
+		}
 		if rawKSkills := strings.TrimSpace(fields["k_skills"]); rawKSkills != "" {
 			if kSkills, err := strconv.Atoi(rawKSkills); err == nil && kSkills >= 0 {
 				payload["k_skills"] = kSkills

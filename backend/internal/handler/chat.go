@@ -75,6 +75,11 @@ const DefaultSystemPrompt = `- 总是以TDD的思想完成任务，主动验证�
 - 验证假设
 - 做出不确定的决策
 
+## 子 Agent（subagent）使用建议
+- 仅当某个步骤边界清晰、能独立交付（代码/文档/文件）且不需要频繁回看大量历史时，才考虑调用 subagent
+- 不要把强耦合、需要频繁交互/反复回看上下文的工作交给子 Agent
+- 调用 subagent 时：提供清晰 task；仅传递前序步骤“短总结 + findings/trace 引用（路径）”，不要塞入全量过程
+
 ## 执行任务
 
 推荐步骤:
@@ -692,17 +697,67 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 							}
 
 							for _, call := range step.ToolCalls {
-								entry := model.NewTraceEntry(model.TraceTypeToolCall, call.Function.Name)
-								entry.Input = map[string]any{
-									"tool_call_id": call.ID,
-									"arguments":    call.Function.Arguments,
-								}
-								entry.Metadata["tool_call_id"] = call.ID
-								entry.Metadata["protocol"] = "xml"
-								entry.Complete()
-								entries = append(entries, entry)
-
 								if r, ok := resultByID[call.ID]; ok {
+									if call.Function.Name == "subagent" {
+										var parsed struct {
+											OK          bool   `json:"ok"`
+											Summary      string `json:"summary"`
+											FindingsPath string `json:"findings_path"`
+											TraceLogPath string `json:"trace_log_path"`
+											RunID        string `json:"run_id"`
+											DurationMs   int64  `json:"duration_ms"`
+											Error        string `json:"error"`
+										}
+										_ = json.Unmarshal([]byte(r.OutputJSON), &parsed)
+
+										entry := model.NewTraceEntry(model.TraceTypeSubAgent, call.Function.Name)
+										entry.Input = map[string]any{
+											"tool_call_id": call.ID,
+											"arguments":    call.Function.Arguments,
+										}
+										entry.Output = map[string]any{
+											"ok":            parsed.OK,
+											"summary":       parsed.Summary,
+											"findings_path": parsed.FindingsPath,
+											"trace_log_path": parsed.TraceLogPath,
+											"run_id":        parsed.RunID,
+											"duration_ms":   parsed.DurationMs,
+											"error":         parsed.Error,
+										}
+										entry.Metadata["tool_call_id"] = call.ID
+										entry.Metadata["protocol"] = "xml"
+										entry.Metadata["parent_session_id"] = sessionID
+										if strings.TrimSpace(parsed.RunID) != "" {
+											entry.Metadata["run_id"] = strings.TrimSpace(parsed.RunID)
+										}
+										if strings.TrimSpace(parsed.FindingsPath) != "" {
+											entry.Metadata["findings_path"] = strings.TrimSpace(parsed.FindingsPath)
+										}
+										if strings.TrimSpace(parsed.TraceLogPath) != "" {
+											entry.Metadata["trace_log_path"] = strings.TrimSpace(parsed.TraceLogPath)
+										}
+										if r.Error != "" {
+											entry.Error = r.Error
+										} else if strings.TrimSpace(parsed.Error) != "" {
+											entry.Error = strings.TrimSpace(parsed.Error)
+										} else if !parsed.OK {
+											entry.Error = "subagent failed"
+										}
+										entry.Complete()
+										entries = append(entries, entry)
+										continue
+									}
+
+									entry := model.NewTraceEntry(model.TraceTypeToolCall, call.Function.Name)
+									entry.Input = map[string]any{
+										"tool_call_id": call.ID,
+										"arguments":    call.Function.Arguments,
+									}
+									entry.Metadata["tool_call_id"] = call.ID
+									entry.Metadata["protocol"] = "xml"
+									entry.Complete()
+									entries = append(entries, entry)
+
 									resEntry := model.NewTraceEntry(model.TraceTypeToolResult, call.Function.Name)
 									resEntry.Output = r.OutputJSON
 									if r.Error != "" {
@@ -712,7 +767,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 									resEntry.Metadata["protocol"] = "xml"
 									resEntry.Complete()
 									entries = append(entries, resEntry)
+									continue
 								}
+
+								entry := model.NewTraceEntry(model.TraceTypeToolCall, call.Function.Name)
+								entry.Input = map[string]any{
+									"tool_call_id": call.ID,
+									"arguments":    call.Function.Arguments,
+								}
+								entry.Metadata["tool_call_id"] = call.ID
+								entry.Metadata["protocol"] = "xml"
+								entry.Complete()
+								entries = append(entries, entry)
 							}
 
 							traceData = model.TraceDataJSON{
@@ -1378,7 +1444,8 @@ func runToolLoop(
 		})
 
 		for _, call := range result.ToolCalls {
-			if enableTrace {
+			isSubagent := call.Function.Name == "subagent"
+			if enableTrace && !isSubagent {
 				entry := model.NewTraceEntry(model.TraceTypeToolCall, call.Function.Name)
 				entry.Input = map[string]any{
 					"tool_call_id": call.ID,
@@ -1466,7 +1533,56 @@ func runToolLoop(
 				},
 			})
 
-			if enableTrace {
+			if enableTrace && isSubagent {
+				var parsed struct {
+					OK          bool   `json:"ok"`
+					Summary      string `json:"summary"`
+					FindingsPath string `json:"findings_path"`
+					TraceLogPath string `json:"trace_log_path"`
+					RunID        string `json:"run_id"`
+					DurationMs   int64  `json:"duration_ms"`
+					Error        string `json:"error"`
+				}
+				_ = json.Unmarshal(response, &parsed)
+
+				entry := model.NewTraceEntry(model.TraceTypeSubAgent, call.Function.Name)
+				entry.Input = map[string]any{
+					"tool_call_id": call.ID,
+					"arguments":    call.Function.Arguments,
+				}
+				entry.Output = map[string]any{
+					"ok":            parsed.OK,
+					"summary":       parsed.Summary,
+					"findings_path": parsed.FindingsPath,
+					"trace_log_path": parsed.TraceLogPath,
+					"run_id":        parsed.RunID,
+					"duration_ms":   parsed.DurationMs,
+					"error":         parsed.Error,
+				}
+				entry.Metadata["tool_call_id"] = call.ID
+				entry.Metadata["protocol"] = "json"
+				entry.Metadata["parent_session_id"] = sessionID
+				if strings.TrimSpace(parsed.RunID) != "" {
+					entry.Metadata["run_id"] = strings.TrimSpace(parsed.RunID)
+				}
+				if strings.TrimSpace(parsed.FindingsPath) != "" {
+					entry.Metadata["findings_path"] = strings.TrimSpace(parsed.FindingsPath)
+				}
+				if strings.TrimSpace(parsed.TraceLogPath) != "" {
+					entry.Metadata["trace_log_path"] = strings.TrimSpace(parsed.TraceLogPath)
+				}
+				if toolErr != nil {
+					entry.Error = toolErr.Error()
+				} else if marshalErr != nil {
+					entry.Error = marshalErr.Error()
+				} else if strings.TrimSpace(parsed.Error) != "" {
+					entry.Error = strings.TrimSpace(parsed.Error)
+				} else if !parsed.OK {
+					entry.Error = "subagent failed"
+				}
+				entry.Complete()
+				stepTraceEntries = append(stepTraceEntries, entry)
+			} else if enableTrace {
 				entry := model.NewTraceEntry(model.TraceTypeToolResult, call.Function.Name)
 				entry.Output = string(response)
 				if toolErr != nil {

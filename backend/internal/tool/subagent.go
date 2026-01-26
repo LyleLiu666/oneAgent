@@ -20,8 +20,11 @@ type subagentToolRequest struct {
 
 	MaxSteps          int `json:"max_steps,omitempty"`
 	MaxRuntimeSeconds int `json:"max_runtime_seconds,omitempty"`
+	MaxLogBytes       int `json:"max_log_bytes,omitempty"`
 
-	KSkills int `json:"k_skills,omitempty"`
+	SkillIDs []string `json:"skill_ids,omitempty"`
+
+	KSkills *int `json:"k_skills,omitempty"`
 }
 
 type subagentToolResult struct {
@@ -75,11 +78,21 @@ func subagentDefinition() Definition {
 						"description": "（可选）最长运行时间秒（默认 3600）。",
 						"minimum":     1,
 					},
+					"max_log_bytes": map[string]any{
+						"type":        "integer",
+						"description": "（可选）子 Agent trace.jsonl 最大字节数软上限（默认 64MiB；超过后将停止记录中间事件，但仍会写入结束事件）。",
+						"minimum":     1,
+					},
 					"k_skills": map[string]any{
 						"type":        "integer",
 						"description": "（可选）按步骤自动注入的技能 Top-K（默认 3；0=不注入）。",
 						"minimum":     0,
 						"maximum":     8,
+					},
+					"skill_ids": map[string]any{
+						"type":        "array",
+						"description": "（可选）显式指定要注入的技能（优先基于 skill_id 解析，找不到则按 name 尝试）。会以“摘要块”写入子 Agent TurnContext（volatile），并提示子 Agent 需要时自行调用 `skill.read` 读取完整 SKILL.md。",
+						"items":       map[string]any{"type": "string"},
 					},
 				},
 				"required":             []string{"task"},
@@ -166,24 +179,77 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	})
 
 	skillsSummary := ""
-	k := req.KSkills
-	if k == 0 {
-		k = 3
+	k := 3
+	if req.KSkills != nil {
+		k = *req.KSkills
 	}
-	if k > 0 {
-		manager := SkillManagerFromContext(ctx)
-		if manager != nil {
-			loadCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			cat, err := manager.Load(loadCtx, workspaceRoot)
-			cancel()
-			if err == nil && cat != nil && len(cat.Skills) > 0 {
+	if k < 0 {
+		k = 0
+	}
+	if k > 8 {
+		k = 8
+	}
+
+	manager := SkillManagerFromContext(ctx)
+	if manager != nil {
+		loadCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		cat, err := manager.Load(loadCtx, workspaceRoot)
+		cancel()
+		if err == nil && cat != nil && len(cat.Skills) > 0 {
+			seenSkills := make(map[string]bool)
+			var b strings.Builder
+
+			for _, raw := range req.SkillIDs {
+				name := strings.TrimSpace(raw)
+				if name == "" {
+					continue
+				}
+				if seenSkills[strings.ToLower(name)] {
+					continue
+				}
+				seenSkills[strings.ToLower(name)] = true
+
+				s, ok := cat.ByID(name)
+				if !ok {
+					s, ok = cat.ByName(name)
+				}
+				if ok {
+					b.WriteString("- ")
+					b.WriteString(strings.TrimSpace(s.Name))
+					b.WriteString(": ")
+					if strings.TrimSpace(s.Description) != "" {
+						b.WriteString(strings.TrimSpace(s.Description))
+					} else {
+						b.WriteString("（无描述）")
+					}
+					b.WriteString(" (")
+					b.WriteString(string(s.Source))
+					b.WriteString(")\n")
+					continue
+				}
+				b.WriteString("- ")
+				b.WriteString(name)
+				b.WriteString(": （未找到该 skill）\n")
+			}
+
+			if k > 0 {
 				res, err := skillrecall.Search(ctx, cat, task, skillrecall.Options{MaxResults: k, Timeout: 2 * time.Second}, nil)
 				if err == nil && len(res.Candidates) > 0 {
-					var b strings.Builder
 					for _, cand := range res.Candidates {
 						if cand.Score <= 0 {
 							continue
 						}
+						key := strings.ToLower(strings.TrimSpace(cand.Skill.ID))
+						if key == "" {
+							key = strings.ToLower(strings.TrimSpace(cand.Skill.Name))
+						}
+						if key != "" && seenSkills[key] {
+							continue
+						}
+						if key != "" {
+							seenSkills[key] = true
+						}
+
 						b.WriteString("- ")
 						b.WriteString(strings.TrimSpace(cand.Skill.Name))
 						b.WriteString(": ")
@@ -196,12 +262,28 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 						b.WriteString(string(cand.Skill.Source))
 						b.WriteString(")\n")
 					}
-					if b.Len() > 0 {
-						b.WriteString("如需使用某个技能，请先调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`。\n")
-						skillsSummary = b.String()
-					}
 				}
 			}
+
+			if b.Len() > 0 {
+				b.WriteString("如需使用某个技能，请先调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`。\n")
+				skillsSummary = b.String()
+			}
+		}
+	} else if len(req.SkillIDs) > 0 {
+		var b strings.Builder
+		for _, raw := range req.SkillIDs {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(name)
+			b.WriteString("\n")
+		}
+		if b.Len() > 0 {
+			b.WriteString("（注意：当前环境无法加载技能目录；如可用请调用 `skill.read` 读取技能详情。）\n")
+			skillsSummary = b.String()
 		}
 	}
 
@@ -220,22 +302,20 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		SkillsSummary:   skillsSummary,
 		MaxSteps:        req.MaxSteps,
 		MaxRuntimeSeconds: req.MaxRuntimeSeconds,
+		MaxLogBytes:     req.MaxLogBytes,
 	})
 
-	if runErr != nil {
-		return subagentToolResult{
-			OK:    false,
-			Error: runErr.Error(),
-		}, nil
-	}
-
-	return subagentToolResult{
-		OK:          true,
+	out := subagentToolResult{
+		OK:          runErr == nil,
 		Summary:      result.Summary,
 		FindingsPath: result.FindingsPath,
 		TraceLogPath: result.TraceLogPath,
 		RunID:        result.RunID,
 		DurationMs:   result.DurationMs,
 		PlanMarkDone: result.PlanMarkDone,
-	}, nil
+	}
+	if runErr != nil {
+		out.Error = runErr.Error()
+	}
+	return out, nil
 }

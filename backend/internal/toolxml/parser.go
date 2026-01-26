@@ -131,6 +131,8 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"maxRuntimeSeconds",
 		"max_runtime_ms",
 		"maxRuntimeMs",
+		"max_log_bytes",
+		"maxLogBytes",
 		"stdout_offset",
 		"stdoutOffset",
 		"stderr_offset",
@@ -214,6 +216,11 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["max_runtime_seconds"]; !ok {
 		if v, ok := fields["maxRuntimeSeconds"]; ok {
 			fields["max_runtime_seconds"] = v
+		}
+	}
+	if _, ok := fields["max_log_bytes"]; !ok {
+		if v, ok := fields["maxLogBytes"]; ok {
+			fields["max_log_bytes"] = v
 		}
 	}
 	if _, ok := fields["stdout_offset"]; !ok {

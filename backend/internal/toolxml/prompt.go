@@ -107,6 +107,8 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("  <k_skills>3</k_skills>（可选；自动召回并注入的技能 Top-K，0=不注入，默认 3）\n")
 			b.WriteString("  <max_steps>200</max_steps>（可选；默认 200）\n")
 			b.WriteString("  <max_runtime_seconds>3600</max_runtime_seconds>（可选；默认 3600）\n")
+			//todo 为什么日志会出现在提示词里，这些难道不应该做在代码工程里吗
+			b.WriteString("  <max_log_bytes>67108864</max_log_bytes>（可选；trace.jsonl 日志软上限，默认 64MiB）\n")
 			b.WriteString("  说明：默认禁止递归（子 Agent 不挂载 subagent 工具本身）。\n")
 		default:
 			if strings.TrimSpace(name) != "" {

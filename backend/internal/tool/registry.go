@@ -81,8 +81,11 @@ var registry = map[string]Definition{
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
 	ToolIDSkillRead:  skillReadDefinition(),
-	ToolIDSubagent:   subagentDefinition(),
 	ToolIDWriteFile:  writeFileDefinition(),
+}
+
+func init() {
+	registry[ToolIDSubagent] = subagentDefinition()
 }
 
 // All returns every tool in stable ID order.
