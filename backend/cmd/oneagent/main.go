@@ -15,9 +15,9 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/doctor"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
+	"github.com/liu_y/oneAgent/backend/internal/server"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
-	"github.com/liu_y/oneAgent/backend/internal/server"
 )
 
 func main() {
@@ -206,7 +206,7 @@ func runSkills(args []string) {
 func runSkillsSearch(args []string) {
 	fs := flag.NewFlagSet("skills search", flag.ExitOnError)
 	query := fs.String("query", "", "search query (required)")
-	workspace := fs.String("workspace", "", "workspace root (optional; enables <workspace>/.oneagent/skills)")
+	workspace := fs.String("workspace", "", "workspace root (optional; enables <workspace>/.oneagent/skills, <workspace>/skills, <workspace>/.claude/skills)")
 	limit := fs.Int("limit", 8, "max results (default: 8)")
 	timeoutSeconds := fs.Int("timeout-seconds", 3, "timeout seconds (default: 3)")
 	_ = fs.Parse(args)

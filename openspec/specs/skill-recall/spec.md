@@ -12,10 +12,13 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **THEN** 工具仍可返回技能候选列表（不因网络不可用而失败）
 
 ### Requirement: 支持多来源发现并基于本地文件召回（grep/ripgrep）
-技能召回工具必须 (MUST) 能从以下来源发现技能并进行召回（对三处来源取并集后按 `name` 去重）：
+技能召回工具必须 (MUST) 能从以下来源发现技能并进行召回（对以上来源取并集后按 `name` 去重）：
 1) `<workspace>/.oneagent/skills`
-2) `~/.claude/skills`
-3) `~/.codex/skills`
+2) `<workspace>/skills`
+3) `<workspace>/.claude/skills`
+4) `~/.claude/skills`
+5) `~/.codex/skills`
+6) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
 
 技能召回工具应该 (SHOULD) 优先使用 `rg`（ripgrep）对 `SKILL.md` 内容进行匹配计分；在 `rg` 不可用时系统必须 (MUST) 降级为 `grep -R`（或等价实现）以保持基本可用，并通过 `doctor` 明确提示安装 `rg`；整个流程不得依赖外部网络。
 
@@ -56,4 +59,3 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **GIVEN** 技能来源中存在技能 `code-review-excellence`
 - **WHEN** 输入 query="请使用 code-review-excellence 这个技能，帮我 review 这个 PR"
 - **THEN** 工具可以将 `code-review-excellence` 解析为候选/推荐技能（可作为 override）
-

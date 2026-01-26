@@ -2,7 +2,6 @@ package skill
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -119,15 +118,4 @@ func firstParagraph(text string, maxRunes int) string {
 	para = strings.ReplaceAll(para, "\n", " ")
 	para = strings.Join(strings.Fields(para), " ")
 	return para
-}
-
-func readSkillFile(path string, maxBytes int64) ([]byte, error) {
-	data, err := osReadFileLimited(path, maxBytes)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, errors.New("empty file")
-	}
-	return data, nil
 }

@@ -164,6 +164,34 @@ func TestSearch_WithManySkills_ReturnsTop8(t *testing.T) {
 	}
 }
 
+func TestSearch_FindsBuiltinSkillWithoutRgOrGrep(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cat, err := skill.Discover(context.Background(), skill.DiscoverOptions{})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+
+	lookPath := func(name string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	res, err := Search(context.Background(), cat, "create-skill", Options{MaxResults: 8, Timeout: 200 * time.Millisecond}, lookPath)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if res.Backend != "none" {
+		t.Fatalf("expected backend=none, got %+v", res)
+	}
+	if len(res.Candidates) == 0 || res.Candidates[0].Skill.ID != "create-skill" {
+		t.Fatalf("expected top candidate create-skill, got %+v", res.Candidates)
+	}
+	if res.Candidates[0].ContentScore <= 0 {
+		t.Fatalf("expected content score > 0, got %+v", res.Candidates[0])
+	}
+}
+
 func writeFakeCountBinary(t *testing.T, path string) string {
 	t.Helper()
 

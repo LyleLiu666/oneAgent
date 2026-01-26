@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/liu_y/oneAgent/backend/internal/skill"
@@ -67,5 +68,32 @@ func TestSkillReadTool_ResolvesByNameWithPrecedence(t *testing.T) {
 	gotPath, _ := filepath.EvalSymlinks(got.Path)
 	if want != "" && gotPath != "" && want != gotPath {
 		t.Fatalf("expected path=%q, got %q", want, gotPath)
+	}
+}
+
+func TestSkillReadTool_ReadsBuiltinSkillWithoutWorkspace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	manager := skill.NewManager(0)
+	ctx := context.Background()
+	ctx = ContextWithSkillManager(ctx, manager)
+
+	raw, _ := json.Marshal(map[string]any{
+		"name": "create-skill",
+	})
+	gotAny, err := runSkillReadTool(ctx, raw)
+	if err != nil {
+		t.Fatalf("skill.read: %v", err)
+	}
+	got := gotAny.(skillReadResult)
+	if !got.OK {
+		t.Fatalf("expected ok=true, got %+v", got)
+	}
+	if got.Source != skill.SourceBuiltin {
+		t.Fatalf("expected source=.builtin, got %+v", got)
+	}
+	if !strings.Contains(got.SkillMD, "# create-skill") {
+		t.Fatalf("expected skill_md content, got=%q", got.SkillMD)
 	}
 }

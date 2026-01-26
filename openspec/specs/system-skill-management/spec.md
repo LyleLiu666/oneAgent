@@ -4,10 +4,13 @@
 TBD - created by archiving change enable-skills-usage. Update Purpose after archive.
 ## Requirements
 ### Requirement: 多来源技能发现 (Multi-Source Skill Discovery)
-系统必须 (MUST) 从以下位置发现技能文件（`SKILL.md`），并支持以“技能目录包”的方式组织（目录内包含 `SKILL.md`，可选包含 `scripts/`、`references/` 等）。系统应对三处来源取并集后按技能 `name` 去重（同名冲突按稳定规则消解）：
+系统必须 (MUST) 从以下位置发现技能文件（`SKILL.md`），并支持以“技能目录包”的方式组织（目录内包含 `SKILL.md`，可选包含 `scripts/`、`references/` 等）。系统应对以上来源取并集后按技能 `name` 去重（同名冲突按稳定规则消解）：
 1) `<workspace>/.oneagent/skills/**/SKILL.md`
-2) `~/.claude/skills/**/SKILL.md`
-3) `~/.codex/skills/**/SKILL.md`
+2) `<workspace>/skills/**/SKILL.md`
+3) `<workspace>/.claude/skills/**/SKILL.md`
+4) `~/.claude/skills/**/SKILL.md`
+5) `~/.codex/skills/**/SKILL.md`
+6) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
 
 #### Scenario: 发现 ~/.claude skills
 - **GIVEN** 用户主目录存在 `~/.claude/skills/translator/SKILL.md`
@@ -19,20 +22,45 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **WHEN** 系统加载技能目录
 - **THEN** 技能列表中包含该技能（source=`.oneagent`）
 
+#### Scenario: 发现 <workspace>/skills
+- **GIVEN** 工作区根目录存在 `<workspace>/skills/tech-spec-architect/SKILL.md`
+- **WHEN** 系统加载技能目录
+- **THEN** 技能列表中包含该技能（source=`.workspace`）
+
+#### Scenario: 发现 <workspace>/.claude skills
+- **GIVEN** 工作区根目录存在 `<workspace>/.claude/skills/translator/SKILL.md`
+- **WHEN** 系统加载技能目录
+- **THEN** 技能列表中包含该技能（source=`.claude`）
+
 #### Scenario: 发现 ~/.codex skills
 - **GIVEN** 用户主目录存在 `~/.codex/skills/git-auto-commit/SKILL.md`
 - **WHEN** 系统加载技能目录
 - **THEN** 技能列表中包含该技能（source=`.codex`）
 
-#### Scenario: 冲突时以 .oneagent 覆盖 .claude
-- **GIVEN** `~/.claude/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
+#### Scenario: 冲突时以 .oneagent 覆盖 <workspace>/skills
+- **GIVEN** `<workspace>/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
 - **WHEN** 系统加载技能目录
 - **THEN** 仅保留 `.oneagent` 版本作为最终生效技能（同名覆盖）
+
+#### Scenario: 冲突时以 <workspace>/skills 覆盖 <workspace>/.claude
+- **GIVEN** `<workspace>/.claude/skills/translator/SKILL.md` 与 `<workspace>/skills/translator/SKILL.md` 同时存在
+- **WHEN** 系统加载技能目录
+- **THEN** 仅保留 `<workspace>/skills` 版本作为最终生效技能（同名覆盖）
+
+#### Scenario: 冲突时以 <workspace>/.claude 覆盖 ~/.claude
+- **GIVEN** `~/.claude/skills/translator/SKILL.md` 与 `<workspace>/.claude/skills/translator/SKILL.md` 同时存在
+- **WHEN** 系统加载技能目录
+- **THEN** 仅保留 `<workspace>/.claude` 版本作为最终生效技能（同名覆盖）
 
 #### Scenario: 冲突时以 .claude 覆盖 .codex
 - **GIVEN** `~/.codex/skills/translator/SKILL.md` 与 `~/.claude/skills/translator/SKILL.md` 同时存在
 - **WHEN** 系统加载技能目录
 - **THEN** 仅保留 `.claude` 版本作为最终生效技能（同名覆盖）
+
+#### Scenario: 冲突时以 workspace 覆盖内置 skills
+- **GIVEN** 内置 skills 中存在 `create-skill`，且 `<workspace>/.oneagent/skills/create-skill/SKILL.md` 同时存在
+- **WHEN** 系统加载技能目录
+- **THEN** 仅保留 workspace 版本作为最终生效技能（同名覆盖）
 
 #### Scenario: ~/.claude skills 为 symlink 目录
 - **GIVEN** `~/.claude/skills/code-review-excellence` 是一个 symlink，指向某个真实目录且该目录内包含 `SKILL.md`
@@ -82,7 +110,7 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 ### Requirement: Skill 读取工具（`skill.read`）
 系统必须 (MUST) 提供一个 skill 读取工具（例如 `skill.read`），使 agent 可仅凭技能名称/ID 读取对应技能的 `SKILL.md` 原文；该原文必须作为工具调用输出（tool output）进入对话上下文，以便 agent 在后续思考与回复中遵循该 Skill 的指令。
 
-该工具必须 (MUST) 按技能发现的同名覆盖规则返回“最终生效版本”（例如 `.oneagent` > `.claude` > `.codex`），且不得要求调用方提供文件路径。
+该工具必须 (MUST) 按技能发现的同名覆盖规则返回“最终生效版本”（例如 `<workspace>/.oneagent` > `<workspace>/skills` > `<workspace>/.claude` > `~/.claude` > `~/.codex` > `.builtin`），且不得要求调用方提供文件路径。
 
 #### Scenario: 仅凭技能名称读取 SKILL.md
 - **GIVEN** 技能来源中存在技能 "Translator"
@@ -93,4 +121,3 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **GIVEN** `~/.claude/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
 - **WHEN** agent 调用 `skill.read("translator")`
 - **THEN** 系统返回 `.oneagent` 版本的 `SKILL.md` 原文作为 tool output
-

@@ -40,6 +40,31 @@ ls dist/release
 - 在 Chat 顶部输入 `Workspace path (server)`（服务运行机器上的绝对路径，例如你的项目目录）
 - 后端会将其保存到 session metadata，并将文件工具/命令工具默认限制在该目录内
 
+## Skills（技能）
+
+oneAgent 的 skills 以“目录包 + `SKILL.md`”形式组织（可选包含 `scripts/`、`references/` 等）。
+
+### 发现位置与优先级
+
+oneAgent 自带一批内置 skills（随二进制发布，source=`.builtin`），同时也会从 workspace / 本机目录发现自定义 skills。
+
+当会话启用 workspace 后，系统会按以下优先级发现并去重（同名/同 ID 先出现者生效）：
+1) `<workspace>/.oneagent/skills/**/SKILL.md`
+2) `<workspace>/skills/**/SKILL.md`（推荐：随仓库提交的项目 skills）
+3) `<workspace>/.claude/skills/**/SKILL.md`（兼容 Claude Code 的项目内 skills）
+4) `~/.claude/skills/**/SKILL.md`
+5) `~/.codex/skills/**/SKILL.md`
+6) `.builtin`（内置 skills，随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
+
+### 验证 skills 是否被识别
+
+```bash
+cd backend
+go run ./cmd/oneagent skills search --query "create-skill"           # 内置 skills（不依赖 workspace）
+go run ./cmd/oneagent skills search --query "tech-spec-architect"    # 内置 skills（不依赖 workspace）
+go run ./cmd/oneagent skills search --query "my-skill" --workspace "$(pwd)/.."   # workspace skills
+```
+
 ## Data Layout
 
 - `ONEAGENT_HOME`（默认 `~/.oneagent_default`）是 oneAgent 的内部状态目录根

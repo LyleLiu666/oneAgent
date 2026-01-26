@@ -97,9 +97,11 @@ func TestDiscover_MultiSourcePrecedence(t *testing.T) {
 
 	claude := filepath.Join(home, ".claude", "skills", "same", "SKILL.md")
 	codex := filepath.Join(home, ".codex", "skills", "same", "SKILL.md")
+	wsClaude := filepath.Join(workspace, ".claude", "skills", "same", "SKILL.md")
+	wsSkills := filepath.Join(workspace, "skills", "same", "SKILL.md")
 	oneagent := filepath.Join(workspace, ".oneagent", "skills", "same", "SKILL.md")
 
-	for _, p := range []string{claude, codex, oneagent} {
+	for _, p := range []string{claude, codex, wsClaude, wsSkills, oneagent} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -111,6 +113,12 @@ func TestDiscover_MultiSourcePrecedence(t *testing.T) {
 	if err := os.WriteFile(claude, []byte("---\nname: same\ndescription: from claude\n---\n"), 0o644); err != nil {
 		t.Fatalf("write claude: %v", err)
 	}
+	if err := os.WriteFile(wsClaude, []byte("---\nname: same\ndescription: from workspace claude\n---\n"), 0o644); err != nil {
+		t.Fatalf("write workspace claude: %v", err)
+	}
+	if err := os.WriteFile(wsSkills, []byte("---\nname: same\ndescription: from workspace skills\n---\n"), 0o644); err != nil {
+		t.Fatalf("write workspace skills: %v", err)
+	}
 	if err := os.WriteFile(oneagent, []byte("---\nname: same\ndescription: from oneagent\n---\n"), 0o644); err != nil {
 		t.Fatalf("write oneagent: %v", err)
 	}
@@ -119,11 +127,71 @@ func TestDiscover_MultiSourcePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discover: %v", err)
 	}
-	if len(cat.Skills) != 1 {
-		t.Fatalf("expected 1 deduped skill, got %d", len(cat.Skills))
+	got, ok := cat.ByID("same")
+	if !ok {
+		t.Fatalf("expected skill to be discoverable by id")
 	}
-	if cat.Skills[0].Description != "from oneagent" || cat.Skills[0].Source != SourceOneAgent {
-		t.Fatalf("expected .oneagent to win, got %+v", cat.Skills[0])
+	if got.Description != "from oneagent" || got.Source != SourceOneAgent {
+		t.Fatalf("expected .oneagent to win, got %+v", got)
+	}
+}
+
+func TestDiscover_WorkspaceSkillsPrecedence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	workspace := t.TempDir()
+
+	homeClaude := filepath.Join(home, ".claude", "skills", "same", "SKILL.md")
+	wsClaude := filepath.Join(workspace, ".claude", "skills", "same", "SKILL.md")
+	wsSkills := filepath.Join(workspace, "skills", "same", "SKILL.md")
+
+	for _, p := range []string{homeClaude, wsClaude, wsSkills} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+
+	if err := os.WriteFile(homeClaude, []byte("---\nname: same\ndescription: from home claude\n---\n"), 0o644); err != nil {
+		t.Fatalf("write home claude: %v", err)
+	}
+	if err := os.WriteFile(wsClaude, []byte("---\nname: same\ndescription: from workspace claude\n---\n"), 0o644); err != nil {
+		t.Fatalf("write workspace claude: %v", err)
+	}
+	if err := os.WriteFile(wsSkills, []byte("---\nname: same\ndescription: from workspace skills\n---\n"), 0o644); err != nil {
+		t.Fatalf("write workspace skills: %v", err)
+	}
+
+	cat, err := Discover(context.Background(), DiscoverOptions{WorkspaceRoot: workspace})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	got, ok := cat.ByID("same")
+	if !ok {
+		t.Fatalf("expected skill to be discoverable by id")
+	}
+	if got.Description != "from workspace skills" || got.Source != SourceWorkspace {
+		t.Fatalf("expected workspace skills to win, got %+v", got)
+	}
+}
+
+func TestDiscover_IncludesBuiltinSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cat, err := Discover(context.Background(), DiscoverOptions{})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	got, ok := cat.ByID("create-skill")
+	if !ok {
+		t.Fatalf("expected built-in create-skill to be discovered")
+	}
+	if got.Source != SourceBuiltin {
+		t.Fatalf("expected source=.builtin, got %+v", got)
+	}
+	if got.Path == "" {
+		t.Fatalf("expected builtin path to be set")
 	}
 }
 
@@ -161,4 +229,3 @@ func TestScanSkillFiles_FollowsSymlinkAndAvoidsCycles(t *testing.T) {
 		t.Fatalf("unexpected file: %q", files[0])
 	}
 }
-

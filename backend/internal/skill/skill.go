@@ -8,9 +8,11 @@ import (
 type Source string
 
 const (
-	SourceOneAgent Source = ".oneagent"
-	SourceClaude   Source = ".claude"
-	SourceCodex    Source = ".codex"
+	SourceOneAgent  Source = ".oneagent"
+	SourceWorkspace Source = ".workspace"
+	SourceClaude    Source = ".claude"
+	SourceCodex     Source = ".codex"
+	SourceBuiltin   Source = ".builtin"
 )
 
 type Skill struct {
@@ -87,4 +89,3 @@ func NormalizeName(name string) string {
 	out := strings.Trim(b.String(), "-")
 	return out
 }
-

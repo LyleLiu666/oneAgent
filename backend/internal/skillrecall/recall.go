@@ -193,13 +193,40 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 		return out, "none", ""
 	}
 
+	diskFiles := make([]string, 0, len(files))
+	builtinFiles := make([]string, 0, 8)
+	for _, f := range files {
+		if skill.IsBuiltinPath(f) {
+			builtinFiles = append(builtinFiles, f)
+			continue
+		}
+		diskFiles = append(diskFiles, f)
+	}
+
+	for _, f := range builtinFiles {
+		data, err := skill.ReadSkillFile(f, 512*1024)
+		if err != nil {
+			continue
+		}
+		if n := countFixedStringFold(string(data), query, 50); n > 0 {
+			out[f] = n
+		}
+	}
+
+	if len(diskFiles) == 0 {
+		return out, "none", ""
+	}
+
 	contentCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	rgReason := ""
 	if rgPath, err := lookPath("rg"); err == nil && strings.TrimSpace(rgPath) != "" {
-		if counts, err := runCountMatches(contentCtx, rgPath, rgArgsPrefix(), query, files); err == nil {
-			return counts, "rg", ""
+		if counts, err := runCountMatches(contentCtx, rgPath, rgArgsPrefix(), query, diskFiles); err == nil {
+			for p, n := range counts {
+				out[p] += n
+			}
+			return out, "rg", ""
 		} else {
 			rgReason = err.Error()
 		}
@@ -208,13 +235,45 @@ func countMatches(ctx context.Context, query string, files []string, timeout tim
 	}
 
 	if grepPath, err := lookPath("grep"); err == nil && strings.TrimSpace(grepPath) != "" {
-		if counts, err := runCountMatches(contentCtx, grepPath, grepArgsPrefix(), query, files); err == nil {
-			return counts, "grep", rgReason
+		if counts, err := runCountMatches(contentCtx, grepPath, grepArgsPrefix(), query, diskFiles); err == nil {
+			for p, n := range counts {
+				out[p] += n
+			}
+			return out, "grep", rgReason
 		}
 		return out, "grep", rgReason
 	}
 
 	return out, "none", rgReason
+}
+
+func countFixedStringFold(haystack string, needle string, maxCount int) int {
+	needle = strings.TrimSpace(needle)
+	if needle == "" || haystack == "" {
+		return 0
+	}
+
+	if maxCount <= 0 {
+		maxCount = 50
+	}
+
+	h := strings.ToLower(haystack)
+	n := strings.ToLower(needle)
+
+	count := 0
+	for {
+		i := strings.Index(h, n)
+		if i < 0 {
+			break
+		}
+		count++
+		if count >= maxCount {
+			break
+		}
+		h = h[i+len(n):]
+	}
+
+	return count
 }
 
 func rgArgsPrefix() []string {
@@ -292,10 +351,10 @@ func runCountMatches(ctx context.Context, exe string, prefix []string, query str
 			}
 			out[filepath.Clean(pathPart)] += n
 		}
-			if err := scanner.Err(); err != nil {
-				_ = cmd.Wait()
-				return nil, err
-			}
+		if err := scanner.Err(); err != nil {
+			_ = cmd.Wait()
+			return nil, err
+		}
 
 		waitErr := cmd.Wait()
 

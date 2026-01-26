@@ -5,8 +5,12 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/liu_y/oneAgent/backend/internal/builtinskills"
 )
 
 type DiscoverOptions struct {
@@ -14,7 +18,8 @@ type DiscoverOptions struct {
 }
 
 // Discover loads skills from configured sources and applies the precedence rule:
-// .oneagent > .claude > .codex (dedup by normalized name).
+// <workspace>/.oneagent > <workspace>/skills > <workspace>/.claude > ~/.claude > ~/.codex > .builtin
+// (dedup by normalized name).
 func Discover(ctx context.Context, opts DiscoverOptions) (*Catalog, error) {
 	sources := buildSources(opts.WorkspaceRoot)
 
@@ -48,6 +53,27 @@ func Discover(ctx context.Context, opts DiscoverOptions) (*Catalog, error) {
 		}
 	}
 
+	builtinFiles, err := scanSkillFilesFS(ctx, builtinskills.FS, "skills")
+	if err != nil {
+		return nil, err
+	}
+	for _, relPath := range builtinFiles {
+		s, err := parseBuiltinSkill(relPath)
+		if err != nil {
+			continue
+		}
+		if s.ID == "" {
+			continue
+		}
+		if _, exists := out.byID[s.ID]; exists {
+			continue
+		}
+		out.Skills = append(out.Skills, s)
+		out.byID[s.ID] = s
+		out.byName[s.ID] = s
+		out.byPath[s.Path] = s
+	}
+
 	return out, nil
 }
 
@@ -61,10 +87,20 @@ func buildSources(workspaceRoot string) []sourceRoot {
 
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	if workspaceRoot != "" {
-		sources = append(sources, sourceRoot{
-			Source: SourceOneAgent,
-			Root:   filepath.Join(workspaceRoot, ".oneagent", "skills"),
-		})
+		sources = append(sources,
+			sourceRoot{
+				Source: SourceOneAgent,
+				Root:   filepath.Join(workspaceRoot, ".oneagent", "skills"),
+			},
+			sourceRoot{
+				Source: SourceWorkspace,
+				Root:   filepath.Join(workspaceRoot, "skills"),
+			},
+			sourceRoot{
+				Source: SourceClaude,
+				Root:   filepath.Join(workspaceRoot, ".claude", "skills"),
+			},
+		)
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
@@ -81,6 +117,87 @@ func buildSources(workspaceRoot string) []sourceRoot {
 	}
 
 	return sources
+}
+
+func scanSkillFilesFS(ctx context.Context, fsys fs.FS, root string) ([]string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return nil, nil
+	}
+
+	root = path.Clean(root)
+	if root == "." || root == "/" {
+		return nil, errors.New("invalid fs root")
+	}
+
+	var results []string
+	err := fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if d == nil || d.IsDir() {
+			return nil
+		}
+		if path.Base(p) == "SKILL.md" {
+			results = append(results, p)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	sort.Strings(results)
+	return results, nil
+}
+
+func parseBuiltinSkill(relPath string) (Skill, error) {
+	data, err := readSkillFileFS(builtinskills.FS, relPath, 512*1024)
+	if err != nil {
+		return Skill{}, err
+	}
+
+	fm, rest, ok := parseFrontmatter(data)
+
+	name := strings.TrimSpace(fm.Name)
+	if name == "" {
+		name = path.Base(path.Dir(relPath))
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Skill{}, errors.New("missing name")
+	}
+
+	desc := strings.TrimSpace(fm.Description)
+	if desc == "" {
+		desc = firstParagraph(string(rest), 200)
+	}
+
+	id := NormalizeName(name)
+	if id == "" {
+		return Skill{}, errors.New("invalid name")
+	}
+
+	s := Skill{
+		ID:          id,
+		Name:        name,
+		Description: desc,
+		Tags:        []string(fm.Tags),
+		Keywords:    []string(fm.Keywords),
+		Source:      SourceBuiltin,
+		Path:        builtinPath(relPath),
+	}
+
+	_ = ok // silence unused; keeps future extension obvious
+	return s, nil
 }
 
 func scanSkillFiles(ctx context.Context, root string) ([]string, error) {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -109,7 +108,7 @@ func runSkillReadTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("skill not found: %s", ident)
 	}
 
-	data, err := os.ReadFile(s.Path)
+	data, err := skill.ReadSkillFile(s.Path, 512*1024)
 	if err != nil {
 		return nil, err
 	}
