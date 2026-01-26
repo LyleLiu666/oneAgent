@@ -6,6 +6,16 @@
 > 1) **尚未开始实现（active changes）**：当前目录下的 change（需要落地实现）
 > 2) **历史 review（archived）**：上一轮开发遗留的 review 记录（供背景参考）
 
+## add-windows-support（Windows 兼容：runtime + tooling）
+该变更面向商业化分发的硬前置：当前实现明显偏 macOS/Unix（`osascript` workspace picker、`bash`/Unix `syscall`、`rg→grep` 降级），Windows 无法编译/运行，更无法在部门内推广。
+
+关键点与风险：
+- **必须用 build tags 收敛平台差异**：`shell`、workspace chooser、search backend 都需要 `*_windows.go` 分离，否则会在主干不断引入条件分支与不可维护的兼容层。
+- **搜索降级在 Windows 不能依赖 grep**：skills recall/rg 工具必须提供“无 rg/无 grep 仍可用”的等价降级（允许慢），并把“如何启用更快后端”的指引放到 doctor 与 tool result 中。
+- **内置 Git/Git Bash 要把合规与可诊断做扎实**：打包 third-party binaries 会带来许可证/NOTICE、体积、以及“使用 system 还是 bundled”的排障需求；必须让 doctor 明确输出来源与版本。
+- **命令执行的语义要尽早定**：`bash/run_command` 在 Windows 默认走 Git Bash（优先 bundled）；若环境策略禁止/缺失 Git Bash，必须显式失败并给出替代路径（例如安装 Git for Windows/使用官方 release，或提示该环境不支持）。
+- **workspace 选择不能卡用户**：picker 可选，但“手动输入 + 校验/规范化”必须跨平台可用，否则 onboarding 会失效。
+
 ## update-workspace-first-onboarding（workspace-first onboarding + quick-start serve）
 该变更解决 “进来就能开干” 的第一步：把 workspace 选择做成强引导（但仍可跳过），并补齐 `oneagent serve` 的 quick-start 能力（`--open/--workspace`），让安装后第一次使用尽量“零摩擦”。
 
@@ -43,14 +53,16 @@
 4) 最后做前端任务面板（队列/详情/产物入口），把“无人值守”体验做出来。
 
 ## 模块冲突与交叉影响（active changes，按优先级）
+- **Windows 兼容是平台地基**：`shell/rg/workspace chooser` 的跨平台抽象如果不先做，后续 onboarding/task queue 会在 Windows 上全部不可用。
 - **workspace 是一切自动化的地基**：Task/plan/subagent 的写入边界必须一致；workspace-first onboarding 是 task queue 的 UX 前置条件（否则用户一进来就创建 task，但工具作用域不清晰）。
 - **Observer 的边界要统一**：plan observer 与 Outcome Observer 都走“只读验收”；命令验收通过“产出测试报告文件”间接完成，避免扩大执行面。
 - **并发与文件冲突**：同 workspace 串行是硬要求；不同 workspace 并行是软承诺（best-effort）。实现层必须有“资源不足时降级排队”的策略与清晰事件记录，否则会导致不可诊断的随机失败。
 - **留痕与保留策略**：Task events + subagent trace + llm logs 叠加后日志量会很大，需要与 `LOG_RETENTION_DAYS` 的清理策略联动，否则长期运行必然膨胀。
 
 ## 推荐开发顺序（active changes，含理由）
-1. **update-workspace-first-onboarding**：先把 workspace 入口前置并形成“新会话选 workspace”的闭环，再加 `--open/--workspace` 降低首次使用成本。
-2. **add-autonomous-task-queue**：在 workspace UX 稳定后引入 Task/Queue/Resume/Observer；否则会被“工具作用域不明确”拖垮整体可靠性。
+1. **add-windows-support**：先把 Windows 的 build/run 与关键工具（command/search/workspace chooser）跑通，否则后续任何“进来就开干/无人值守交付”在 Windows 都不可用。
+2. **update-workspace-first-onboarding**：在跨平台基础可用后，把 workspace 入口前置并形成“新会话选 workspace”的闭环，再加 `--open/--workspace` 降低首次使用成本。
+3. **add-autonomous-task-queue**：在 workspace UX 稳定后引入 Task/Queue/Resume/Observer；否则会被“工具作用域不明确”拖垮整体可靠性。
 
 ## 历史 review（archived changes，供背景参考）
 
