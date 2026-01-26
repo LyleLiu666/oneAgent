@@ -152,6 +152,7 @@ oneagent serve --workspace . --open
 | 零摩擦启动     | `update-workspace-first-onboarding` | 控制感 + 无打扰              |
 | 挂机干活       | `add-autonomous-task-queue`        | 信任感（后台 + Resume）      |
 | 部门级分发/跨平台 | `add-windows-support`              | 无打扰（安装一致性）+ 信任感（可诊断/可审计） |
+| 留痕复利/SOP | `add-work-ledger-sop-learning`     | 信任感（证据链）+ 存在感（习惯/经验复用） |
 | 结果可信       | `enable-plan-observer-validation`  | 信任感（TDD 验收）           |
 | AI 懂我的项目  | `enable-skills-usage`              | 存在感（专属知识）           |
 | 长任务不膨胀   | `optimize-kv-cache`                | 无打扰（成本可控、性能稳定） |

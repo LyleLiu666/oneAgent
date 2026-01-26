@@ -52,6 +52,17 @@
 3) 再做 resume（attempt 历史 + 复用上次产物的 context_summary）；
 4) 最后做前端任务面板（队列/详情/产物入口），把“无人值守”体验做出来。
 
+## add-work-ledger-sop-learning（Work Ledger + Receipt→SOP（人工确认启用））
+该变更把“可交付”进一步固化为“可积累资产”，目标是两件事：
+1) **让用户信任交付**：每次尝试都有 Receipt（json+md）作为可复核证据（summary + artifacts 指针）。
+2) **让用户形成复利**：从重复出现的 Receipt 模式中提炼 SOP Suggestions，并通过“中间态（proposed）→ 人工确认（approved）”把经验沉淀为个人 skills。
+
+关键点与风险：
+- **数据归属为个人（v1=单机单用户）**：v1 可将 `principal_id` 视为隐式常量（例如 `local`），避免引入账号系统；多用户/SSO 作为后续变更单独推进。
+- **中间态是质量闸门**：自动提炼的 SOP 默认不启用，必须人工确认；并且确认前最好允许编辑（scope/步骤），避免误学污染未来任务。
+- **落盘与检索的成本**：Receipt/Digest/SOP suggestions 会明显增加数据量，必须与现有 `LOG_RETENTION_DAYS` 清理策略联动，避免长期运行膨胀。
+- **与 skills source 的关系**：启用后的 SOP 走 oneAgent-managed personal skills 路径，需要把 discovery/recall 的 source 矩阵扩展好，并保持 precedence 清晰（workspace > personal > builtin）。
+
 ## 模块冲突与交叉影响（active changes，按优先级）
 - **Windows 兼容是平台地基**：`shell/rg/workspace chooser` 的跨平台抽象如果不先做，后续 onboarding/task queue 会在 Windows 上全部不可用。
 - **workspace 是一切自动化的地基**：Task/plan/subagent 的写入边界必须一致；workspace-first onboarding 是 task queue 的 UX 前置条件（否则用户一进来就创建 task，但工具作用域不清晰）。
@@ -63,6 +74,7 @@
 1. **add-windows-support**：先把 Windows 的 build/run 与关键工具（command/search/workspace chooser）跑通，否则后续任何“进来就开干/无人值守交付”在 Windows 都不可用。
 2. **update-workspace-first-onboarding**：在跨平台基础可用后，把 workspace 入口前置并形成“新会话选 workspace”的闭环，再加 `--open/--workspace` 降低首次使用成本。
 3. **add-autonomous-task-queue**：在 workspace UX 稳定后引入 Task/Queue/Resume/Observer；否则会被“工具作用域不明确”拖垮整体可靠性。
+4. **add-work-ledger-sop-learning**：在任务与产物留痕跑通后，把 Receipt/Digest/SOP（人工确认）做成“可积累资产”，形成留存与复用的复利。
 
 ## 历史 review（archived changes，供背景参考）
 
