@@ -57,11 +57,16 @@ oneAgent 当前以 Web 应用形态运行：后端（Go/Gin）对外提供 UI �
         <session_id>/
           session.json
           messages.jsonl
-    logs/                   # 日志：trace/llm/subagent 等（按日期 + session_id 分层）
-      trace/YYYY-MM-DD/<session_id>/trace.jsonl
+    logs/                   # 日志：llm/subagent 等（按日期 + session_id 分层）
       llm/YYYY-MM-DD/<session_id>/<call_id>.json
       subagent/YYYY-MM-DD/<session_id>/<run_id>/...
     tmp/                    # 临时文件（可清理）
+```
+
+项目私有数据（不进入 git）：
+```
+<workspace>/
+  .oneagent/
     skills/                 # 项目私有 skills（若使用）
     PLAN.md                 # 计划文件（若启用 plan 模块）
 ```

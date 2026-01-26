@@ -16,7 +16,7 @@
 - 对 `edit` / `write_file` 来说，字段被污染后会导致参数校验失败或路径解析失败。
 
 建议（提示词侧）：
-- 只要使用 `<![CDATA[`，必须闭合为 `]]>`；不要把 `<![CDATA[` 当作普通文本写进字段值里。
+- **尽量不要显式输出 `<![CDATA[...]]>`**（系统默认按“节点内容纯文本”解析）；若确实输出 `<![CDATA[`，必须闭合为 `]]>`，且不要把 `<![CDATA[` 当作普通文本写进字段值里。
 
 工程侧缓解（已做）：
 - XML 解析器对“未闭合 CDATA”做容错：会剥离 `<![CDATA[` 前缀，避免把 `<` 传给下游工具。
@@ -75,7 +75,7 @@
 
 ## 二、你可以怎么改提示词（最有效的几条）
 
-- 强制 XML 工具调用时 CDATA 必须闭合：`<![CDATA[` 与 `]]>` 成对出现。
+- 提示词中不要出现 `CDATA`；默认按“节点内容纯文本”解析，避免模型模仿输出 `<![CDATA[` 导致 `]]>` 漏写。
 - 明确“写文件用 write_file、改文件用 edit；不要在 bash 里用 heredoc/echo 重定向写文件”。
 - 明确 bash 沙箱禁用命令清单（至少列出最常见踩坑：`node/npm/find/touch/sudo/apt-get/pip`）。
 - 强制写文件用 `write_file`（`filePath+content`），改文件用 `edit`（`filePath+oldcontent/newcontent`）；`edit` 不支持 `command`/`apply_edit`。

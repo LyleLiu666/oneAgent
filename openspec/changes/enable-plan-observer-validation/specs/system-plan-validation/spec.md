@@ -8,7 +8,7 @@
 #### Scenario: 默认创建计划文件
 - **GIVEN** 会话启用 workspace，根目录为 `<workspace>/`
 - **WHEN** 系统初始化计划
-- **THEN** 在 `ONEAGENT_HOME/.oneagent/PLAN.md` 创建计划文件（当启用 workspace 时 `ONEAGENT_HOME=<workspace>/`）
+- **THEN** 在 `<workspace>/.oneagent/PLAN.md` 创建计划文件
 
 ### Requirement: 标记 done 需要观察者校验（TDD）
 系统必须 (MUST) 在任务被标记为 done 时引入观察者校验：只有当观察者判定任务达标时，该任务才会被真正写为 done；否则必须拒绝标记并返回原因。
@@ -44,7 +44,7 @@
 - **THEN** `plan.mark_done` 失败并返回可操作的失败原因
 
 ### Requirement: 任务可声明 scope 并用于约束写入范围
-系统必须 (MUST) 支持在计划任务中声明可编辑范围（scope，glob 规则，基于 `ONEAGENT_HOME` 的相对路径），并在执行该任务的 agent/subagent 文件写操作时强制执行越界拦截。
+系统必须 (MUST) 支持在计划任务中声明可编辑范围（scope，glob 规则，基于 `<workspace>/` 的相对路径），并在执行该任务的 agent/subagent 文件写操作时强制执行越界拦截。
 
 #### Scenario: scope 越界写入被拒绝
 - **GIVEN** 任务 T1 的 scope 为 `backend/**`

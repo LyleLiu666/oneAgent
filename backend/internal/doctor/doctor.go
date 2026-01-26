@@ -29,6 +29,8 @@ type Report struct {
 	OS               string
 	Arch             string
 	Profile          string
+	Bind             string
+	Port             string
 	AuthMode         string
 	OneAgentHome     string
 	SettingsDBPath   string
@@ -58,6 +60,8 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 		OS:               stdruntime.GOOS,
 		Arch:             stdruntime.GOARCH,
 		Profile:          rt.Config.Profile,
+		Bind:             rt.Config.Bind,
+		Port:             rt.Config.Port,
 		AuthMode:         rt.Config.AuthMode,
 		OneAgentHome:     rt.Layout.Home,
 		SettingsDBPath:   rt.Layout.SettingsDBPath,
@@ -135,7 +139,7 @@ func Format(report Report) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "oneagent doctor (%s)\n", strings.TrimSpace(report.Version))
 	fmt.Fprintf(&b, "build: commit=%s date=%s os=%s arch=%s\n", report.Commit, report.BuildDate, report.OS, report.Arch)
-	fmt.Fprintf(&b, "profile=%s auth_mode=%s\n", report.Profile, report.AuthMode)
+	fmt.Fprintf(&b, "profile=%s listen=%s:%s auth_mode=%s\n", report.Profile, report.Bind, report.Port, report.AuthMode)
 	fmt.Fprintf(&b, "home=%s\n", report.OneAgentHome)
 	fmt.Fprintf(&b, "settings_db=%s\n", report.SettingsDBPath)
 	fmt.Fprintf(&b, "auth_token_file=%s\n", report.AuthTokenPath)

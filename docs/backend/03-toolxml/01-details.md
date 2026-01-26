@@ -54,11 +54,13 @@ func RunLoop(
     <tool_name>bash</tool_name>
     <tool_call_id>xml_0_0</tool_call_id>
     <ok>true</ok>
-    <output><![CDATA[{"stdout":"...","exit_code":0}]]></output>
+    <output>{"stdout":"...","exit_code":0}</output>
     <error></error>
   </call>
 </tool_result>
 ```
+
+> 说明：ToolXML 是“类 XML tag 协议”而非严格 XML。系统默认将节点内容视为纯文本（类似“默认 CDATA”），不要求模型显式输出 `<![CDATA[...]]>`；工程侧会对 `<`/`&` 做必要转义，并对显式/不完整 CDATA 做容错。
 
 ### 1.3 Call 解析结构
 

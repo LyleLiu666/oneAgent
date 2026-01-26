@@ -4,7 +4,7 @@
 
 ## refactor-container-to-local-tool（容器运行 → 本地工具形应用）
 这是其它 4 个 change 的底座：引入 `oneagent` CLI、profile（local/dev）、Token Auth（替代 Keycloak/OAuth）、并重定义 “home/写入边界/目录契约”。
-- **home 规则已明确**：默认 `ONEAGENT_HOME=~/.oneagent_default`；启用 workspace 时 `ONEAGENT_HOME=<workspace>/`；home 之外禁止写/改/删。
+- **home/workspace 规则已明确**：默认 `ONEAGENT_HOME=~/.oneagent_default` 用于承载内部状态目录；workspace 是会话级可选“工具根目录/写入边界”，文件写/改/删默认只能发生在 `<workspace>/` 内（系统不强制自动切换 `ONEAGENT_HOME`；如需“项目私有数据”，可通过 `--home <workspace>` 让两者一致）。
 - **目录契约已统一**：内部状态统一落在 `ONEAGENT_HOME/.oneagent/`（去掉 `sandbox/` 说法）。
 - **存储策略已明确**：不支持 Postgres / `DATABASE_URL`；Settings 用 SQLite `ONEAGENT_HOME/.oneagent/settings.db`；其它状态（会话/trace/logs）走文件存储 `ONEAGENT_HOME/.oneagent/{data,logs}`。
 - **已知限制**：`bash/run_command` 可能绕过文件工具层的 home/scope 校验；出于灵活性与实现成本考虑，当前采取“强引导而非硬拦截”（默认 root 对齐 workspace/home + 清晰提示），不做强制禁止。
@@ -23,15 +23,15 @@
 ## enable-subagent-orchestration（子 Agent 编排）
 该特性通过隔离上下文的 subagent 来执行步骤，并用“短总结 + findings 引用”控制主上下文膨胀。
 - **交付件**：每步产出 `FINDINGS.md` + `trace.jsonl`，落 `ONEAGENT_HOME/.oneagent/logs/subagent/YYYY-MM-DD/<session_id>/<run_id>/...`；主 agent 仅保留 `summary + findings_path/trace_log_path`。
-- **scope**：子 agent 可写范围使用 glob（相对 `ONEAGENT_HOME`），由文件工具层强制越界拦截；默认串行执行，避免并发编辑引入锁与长等待。
+- **scope**：子 agent 可写范围使用 glob（相对 `<workspace>/` 的相对路径），由文件工具层强制越界拦截；默认串行执行，避免并发编辑引入锁与长等待。
 - **联动**：按步骤调用 skills recall Top-K，并把 skills 摘要写入子 agent TurnContext（volatile）可作为增强项（不得回写稳定 system prompt）。
 
 主要风险是资源治理（max_steps/max_runtime/log 大小）、日志轮转清理、失败重试语义；这些如果不尽早定，容易出现“能跑但不可控/不可运维”的情况。
 
 ## enable-plan-observer-validation（计划模块 + 观察者验收）
 该特性把“TDD/验收”变成系统机制：任务 done 必须经 observer 校验通过才写回。
-- **PLAN 路径**：`ONEAGENT_HOME/.oneagent/PLAN.md`（启用 workspace 时 `ONEAGENT_HOME=<workspace>/`）。
-- **scope**：使用 glob（相对 `ONEAGENT_HOME`），规则已在 design 中补全；scope enforcement 在文件工具层统一执行，且 plan/subagent/文件工具三方必须复用同一实现。
+- **PLAN 路径**：`<workspace>/.oneagent/PLAN.md`（项目私有；不进入 git）。
+- **scope**：使用 glob（相对 `<workspace>/` 的相对路径），规则已在 design 中补全；scope enforcement 在文件工具层统一执行，且 plan/subagent/文件工具三方必须复用同一实现。
 - **验收策略已明确**：默认只做“文件内容/结构”验收（例如 `files` + `must_contain`），不执行命令；如需 `go test` 等命令验收，后续以单独变更引入（避免扩大执行面）。
 - **已知限制**：同样存在 `bash/run_command` 可能绕过 scope 的问题；当前采取“强引导而非硬拦截”（默认 root 对齐 workspace/home + 清晰提示），不做强制禁止。
 
@@ -42,7 +42,7 @@
 - **观测落点**：缓存指标进入 trace，同时将每次 LLM 调用的完整 request/response（含 messages）写入日志文件（替代原先入库的做法），trace 仅保存摘要与指针。
 
 ## 模块冲突与交叉影响（按优先级）
-- **`ONEAGENT_HOME`/`.oneagent/` 目录契约**：token/plan/skills/subagent logs 的路径必须统一，否则 docs 与实现会分叉。
+- **目录契约**：`ONEAGENT_HOME/.oneagent/` 承载内部状态（token/settings/sessions/logs）；`<workspace>/.oneagent/` 承载项目私有数据（skills/PLAN）。两者不要混用口径，否则 docs 与实现会分叉。
 - **文件存储约定**：会话相关文件建议按 `session_id` 分目录/分文件；trace/llm/subagent logs 统一在 `ONEAGENT_HOME/.oneagent/logs/` 下分层，避免各模块各写一套。
 - **scope=glob 的统一实现**：plan/subagent/文件工具必须共用同一套“path 规范化 + glob match”规则（含 symlink 与 `..` 处理）。
 - **`rg` 依赖**：skills recall（以及未来可能的文件验收）依赖 `rg` 的可用性，需要 `doctor` 提示安装，并在缺失时允许降级为 `grep -R`。

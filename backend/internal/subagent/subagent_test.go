@@ -215,3 +215,42 @@ func TestRun_TruncatesSummary(t *testing.T) {
 		t.Fatalf("expected summary to be truncated, got %d runes", utf8.RuneCountInString(got.Summary))
 	}
 }
+
+func TestParseHandoffXML_ToleratesRawTextAndMalformedXML(t *testing.T) {
+	t.Run("raw angle brackets and ampersands", func(t *testing.T) {
+		input := `<subagent_handoff>
+  <summary>ok</summary>
+  <timeline>## 流水账
+- emitted <tool_data> and & chars</timeline>
+  <findings>## Findings
+- ok</findings>
+</subagent_handoff>`
+
+		summary, timeline, findings, changed := parseHandoffXML(input)
+		if summary != "ok" {
+			t.Fatalf("expected summary ok, got %q", summary)
+		}
+		if !strings.Contains(timeline, "<tool_data>") || !strings.Contains(timeline, "&") {
+			t.Fatalf("expected timeline to preserve raw text, got %q", timeline)
+		}
+		if !strings.Contains(findings, "## Findings") {
+			t.Fatalf("expected findings to contain header, got %q", findings)
+		}
+		if changed != "" {
+			t.Fatalf("expected changed_files empty, got %q", changed)
+		}
+	})
+
+	t.Run("missing closing tags", func(t *testing.T) {
+		input := `<subagent_handoff><summary>done</summary><findings>## Findings
+- ok`
+
+		summary, _, findings, _ := parseHandoffXML(input)
+		if summary != "done" {
+			t.Fatalf("expected summary done, got %q", summary)
+		}
+		if !strings.Contains(findings, "## Findings") || !strings.Contains(findings, "- ok") {
+			t.Fatalf("expected findings to be extracted, got %q", findings)
+		}
+	})
+}

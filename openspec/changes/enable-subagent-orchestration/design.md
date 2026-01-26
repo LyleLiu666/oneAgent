@@ -111,7 +111,7 @@ findings 文件中包含两类核心信息：
 ## 并发与文件作用域 (Concurrency & File Scope)
 默认采用**串行** subagent（避免并发编辑同一资源带来的锁与长等待）。
 
-如果未来需要并发 subagent，建议依赖一个“计划/分工”模块，在启动并发 subagent 前先划定每个 subagent 的可编辑范围（scope，glob 规则，基于 `ONEAGENT_HOME` 的相对路径），并在文件工具层强制校验：
+如果未来需要并发 subagent，建议依赖一个“计划/分工”模块，在启动并发 subagent 前先划定每个 subagent 的可编辑范围（scope，glob 规则，基于 `<workspace>/` 的相对路径），并在文件工具层强制校验：
 - 子 Agent 只能对 scope 内文件做写/改/删；越界则返回可理解错误，促使其重试或调整计划
 - 通过“分区”优先规避全局锁；锁仅作为最后手段（例如短时间文件级锁）
 

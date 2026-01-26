@@ -17,7 +17,7 @@ Plan 是一个文件化的任务清单，每个任务至少包含：
 - `scope`（可选）：允许修改的目录范围（用于 subagent 分工与越界拦截）
 
 默认路径（项目私有、避免进 git）：
-- `ONEAGENT_HOME/.oneagent/PLAN.md`（当启用 workspace 时 `ONEAGENT_HOME=<workspace>/`）
+- `<workspace>/.oneagent/PLAN.md`
 
 ### 2) Observer（观察者）
 Observer 是一次独立的校验执行单元：
@@ -29,7 +29,7 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 
 验收策略（默认）：
 - observer 仅基于 `acceptance.files` 与可选的“文件内容断言”（例如 `acceptance.must_contain`）判定 pass/fail
-- 所有验收涉及的文件路径必须位于 `ONEAGENT_HOME` 内；若 task 声明了 `scope`，则还必须匹配 `scope`（glob）
+- 所有验收涉及的文件路径必须位于 `<workspace>/` 内；若 task 声明了 `scope`，则还必须匹配 `scope`（glob）
 
 ## Plan 文件格式（默认）
 优先采用“可读 + 易解析”的 Markdown 结构，类似现有 `tasks.md`：
@@ -52,14 +52,14 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 - 任务行用 `- [ ]` / `- [x]` 表示状态
 - `<!-- id: ... -->` 提供稳定 id
 - `scope:`、`acceptance:` 作为语义块（缩进的子项）
-- `scope` 使用 glob（相对 `ONEAGENT_HOME` 的相对路径），用于约束该任务允许写入/修改的范围
+- `scope` 使用 glob（相对 `<workspace>/` 的相对路径），用于约束该任务允许写入/修改的范围
 
 ### Scope（glob）规则（默认）
-- scope 是一个 glob 列表（允许 `*`、`?`、`**`），匹配对象为“相对 `ONEAGENT_HOME` 的相对路径”，路径分隔符统一使用 `/`。
+- scope 是一个 glob 列表（允许 `*`、`?`、`**`），匹配对象为“相对 `<workspace>/` 的相对路径”，路径分隔符统一使用 `/`。
 - 默认大小写敏感；不支持否定模式（例如 `!foo/**`）。
 - glob 不得是绝对路径（不得以 `/` 开头），不得包含 `..` 片段；发现非法 scope 时必须直接报错。
 - 判断某个文件是否可写时，系统必须同时满足：
-  1) 目标路径解析后位于 `ONEAGENT_HOME` 内（防止 `..` 与 symlink 越界）
+  1) 目标路径解析后位于 `<workspace>/` 内（防止 `..` 与 symlink 越界）
   2) 若 scope 非空，则目标相对路径至少匹配一个 glob
 - scope 的 path 规范化与 glob 匹配逻辑必须由 plan/subagent/文件工具三方复用同一实现（避免规则漂移）。
 
@@ -72,7 +72,7 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 - `plan(action=mark_done, task_id)` → 触发 observer 校验；通过则写回 `PLAN.md`，失败则返回失败原因并不写回
 
 ### observer runner（系统内部）
-- `observer.validate(oneagent_home, task)` → `{pass, reason, evidence?}`
+- `observer.validate(workspace_root, task)` → `{pass, reason, evidence?}`
 
 关键约束：
 - `plan.mark_done` 必须是“原子操作”：要么校验通过并写回，要么失败且不更改状态
@@ -84,7 +84,7 @@ Observer 不需要看到主/子 Agent 的对话上下文，也不需要读取 tr
 - subagent 若调用 `plan.mark_done`：
   - 结果必须自动拼接进 subagent handoff（summary/findings）中，便于主 Agent 了解任务是否真正验收通过
 
-> 已知限制：`bash/run_command` 在宿主机上运行，可能绕过文件工具层的 scope 校验。出于灵活性与实现成本考虑（也无法彻底防止通过脚本/编辑器修改文件），当前不做硬性拦截，仅做强引导：默认 `BASH_ROOT_DIR` 对齐 `ONEAGENT_HOME`（workspace），并在提示词/错误信息中强调“优先用文件工具修改文件；bash 主要用于只读/运行命令”。
+> 已知限制：`bash/run_command` 在宿主机上运行，可能绕过文件工具层的 scope 校验。出于灵活性与实现成本考虑（也无法彻底防止通过脚本/编辑器修改文件），当前不做硬性拦截，仅做强引导：默认 `BASH_ROOT_DIR` 对齐 `<workspace>`，并在提示词/错误信息中强调“优先用文件工具修改文件；bash 主要用于只读/运行命令”。
 
 ## 并发策略（后置）
 并发 subagent 的必要条件：

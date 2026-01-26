@@ -7,7 +7,7 @@
 - [x] 可观测性：trace 记录 `subagent` 条目并关联 parent，同时包含 `findings_path`/`trace_log_path` 指针 <!-- id: 5 -->
 - [x] 日志落盘：按日期 + session_id 分类存放子 Agent 完整痕迹（写入 `ONEAGENT_HOME/.oneagent/logs/`，格式 jsonl） <!-- id: 6 -->
 - [x] 与技能联动：子 Agent 启动时按步骤任务调用技能召回，并将 Top-K skills 摘要写入子 Agent TurnContext（volatile）（不得回写稳定 system prompt；若不可用则跳过） <!-- id: 7 -->
-- [x] 文件作用域：支持对子 Agent 传入可写 scope（glob 规则，基于 `ONEAGENT_HOME` 的相对路径），并在文件工具层强制校验越界写/改/删 <!-- id: 12 -->
+- [x] 文件作用域：支持对子 Agent 传入可写 scope（glob 规则，基于 `<workspace>/` 的相对路径），并在文件工具层强制校验越界写/改/删 <!-- id: 12 -->
 - [x] 限制参数：max_steps/max_runtime/log 大小等提供配置项，并设置“偏大”的默认值（面向生产级长任务） <!-- id: 13 -->
 - [x] 单元测试：
   - [x] findings 文件生成与结构校验 <!-- id: 8 -->

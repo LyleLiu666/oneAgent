@@ -16,7 +16,7 @@
 ## 建议方案 (Proposed Solution)
 ### 1) 计划文件（Plan File）
 默认在 workspace 下生成项目私有计划文件：
-- 路径建议：`ONEAGENT_HOME/.oneagent/PLAN.md`（不进入 git；当启用 workspace 时 `ONEAGENT_HOME=<workspace>/`）
+- 路径建议：`<workspace>/.oneagent/PLAN.md`（项目私有；不进入 git）
 - 计划内容包含：任务列表、每个任务的验收标准（acceptance criteria）、可选的编辑范围（scope）
 
 ### 2) Plan 工具（Plan Tool）
