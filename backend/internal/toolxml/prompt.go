@@ -96,6 +96,18 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("  <max_results>50</max_results>（可选，默认 50，最大 200；达到上限会提前终止并标记 truncated=true）\n")
 			b.WriteString("  <fixed_strings>true</fixed_strings>（可选；true=字面量搜索）\n")
 			b.WriteString("  说明：若环境未安装 rg，将返回 available=false（工具调用 ok=true），你需要自行决定下一步（例如改用 bash）。\n")
+		case "subagent":
+			b.WriteString("- subagent（启动一个隔离上下文的子 Agent 执行独立步骤；返回短总结 + 引用路径）：\n")
+			b.WriteString("  <tool_name>subagent</tool_name>\n")
+			b.WriteString("  <task>...</task>\n")
+			b.WriteString("  <context_summary>...</context_summary>（可选；前序步骤短总结 + findings/trace 引用）\n")
+			b.WriteString("  <scope><![CDATA[[\"backend/**\"]]]></scope>（可选；可写范围 glob，JSON 数组或逗号分隔列表）\n")
+			b.WriteString("  <tool_ids><![CDATA[[\"edit\",\"write_file\",\"rg\"]]]></tool_ids>（可选；允许工具 ID 列表；默认继承主工具集但不含 subagent）\n")
+			b.WriteString("  <skill_ids><![CDATA[[\"translator\"]]]></skill_ids>（可选；显式注入的技能 ID 列表）\n")
+			b.WriteString("  <k_skills>3</k_skills>（可选；自动召回并注入的技能 Top-K，0=不注入，默认 3）\n")
+			b.WriteString("  <max_steps>200</max_steps>（可选；默认 200）\n")
+			b.WriteString("  <max_runtime_seconds>3600</max_runtime_seconds>（可选；默认 3600）\n")
+			b.WriteString("  说明：默认禁止递归（子 Agent 不挂载 subagent 工具本身）。\n")
 		default:
 			if strings.TrimSpace(name) != "" {
 				b.WriteString(fmt.Sprintf("- %s: not documented\n", name))

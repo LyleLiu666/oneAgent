@@ -89,7 +89,24 @@ func firstParagraph(text string, maxRunes int) string {
 		return ""
 	}
 	parts := strings.Split(trimmed, "\n\n")
-	para := strings.TrimSpace(parts[0])
+	para := ""
+	for _, part := range parts {
+		candidate := strings.TrimSpace(part)
+		if candidate == "" {
+			continue
+		}
+		if strings.HasPrefix(candidate, "#") {
+			continue
+		}
+		if strings.HasPrefix(candidate, ">") {
+			continue
+		}
+		if strings.HasPrefix(candidate, "```") {
+			continue
+		}
+		para = candidate
+		break
+	}
 	if para == "" {
 		return ""
 	}
@@ -114,4 +131,3 @@ func readSkillFile(path string, maxBytes int64) ([]byte, error) {
 	}
 	return data, nil
 }
-

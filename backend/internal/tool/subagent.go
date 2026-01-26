@@ -1,0 +1,241 @@
+package tool
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
+	"github.com/liu_y/oneAgent/backend/internal/subagent"
+)
+
+type subagentToolRequest struct {
+	Task           string   `json:"task"`
+	ContextSummary string   `json:"context_summary,omitempty"`
+	ToolIDs        []string `json:"tool_ids,omitempty"`
+	Scope          []string `json:"scope,omitempty"`
+
+	MaxSteps          int `json:"max_steps,omitempty"`
+	MaxRuntimeSeconds int `json:"max_runtime_seconds,omitempty"`
+
+	KSkills int `json:"k_skills,omitempty"`
+}
+
+type subagentToolResult struct {
+	OK bool `json:"ok"`
+
+	Summary      string `json:"summary,omitempty"`
+	FindingsPath string `json:"findings_path,omitempty"`
+	TraceLogPath string `json:"trace_log_path,omitempty"`
+	RunID        string `json:"run_id,omitempty"`
+	DurationMs   int64  `json:"duration_ms,omitempty"`
+
+	PlanMarkDone []subagent.PlanMarkDoneRecord `json:"plan_mark_done,omitempty"`
+
+	Error string `json:"error,omitempty"`
+}
+
+func subagentDefinition() Definition {
+	spec := llm.Tool{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "subagent",
+			Description: "启动一个隔离上下文的子 Agent 执行一个独立步骤。输入 task（必填）+ 可选 context_summary/scope/tool_ids/max_steps/max_runtime_seconds/k_skills；输出短总结 summary + findings_path/trace_log_path 指针。默认禁止递归（子 Agent 不挂载 subagent 工具本身）。",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"task": map[string]any{
+						"type":        "string",
+						"description": "本步骤要完成的任务描述（必填）。",
+					},
+					"context_summary": map[string]any{
+						"type":        "string",
+						"description": "（可选）前序步骤短总结与引用（路径）。",
+					},
+					"tool_ids": map[string]any{
+						"type":        "array",
+						"description": "（可选）子 Agent 允许使用的工具 ID 列表；为空则默认使用主工具集（排除 subagent 本身）。",
+						"items":       map[string]any{"type": "string"},
+					},
+					"scope": map[string]any{
+						"type":        "array",
+						"description": "（可选）子 Agent 可写范围（glob，基于 workspace 根目录的相对路径）。越界写/改/删会被拒绝。",
+						"items":       map[string]any{"type": "string"},
+					},
+					"max_steps": map[string]any{
+						"type":        "integer",
+						"description": "（可选）最大工具调用步数（默认 200）。",
+						"minimum":     1,
+					},
+					"max_runtime_seconds": map[string]any{
+						"type":        "integer",
+						"description": "（可选）最长运行时间秒（默认 3600）。",
+						"minimum":     1,
+					},
+					"k_skills": map[string]any{
+						"type":        "integer",
+						"description": "（可选）按步骤自动注入的技能 Top-K（默认 3；0=不注入）。",
+						"minimum":     0,
+						"maximum":     8,
+					},
+				},
+				"required":             []string{"task"},
+				"additionalProperties": false,
+			},
+		},
+	}
+
+	return newDefinition(ToolIDSubagent, spec, runSubagentTool)
+}
+
+func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
+	var req subagentToolRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+
+	task := strings.TrimSpace(req.Task)
+	if task == "" {
+		return nil, errors.New("task is required")
+	}
+
+	sessionID := strings.TrimSpace(SessionIDFromContext(ctx))
+	if sessionID == "" {
+		return nil, errors.New("missing session context")
+	}
+
+	userID := strings.TrimSpace(UserIDFromContext(ctx))
+
+	layout := RuntimeLayoutFromContext(ctx)
+	if layout == nil {
+		return nil, errors.New("missing runtime layout")
+	}
+
+	client := LLMClientFromContext(ctx)
+	if client == nil {
+		return nil, errors.New("missing llm client")
+	}
+
+	systemPrompt := SystemPromptFromContext(ctx)
+
+	ws := WorkspaceFromContext(ctx)
+	workspaceRoot := ""
+	if ws.Enabled {
+		workspaceRoot = ws.Root
+	}
+
+	// Build tool set for subagent (exclude subagent itself to prevent recursion).
+	ids := req.ToolIDs
+	if len(ids) == 0 {
+		for _, def := range All() {
+			if def.ID == ToolIDSubagent {
+				continue
+			}
+			ids = append(ids, def.ID)
+		}
+	} else {
+		filtered := make([]string, 0, len(ids))
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" || id == ToolIDSubagent {
+				continue
+			}
+			filtered = append(filtered, id)
+		}
+		ids = filtered
+	}
+
+	defs, err := Mount(ids)
+	if err != nil {
+		return nil, err
+	}
+
+	handlers := make(map[string]subagent.ToolHandler, len(defs))
+	for _, def := range defs {
+		handlers[def.Spec.Function.Name] = subagent.ToolHandler(def.Handler)
+	}
+
+	subCtx := ctx
+	subCtx = ContextWithWorkspace(subCtx, WorkspaceConfig{
+		Enabled:    ws.Enabled,
+		Root:       ws.Root,
+		WriteScope: req.Scope,
+	})
+
+	skillsSummary := ""
+	k := req.KSkills
+	if k == 0 {
+		k = 3
+	}
+	if k > 0 {
+		manager := SkillManagerFromContext(ctx)
+		if manager != nil {
+			loadCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			cat, err := manager.Load(loadCtx, workspaceRoot)
+			cancel()
+			if err == nil && cat != nil && len(cat.Skills) > 0 {
+				res, err := skillrecall.Search(ctx, cat, task, skillrecall.Options{MaxResults: k, Timeout: 2 * time.Second}, nil)
+				if err == nil && len(res.Candidates) > 0 {
+					var b strings.Builder
+					for _, cand := range res.Candidates {
+						if cand.Score <= 0 {
+							continue
+						}
+						b.WriteString("- ")
+						b.WriteString(strings.TrimSpace(cand.Skill.Name))
+						b.WriteString(": ")
+						if strings.TrimSpace(cand.Skill.Description) != "" {
+							b.WriteString(strings.TrimSpace(cand.Skill.Description))
+						} else {
+							b.WriteString("（无描述）")
+						}
+						b.WriteString(" (")
+						b.WriteString(string(cand.Skill.Source))
+						b.WriteString(")\n")
+					}
+					if b.Len() > 0 {
+						b.WriteString("如需使用某个技能，请先调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`。\n")
+						skillsSummary = b.String()
+					}
+				}
+			}
+		}
+	}
+
+	result, runErr := subagent.Run(subCtx, subagent.RunRequest{
+		ParentSessionID: sessionID,
+		UserID:          userID,
+		SystemPrompt:    systemPrompt,
+		Client:          client,
+		Tools:           ToolsForLLM(defs),
+		Handlers:        handlers,
+		WorkspaceRoot:   workspaceRoot,
+		WriteScope:      req.Scope,
+		LogsBaseDir:     layout.SubagentLogsDir,
+		Task:            task,
+		ContextSummary:  strings.TrimSpace(req.ContextSummary),
+		SkillsSummary:   skillsSummary,
+		MaxSteps:        req.MaxSteps,
+		MaxRuntimeSeconds: req.MaxRuntimeSeconds,
+	})
+
+	if runErr != nil {
+		return subagentToolResult{
+			OK:    false,
+			Error: runErr.Error(),
+		}, nil
+	}
+
+	return subagentToolResult{
+		OK:          true,
+		Summary:      result.Summary,
+		FindingsPath: result.FindingsPath,
+		TraceLogPath: result.TraceLogPath,
+		RunID:        result.RunID,
+		DurationMs:   result.DurationMs,
+		PlanMarkDone: result.PlanMarkDone,
+	}, nil
+}

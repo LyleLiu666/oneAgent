@@ -21,6 +21,7 @@ const (
 	ToolIDSearch     = "search"
 	ToolIDRunCommand = "run_command"
 	ToolIDSkillRead  = "skill_read"
+	ToolIDSubagent   = "subagent"
 	ToolIDWriteFile  = "write_file"
 )
 
@@ -80,6 +81,7 @@ var registry = map[string]Definition{
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
 	ToolIDSkillRead:  skillReadDefinition(),
+	ToolIDSubagent:   subagentDefinition(),
 	ToolIDWriteFile:  writeFileDefinition(),
 }
 

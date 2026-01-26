@@ -3,6 +3,7 @@ package skillrecall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -133,6 +134,36 @@ func TestSearch_FallsBackToGrepWhenRgMissing(t *testing.T) {
 	}
 }
 
+func TestSearch_WithManySkills_ReturnsTop8(t *testing.T) {
+	skills := make([]skill.Skill, 0, 1200)
+	for i := 0; i < 1200; i++ {
+		id := fmt.Sprintf("skill-%04d", i)
+		skills = append(skills, skill.Skill{
+			ID:          id,
+			Name:        id,
+			Description: "desc",
+			Path:        "/tmp/" + id + "/SKILL.md",
+			Source:      skill.SourceClaude,
+		})
+	}
+
+	cat := &skill.Catalog{Skills: skills}
+	lookPath := func(name string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	res, err := Search(context.Background(), cat, "please use skill-0999", Options{MaxResults: 8, Timeout: 200 * time.Millisecond}, lookPath)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res.Candidates) != 8 {
+		t.Fatalf("expected 8 candidates, got %d", len(res.Candidates))
+	}
+	if res.Candidates[0].Skill.ID != "skill-0999" {
+		t.Fatalf("expected top=skill-0999, got %q", res.Candidates[0].Skill.ID)
+	}
+}
+
 func writeFakeCountBinary(t *testing.T, path string) string {
 	t.Helper()
 
@@ -171,4 +202,3 @@ exit 1
 	}
 	return path
 }
-

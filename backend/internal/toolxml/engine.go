@@ -676,6 +676,65 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		data, err := json.Marshal(payload)
 		return data, string(data), err
 
+	case "subagent":
+		task := strings.TrimSpace(fields["task"])
+		if task == "" {
+			return nil, "", errors.New("missing task")
+		}
+
+		payload := map[string]any{
+			"task": task,
+		}
+
+		if summary := strings.TrimSpace(fields["context_summary"]); summary != "" {
+			payload["context_summary"] = summary
+		}
+		if rawToolIDs := strings.TrimSpace(fields["tool_ids"]); rawToolIDs != "" {
+			ids, err := parseStringList(rawToolIDs)
+			if err != nil {
+				return nil, "", fmt.Errorf("tool_ids: %w", err)
+			}
+			if len(ids) > 0 {
+				payload["tool_ids"] = ids
+			}
+		}
+		if rawScope := strings.TrimSpace(fields["scope"]); rawScope != "" {
+			scopePatterns, err := parseStringList(rawScope)
+			if err != nil {
+				return nil, "", fmt.Errorf("scope: %w", err)
+			}
+			if len(scopePatterns) > 0 {
+				payload["scope"] = scopePatterns
+			}
+		}
+		if rawSkillIDs := strings.TrimSpace(fields["skill_ids"]); rawSkillIDs != "" {
+			skillIDs, err := parseStringList(rawSkillIDs)
+			if err != nil {
+				return nil, "", fmt.Errorf("skill_ids: %w", err)
+			}
+			if len(skillIDs) > 0 {
+				payload["skill_ids"] = skillIDs
+			}
+		}
+		if rawMaxSteps := strings.TrimSpace(fields["max_steps"]); rawMaxSteps != "" {
+			if maxSteps, err := strconv.Atoi(rawMaxSteps); err == nil && maxSteps > 0 {
+				payload["max_steps"] = maxSteps
+			}
+		}
+		if rawMaxRuntime := strings.TrimSpace(fields["max_runtime_seconds"]); rawMaxRuntime != "" {
+			if maxRuntime, err := strconv.Atoi(rawMaxRuntime); err == nil && maxRuntime > 0 {
+				payload["max_runtime_seconds"] = maxRuntime
+			}
+		}
+		if rawKSkills := strings.TrimSpace(fields["k_skills"]); rawKSkills != "" {
+			if kSkills, err := strconv.Atoi(rawKSkills); err == nil && kSkills >= 0 {
+				payload["k_skills"] = kSkills
+			}
+		}
+
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
 	default:
 		return nil, "", fmt.Errorf("unsupported tool: %s", toolName)
 	}
@@ -688,4 +747,37 @@ func parseBool(value string) bool {
 	}
 	b, err := strconv.ParseBool(trimmed)
 	return err == nil && b
+}
+
+func parseStringList(value string) ([]string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	if strings.HasPrefix(trimmed, "[") {
+		var out []string
+		if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+			return nil, errors.New("must be a JSON array of strings or a comma-separated list")
+		}
+		return out, nil
+	}
+
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		switch r {
+		case ',', '\n', '\r', '\t', ' ':
+			return true
+		default:
+			return false
+		}
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out, nil
 }

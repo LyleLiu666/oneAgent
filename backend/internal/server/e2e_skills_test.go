@@ -104,6 +104,8 @@ func TestE2E_Skills_TurnContextInjection_ExplicitSkillName(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("chat status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
+	// Drain the stream so the handler completes and the mock receives the request.
+	_, _ = io.ReadAll(resp.Body)
 
 	rawMsgs, _ := gotReq["messages"].([]any)
 	if len(rawMsgs) < 2 {
@@ -123,4 +125,3 @@ func TestE2E_Skills_TurnContextInjection_ExplicitSkillName(t *testing.T) {
 		t.Fatalf("expected skills turn context injected, got messages=%v", gotReq["messages"])
 	}
 }
-

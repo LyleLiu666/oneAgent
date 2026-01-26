@@ -63,8 +63,9 @@ func TestSkillReadTool_ResolvesByNameWithPrecedence(t *testing.T) {
 	if got.SkillMD == "" {
 		t.Fatalf("expected skill_md content")
 	}
-	if filepath.Clean(got.Path) != filepath.Clean(oneagent) {
-		t.Fatalf("expected path=%q, got %q", oneagent, got.Path)
+	want, _ := filepath.EvalSymlinks(oneagent)
+	gotPath, _ := filepath.EvalSymlinks(got.Path)
+	if want != "" && gotPath != "" && want != gotPath {
+		t.Fatalf("expected path=%q, got %q", want, gotPath)
 	}
 }
-

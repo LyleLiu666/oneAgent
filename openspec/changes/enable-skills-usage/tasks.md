@@ -1,28 +1,28 @@
 # 任务列表 (Tasks)
 
-- [ ] 定义技能来源：`<workspace>/.oneagent/skills`、`~/.claude/skills`、`~/.codex/skills`（三者默认启用；取并集后按 name 去重；同名冲突按稳定规则消解） <!-- id: 1 -->
-- [ ] 创建 `internal/skill`：扫描技能目录包（目录内 `SKILL.md`）并解析元数据（frontmatter + 回退策略） <!-- id: 2 -->
-- [ ] 支持目录 symlink：扫描时跟随 symlink 目录，且避免循环引用 <!-- id: 3 -->
-- [ ] 创建 `internal/skillrecall`：基于 metadata + `rg`（ripgrep）对 `SKILL.md` 内容做匹配计分，返回 Top-8（固定；稳定排序） <!-- id: 4 -->
-- [ ] 召回计分与排序规则：score 相同用 `skill_id`/`path` 做 tie-break；确保同一输入返回顺序稳定 <!-- id: 5 -->
-- [ ] `rg` 执行约束：默认跟随 symlink、限制最大匹配数/输出体积、并设置超时（避免极端目录导致卡死） <!-- id: 6 -->
-- [ ] CLI：`oneagent skills search`（返回 Top-8 + score） <!-- id: 7 -->
-- [ ] 新增 skill 读取工具：`skill.read`（输入 skill 名称/ID；返回对应 `SKILL.md` 原文作为工具输出；不得要求调用方提供文件路径；同名冲突时按来源优先级选择生效版本） <!-- id: 21 -->
-- [ ] 在 `backend/internal/handler/chat.go` 集成：
-  - [ ] 支持“语义显式指定技能名称”（不依赖特殊语法）：当用户明确表示要用某个技能时，解析/命中该技能并作为推荐技能（可跳过召回/选择或作为 override） <!-- id: 8 -->
-  - [ ] 否则：每次聊天前调用召回得到 Top-8，并取 Top-1 作为推荐技能（或 none） <!-- id: 9 -->
-- [ ] 更新 prompt 构建逻辑：在 Stable Prefix 之后追加 TurnContext（volatile），以**中文**写入“推荐技能摘要”（Top-1；而非 Top-8 全列表）；注入中必须引导使用 `skill.read`（按名称）读取 `SKILL.md`；不得回写稳定 system prompt，且该 TurnContext 不应被标记为 cacheable <!-- id: 10 -->
-- [ ] 单元测试：
-  - [ ] frontmatter 解析与回退策略 <!-- id: 11 -->
-  - [ ] 多来源合并与优先级覆盖 <!-- id: 12 -->
-  - [ ] symlink 跟随与循环检测 <!-- id: 13 -->
-  - [ ] `rg` 召回计分与 Top-8 截断（稳定顺序） <!-- id: 14 -->
-  - [ ] `rg` 不可用时的降级与提示：`doctor` 提示安装，同时召回可降级为 `grep -R` <!-- id: 15 -->
-  - [ ] 显式技能名解析与命中 <!-- id: 16 -->
-  - [ ] `skill.read`：按名称解析生效 skill 并返回 `SKILL.md` 原文（同名覆盖优先级生效） <!-- id: 22 -->
-- [ ] E2E 验证：
-  - [ ] `~/.claude/skills` 为 symlink 目录时仍可正常发现并召回 <!-- id: 17 -->
-  - [ ] 同时存在 `~/.codex`、`~/.claude` 与 `<workspace>/.oneagent` skills 时能取并集并按 name 去重（同名冲突规则生效） <!-- id: 18 -->
-  - [ ] 用户语义显式指定技能名时可正确命中并绕过召回/选择流程（或作为 override） <!-- id: 19 -->
-  - [ ] 模拟 1000+ skills 时仍保持可用（不把全量塞进 prompt，`rg` 召回仍可完成） <!-- id: 20 -->
-  - [ ] Agent 可仅凭技能名称调用 `skill.read` 并在上下文中获得 `SKILL.md` 内容继续执行 <!-- id: 23 -->
+- [x] 定义技能来源：`<workspace>/.oneagent/skills`、`~/.claude/skills`、`~/.codex/skills`（三者默认启用；取并集后按 name 去重；同名冲突按稳定规则消解） <!-- id: 1 -->
+- [x] 创建 `internal/skill`：扫描技能目录包（目录内 `SKILL.md`）并解析元数据（frontmatter + 回退策略） <!-- id: 2 -->
+- [x] 支持目录 symlink：扫描时跟随 symlink 目录，且避免循环引用 <!-- id: 3 -->
+- [x] 创建 `internal/skillrecall`：基于 metadata + `rg`（ripgrep）对 `SKILL.md` 内容做匹配计分，返回 Top-8（固定；稳定排序） <!-- id: 4 -->
+- [x] 召回计分与排序规则：score 相同用 `skill_id`/`path` 做 tie-break；确保同一输入返回顺序稳定 <!-- id: 5 -->
+- [x] `rg` 执行约束：默认跟随 symlink、限制最大匹配数/输出体积、并设置超时（避免极端目录导致卡死） <!-- id: 6 -->
+- [x] CLI：`oneagent skills search`（返回 Top-8 + score） <!-- id: 7 -->
+- [x] 新增 skill 读取工具：`skill.read`（输入 skill 名称/ID；返回对应 `SKILL.md` 原文作为工具输出；不得要求调用方提供文件路径；同名冲突时按来源优先级选择生效版本） <!-- id: 21 -->
+- [x] 在 `backend/internal/handler/chat.go` 集成：
+  - [x] 支持“语义显式指定技能名称”（不依赖特殊语法）：当用户明确表示要用某个技能时，解析/命中该技能并作为推荐技能（可跳过召回/选择或作为 override） <!-- id: 8 -->
+  - [x] 否则：每次聊天前调用召回得到 Top-8，并取 Top-1 作为推荐技能（或 none） <!-- id: 9 -->
+- [x] 更新 prompt 构建逻辑：在 Stable Prefix 之后追加 TurnContext（volatile），以**中文**写入“推荐技能摘要”（Top-1；而非 Top-8 全列表）；注入中必须引导使用 `skill.read`（按名称）读取 `SKILL.md`；不得回写稳定 system prompt，且该 TurnContext 不应被标记为 cacheable <!-- id: 10 -->
+- [x] 单元测试：
+  - [x] frontmatter 解析与回退策略 <!-- id: 11 -->
+  - [x] 多来源合并与优先级覆盖 <!-- id: 12 -->
+  - [x] symlink 跟随与循环检测 <!-- id: 13 -->
+  - [x] `rg` 召回计分与 Top-8 截断（稳定顺序） <!-- id: 14 -->
+  - [x] `rg` 不可用时的降级与提示：`doctor` 提示安装，同时召回可降级为 `grep -R` <!-- id: 15 -->
+  - [x] 显式技能名解析与命中 <!-- id: 16 -->
+  - [x] `skill.read`：按名称解析生效 skill 并返回 `SKILL.md` 原文（同名覆盖优先级生效） <!-- id: 22 -->
+- [x] E2E 验证：
+  - [x] `~/.claude/skills` 为 symlink 目录时仍可正常发现并召回 <!-- id: 17 -->
+  - [x] 同时存在 `~/.codex`、`~/.claude` 与 `<workspace>/.oneagent` skills 时能取并集并按 name 去重（同名冲突规则生效） <!-- id: 18 -->
+  - [x] 用户语义显式指定技能名时可正确命中并绕过召回/选择流程（或作为 override） <!-- id: 19 -->
+  - [x] 模拟 1000+ skills 时仍保持可用（不把全量塞进 prompt，`rg` 召回仍可完成） <!-- id: 20 -->
+  - [x] Agent 可仅凭技能名称调用 `skill.read` 并在上下文中获得 `SKILL.md` 内容继续执行 <!-- id: 23 -->

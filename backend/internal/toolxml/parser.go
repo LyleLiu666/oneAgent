@@ -137,6 +137,18 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"stderrOffset",
 		"max_delta_bytes",
 		"maxDeltaBytes",
+		"task",
+		"context_summary",
+		"contextSummary",
+		"tool_ids",
+		"toolIds",
+		"scope",
+		"max_steps",
+		"maxSteps",
+		"k_skills",
+		"kSkills",
+		"skill_ids",
+		"skillIds",
 		"filePath",
 		"file_path",
 		"oldcontent",
@@ -147,10 +159,20 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"append",
 		"pattern",
 		"path",
+		"query",
+		"count",
+		"freshness",
 		"max_results",
 		"maxResults",
 		"fixed_strings",
 		"fixedStrings",
+		"task_id",
+		"taskId",
+		"template",
+		"overwrite",
+		"name",
+		"skill_id",
+		"id",
 		"edits",
 	} {
 		if value, ok := tagValue(callInner, tag); ok {
@@ -217,6 +239,36 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["fixed_strings"]; !ok {
 		if v, ok := fields["fixedStrings"]; ok {
 			fields["fixed_strings"] = v
+		}
+	}
+	if _, ok := fields["context_summary"]; !ok {
+		if v, ok := fields["contextSummary"]; ok {
+			fields["context_summary"] = v
+		}
+	}
+	if _, ok := fields["tool_ids"]; !ok {
+		if v, ok := fields["toolIds"]; ok {
+			fields["tool_ids"] = v
+		}
+	}
+	if _, ok := fields["max_steps"]; !ok {
+		if v, ok := fields["maxSteps"]; ok {
+			fields["max_steps"] = v
+		}
+	}
+	if _, ok := fields["k_skills"]; !ok {
+		if v, ok := fields["kSkills"]; ok {
+			fields["k_skills"] = v
+		}
+	}
+	if _, ok := fields["skill_ids"]; !ok {
+		if v, ok := fields["skillIds"]; ok {
+			fields["skill_ids"] = v
+		}
+	}
+	if _, ok := fields["task_id"]; !ok {
+		if v, ok := fields["taskId"]; ok {
+			fields["task_id"] = v
 		}
 	}
 

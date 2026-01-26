@@ -568,9 +568,14 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			// Call LLM with streaming
 			var fullContent string
 			ctx := context.Background() // Use background context so generation survives request cancellation
+			ctx = tool.ContextWithSessionID(ctx, sessionID)
 			ctx = tool.ContextWithUserID(ctx, userID)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
+			ctx = tool.ContextWithRuntimeLayout(ctx, h.rt.Layout)
+			ctx = tool.ContextWithLLMClient(ctx, resolvedModel.Client)
+			ctx = tool.ContextWithModelName(ctx, resolvedModel.ModelName)
+			ctx = tool.ContextWithSystemPrompt(ctx, systemPrompt)
 			ctx = tool.ContextWithWorkspace(ctx, tool.WorkspaceConfig{
 				Enabled: strings.TrimSpace(workspaceRoot) != "",
 				Root:    workspaceRoot,
