@@ -15,6 +15,7 @@ import {
   Moon,
   Bot,
   ListTodo,
+  ListChecks,
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -33,6 +34,7 @@ const navItems = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Chat', path: '/chat', icon: MessageSquare },
   { name: 'Tasks', path: '/tasks', icon: ListTodo },
+  { name: 'Governance', path: '/governance/sop', icon: ListChecks },
   { name: 'Ledger', path: '/ledger', icon: ScrollText },
   { name: 'Settings', path: '/settings', icon: Settings },
 

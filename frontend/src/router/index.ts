@@ -34,6 +34,12 @@ const routes = [
     component: () => import("@/views/TaskWorkbench.vue"),
     meta: { requiresAuth: true },
   },
+  {
+    path: "/governance/sop",
+    name: "SOP Governance",
+    component: () => import("@/views/SopGovernance.vue"),
+    meta: { requiresAuth: true },
+  },
 
   {
     path: "/:pathMatch(.*)*",
