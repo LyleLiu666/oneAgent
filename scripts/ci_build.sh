@@ -12,4 +12,5 @@ cd "${ROOT_DIR}"
 bash scripts/release_local_selftest.sh
 
 echo "[ci] windows cross-build"
+cd "${ROOT_DIR}/backend"
 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
