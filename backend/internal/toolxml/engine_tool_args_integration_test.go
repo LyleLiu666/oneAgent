@@ -200,17 +200,8 @@ func TestBuildToolArgs_Rg_RunsRgTool(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected tool.RgToolResult, got %T", gotAny)
 	}
-	if _, err := exec.LookPath("rg"); err != nil {
-		if got.Available {
-			t.Fatalf("expected available=false when rg missing")
-		}
-		if got.NotAvailableReason == "" {
-			t.Fatalf("expected not_available_reason")
-		}
-		return
-	}
 	if !got.Available {
-		t.Fatalf("expected available=true")
+		t.Fatalf("expected available=true (fallback should keep tool usable)")
 	}
 	if len(got.Matches) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(got.Matches))
@@ -220,5 +211,20 @@ func TestBuildToolArgs_Rg_RunsRgTool(t *testing.T) {
 	}
 	if got.Matches[0].Lines != "abc" {
 		t.Fatalf("expected lines=%q, got %q", "abc", got.Matches[0].Lines)
+	}
+
+	// When ripgrep is not installed, the tool MUST still work via fallback (grep/go) and record the reason.
+	if _, err := exec.LookPath("rg"); err != nil {
+		if got.Backend == "rg" {
+			t.Fatalf("expected fallback backend when rg missing")
+		}
+		if strings.TrimSpace(got.NotAvailableReason) == "" {
+			t.Fatalf("expected not_available_reason when rg missing")
+		}
+		return
+	}
+
+	if got.Backend != "rg" {
+		t.Fatalf("expected backend=rg when rg is available, got %q", got.Backend)
 	}
 }
