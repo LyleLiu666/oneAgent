@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/llmlog"
-	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
+	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
@@ -37,7 +38,8 @@ type Runtime struct {
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 	bgWG     sync.WaitGroup
-	bgOnce   sync.Once
+	bgMu     sync.Mutex
+	bgOnce   map[string]*sync.Once
 }
 
 func Init(cfg *config.Config) (*Runtime, error) {
@@ -100,14 +102,14 @@ func Init(cfg *config.Config) (*Runtime, error) {
 	}
 
 	rt := &Runtime{
-		Config:    cfg,
-		Layout:    layout,
-		AuthToken: token,
-		Settings:  settings,
-		Sessions:  sessions,
-		LLMLog:    llmLogger,
-		Skills:    skill.NewManager(30 * time.Second),
-		Tasks:     tasks,
+		Config:     cfg,
+		Layout:     layout,
+		AuthToken:  token,
+		Settings:   settings,
+		Sessions:   sessions,
+		LLMLog:     llmLogger,
+		Skills:     skill.NewManager(30 * time.Second),
+		Tasks:      tasks,
 		WorkLedger: ledger,
 	}
 	rt.bgCtx, rt.bgCancel = context.WithCancel(context.Background())
@@ -129,10 +131,30 @@ func (r *Runtime) Go(fn func(ctx context.Context)) {
 
 // GoOnce starts a background goroutine only once per runtime instance.
 func (r *Runtime) GoOnce(fn func(ctx context.Context)) {
+	r.GoOnceKey("default", fn)
+}
+
+func (r *Runtime) GoOnceKey(key string, fn func(ctx context.Context)) {
 	if r == nil || fn == nil {
 		return
 	}
-	r.bgOnce.Do(func() { r.Go(fn) })
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = "default"
+	}
+
+	r.bgMu.Lock()
+	if r.bgOnce == nil {
+		r.bgOnce = map[string]*sync.Once{}
+	}
+	once, ok := r.bgOnce[key]
+	if !ok {
+		once = &sync.Once{}
+		r.bgOnce[key] = once
+	}
+	r.bgMu.Unlock()
+
+	once.Do(func() { r.Go(fn) })
 }
 
 func (r *Runtime) Close() error {
@@ -156,13 +178,13 @@ func (r *Runtime) Close() error {
 }
 
 type HealthStatus struct {
-	Status        string `json:"status"`
-	SettingsDBOK  bool   `json:"settings_db"`
-	DataDirOK     bool   `json:"data_dir"`
-	LogsDirOK     bool   `json:"logs_dir"`
-	AuthMode      string `json:"auth_mode"`
-	OneAgentHome  string `json:"oneagent_home"`
-	SettingsDB    string `json:"settings_db_path"`
+	Status       string `json:"status"`
+	SettingsDBOK bool   `json:"settings_db"`
+	DataDirOK    bool   `json:"data_dir"`
+	LogsDirOK    bool   `json:"logs_dir"`
+	AuthMode     string `json:"auth_mode"`
+	OneAgentHome string `json:"oneagent_home"`
+	SettingsDB   string `json:"settings_db_path"`
 }
 
 func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {

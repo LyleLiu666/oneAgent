@@ -59,4 +59,3 @@ func RunDailyJob(ctx context.Context, store *workledger.Store, principalID strin
 	_ = store.WriteLearningJob(job)
 	return job, nil
 }
-

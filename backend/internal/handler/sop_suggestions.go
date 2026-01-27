@@ -59,7 +59,7 @@ func CreateSuggestion(c *gin.Context) {
 		RiskNotes:         strings.TrimSpace(req.RiskNotes),
 		EvidenceReceiptIDs: req.EvidenceIDs,
 		DraftSkill:         strings.TrimSpace(req.DraftSkill),
-		Scores: computeSuggestionScores(rt.WorkLedger, principal, dayKey, req.Title, req.DraftSkill, req.EvidenceIDs),
+		Scores: workledger.ComputeSuggestionScores(rt.WorkLedger, principal, dayKey, req.Title, req.DraftSkill, req.EvidenceIDs),
 		Meta: workledger.SuggestionMeta{DayKey: dayKey},
 	})
 	if err != nil {

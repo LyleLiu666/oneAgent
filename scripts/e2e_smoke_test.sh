@@ -67,6 +67,21 @@ assert "day_key" in d, d
 assert "markdown" in d, d
 print("[e2e] /api/ledger/digests/today OK")
 
+# Daily learning job should auto-run (best-effort). Poll briefly.
+import time as _time
+for _ in range(40):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ledger/learning/jobs/today") as r:
+            job = json.loads(r.read().decode("utf-8"))
+        if job.get("status") in ("running", "succeeded", "failed"):
+            print("[e2e] /api/ledger/learning/jobs/today OK")
+            break
+    except Exception:
+        pass
+    _time.sleep(0.1)
+else:
+    raise AssertionError("learning job not found")
+
 # Create a SOP suggestion (even without real receipt evidence in v1).
 req = urllib.request.Request(
     f"http://127.0.0.1:{port}/api/ledger/sop_suggestions",

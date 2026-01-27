@@ -21,7 +21,7 @@ func StartDailyScheduler(rt *runtime.Runtime) {
 	if rt == nil || rt.WorkLedger == nil {
 		return
 	}
-	rt.GoOnce(func(ctx context.Context) {
+	rt.GoOnceKey("learning.dailyScheduler", func(ctx context.Context) {
 		runLoop(ctx, rt.WorkLedger, "local", time.Now)
 	})
 }
@@ -92,4 +92,3 @@ func shouldAutoRunToday(store *workledger.Store, principalID, dayKey string, now
 		return true
 	}
 }
-

@@ -1,18 +1,16 @@
-package handler
+package workledger
 
 import (
 	"strings"
 	"unicode"
-
-	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
-func computeSuggestionScores(store *workledger.Store, principalID, dayKey, title, draftSkill string, evidenceIDs []string) workledger.SuggestionScores {
+func ComputeSuggestionScores(store *Store, principalID, dayKey, title, draftSkill string, evidenceIDs []string) SuggestionScores {
 	evidenceScore := scoreEvidence(len(evidenceIDs))
 	depthScore := scoreDepth(draftSkill)
 	scarcityScore := scoreScarcity(store, principalID, dayKey, title, draftSkill)
 	total := 0.40*depthScore + 0.35*scarcityScore + 0.25*evidenceScore
-	return workledger.SuggestionScores{
+	return SuggestionScores{
 		ScarcityScore: scarcityScore,
 		DepthScore:    depthScore,
 		EvidenceScore: evidenceScore,
@@ -87,7 +85,7 @@ func countNumberedSteps(text string) int {
 	return n
 }
 
-func scoreScarcity(store *workledger.Store, principalID, dayKey, title, draft string) float64 {
+func scoreScarcity(store *Store, principalID, dayKey, title, draft string) float64 {
 	if store == nil {
 		return 0.5
 	}
@@ -98,7 +96,7 @@ func scoreScarcity(store *workledger.Store, principalID, dayKey, title, draft st
 		return 0.5
 	}
 
-	existing, err := store.ListSuggestions(workledger.ListSuggestionsQuery{
+	existing, err := store.ListSuggestions(ListSuggestionsQuery{
 		PrincipalID:   principalID,
 		DayKey:        dayKey,
 		IncludeParked: true,
@@ -165,4 +163,3 @@ func jaccard(a, b map[string]struct{}) float64 {
 	}
 	return float64(inter) / float64(union)
 }
-

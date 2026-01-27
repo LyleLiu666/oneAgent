@@ -3,9 +3,10 @@ package handler
 import (
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
-	"sort"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,10 +15,10 @@ import (
 )
 
 type similarSuggestion struct {
-	SuggestionID string                    `json:"suggestion_id"`
-	Title        string                    `json:"title"`
+	SuggestionID string                      `json:"suggestion_id"`
+	Title        string                      `json:"title"`
 	Status       workledger.SuggestionStatus `json:"status"`
-	Similarity   float64                   `json:"similarity"`
+	Similarity   float64                     `json:"similarity"`
 }
 
 func GetSimilarSuggestions(c *gin.Context) {
@@ -102,4 +103,43 @@ func GetSimilarSuggestions(c *gin.Context) {
 		out = out[:limit]
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+func toTokenSet(s string) map[string]struct{} {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+		default:
+			b.WriteRune(' ')
+		}
+	}
+	parts := strings.Fields(b.String())
+	out := make(map[string]struct{}, len(parts))
+	for _, p := range parts {
+		if len(p) < 3 {
+			continue
+		}
+		out[p] = struct{}{}
+	}
+	return out
+}
+
+func jaccard(a, b map[string]struct{}) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for k := range a {
+		if _, ok := b[k]; ok {
+			inter++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union <= 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
 }

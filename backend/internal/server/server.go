@@ -11,6 +11,7 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/bocha"
 	"github.com/liu_y/oneAgent/backend/internal/handler"
+	"github.com/liu_y/oneAgent/backend/internal/learning"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/web"
@@ -24,6 +25,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 	if err := ensureTaskQueue(rt); err != nil {
 		return nil, err
 	}
+	learning.StartDailyScheduler(rt)
 
 	router := gin.Default()
 	router.Use(middleware.InjectRuntime(rt))
@@ -77,6 +79,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/ledger/receipts/:id", handler.GetReceipt)
 		api.GET("/ledger/digests/today", handler.GetDigestToday)
 		api.GET("/ledger/digests/:day", handler.GetDigest)
+		api.GET("/ledger/learning/jobs/today", handler.GetLearningJobToday)
+		api.POST("/ledger/learning/jobs/run_today", handler.RunLearningJobToday)
 
 		// SOP suggestions.
 		api.POST("/ledger/sop_suggestions", handler.CreateSuggestion)
