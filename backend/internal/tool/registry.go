@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -116,6 +117,9 @@ func Mount(ids []string) ([]Definition, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown tool id: %s", trimmed)
 		}
+		if isToolDisabledByEnv(def.ID) {
+			return nil, fmt.Errorf("tool disabled by configuration: %s (set %s=0 to enable)", def.ID, toolDisableEnvVar(def.ID))
+		}
 		seen[trimmed] = true
 		defs = append(defs, def)
 	}
@@ -141,6 +145,9 @@ func Infos() []Info {
 	defs := All()
 	out := make([]Info, 0, len(defs))
 	for _, def := range defs {
+		if isToolDisabledByEnv(def.ID) {
+			continue
+		}
 		out = append(out, Info{
 			ID:          def.ID,
 			Name:        def.Spec.Function.Name,
@@ -155,4 +162,13 @@ func sortDefinitionsByID(defs []Definition) []Definition {
 		return defs[i].ID < defs[j].ID
 	})
 	return defs
+}
+
+func toolDisableEnvVar(id string) string {
+	return "ONEAGENT_DISABLE_TOOL_" + strings.ToUpper(id)
+}
+
+func isToolDisabledByEnv(id string) bool {
+	v := strings.TrimSpace(os.Getenv(toolDisableEnvVar(id)))
+	return v == "1" || strings.EqualFold(v, "true")
 }

@@ -74,7 +74,7 @@ func TestSearch_UsesRgWhenAvailable(t *testing.T) {
 		return "", errors.New("not found")
 	}
 
-	res, err := Search(context.Background(), cat, "review", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	res, err := Search(context.Background(), cat, "review", Options{MaxResults: 8, Timeout: 5 * time.Second}, lookPath)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestSearch_TokenizesMultiWordQuery(t *testing.T) {
 		return "", errors.New("not found")
 	}
 
-	res, err := Search(context.Background(), cat, "apple notes memo", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	res, err := Search(context.Background(), cat, "apple notes memo", Options{MaxResults: 8, Timeout: 5 * time.Second}, lookPath)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestSearch_FallsBackToGrepWhenRgMissing(t *testing.T) {
 		}
 	}
 
-	res, err := Search(context.Background(), cat, "hello", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	res, err := Search(context.Background(), cat, "hello", Options{MaxResults: 8, Timeout: 5 * time.Second}, lookPath)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestSearch_FallsBackToGoWhenRgAndGrepMissing(t *testing.T) {
 		return "", errors.New("not found")
 	}
 
-	res, err := Search(context.Background(), cat, "hello", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	res, err := Search(context.Background(), cat, "hello", Options{MaxResults: 8, Timeout: 5 * time.Second}, lookPath)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}

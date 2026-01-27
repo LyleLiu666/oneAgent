@@ -98,6 +98,9 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 	if created.ID == "" || created.Workspace == "" {
 		t.Fatalf("unexpected task: %+v", created)
 	}
+	if created.Limits.MaxSteps <= 0 || created.Limits.MaxRuntimeSeconds <= 0 {
+		t.Fatalf("expected default limits to be applied, got %+v", created.Limits)
+	}
 
 	// Wait for background run to finish (runner is async).
 	deadline := time.Now().Add(2 * time.Second)

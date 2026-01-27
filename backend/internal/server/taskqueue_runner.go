@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -56,13 +57,16 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			Enabled: true,
 			Root:    task.Workspace,
 		})
+		toolCtx = tool.ContextWithOCC(toolCtx, strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_OCC")) != "1")
 
-		maxSteps := task.Limits.MaxSteps
+		limits := taskqueue.ResolveLimits(task.Limits)
+
+		maxSteps := limits.MaxSteps
 		if maxSteps <= 0 {
 			maxSteps = 2000
 		}
 
-		maxRuntime := task.Limits.MaxRuntimeSeconds
+		maxRuntime := limits.MaxRuntimeSeconds
 		if maxRuntime <= 0 {
 			maxRuntime = int((6 * time.Hour).Seconds())
 		}

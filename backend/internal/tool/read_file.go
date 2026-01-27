@@ -136,8 +136,10 @@ func runReadFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	defer f.Close()
 
 	var totalBytes int64
+	sizeKnown := false
 	if st, err := f.Stat(); err == nil {
 		totalBytes = st.Size()
+		sizeKnown = true
 	}
 
 	r := bufio.NewReaderSize(f, 64*1024)
@@ -211,6 +213,15 @@ func runReadFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	if !truncated && writtenBytes >= maxBytes {
 		if _, err := r.Peek(1); err == nil {
 			truncated = true
+		}
+	}
+
+	// Record OCC fingerprint for small files to prevent read->write drift.
+	// We use the file's full content sha256 (independent of pagination/truncation).
+	const maxOCCTrackedFileBytes = 8 * 1024 * 1024
+	if OCCFromContext(ctx) != nil && sizeKnown && totalBytes <= maxOCCTrackedFileBytes {
+		if sha, err := fileSHA256Hex(target); err == nil {
+			occRecordSHA256(ctx, target, sha)
 		}
 	}
 

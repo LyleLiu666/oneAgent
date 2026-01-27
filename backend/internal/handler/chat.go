@@ -586,6 +586,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				Enabled: strings.TrimSpace(workspaceRoot) != "",
 				Root:    workspaceRoot,
 			})
+			ctx = tool.ContextWithOCC(ctx, strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_OCC")) != "1")
 
 			opts := &llm.ChatCompletionOptions{
 				Trace: traceCallback,

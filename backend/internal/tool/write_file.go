@@ -103,6 +103,11 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
+	if req.Preconditions == nil {
+		if expected, ok := occExpectedSHA256(ctx, target); ok {
+			req.Preconditions = &FilePreconditions{ExpectedSHA256: expected}
+		}
+	}
 	if err := checkFilePreconditions(target, req.Preconditions); err != nil {
 		return nil, err
 	}
@@ -168,6 +173,12 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		result.OriginalRunes = originalRunes
 		result.WrittenRunes = writtenRunes
 		result.ContinueAppend = true
+	}
+
+	if OCCFromContext(ctx) != nil {
+		if sha, err := fileSHA256Hex(target); err == nil {
+			occRecordSHA256(ctx, target, sha)
+		}
 	}
 	return result, nil
 }

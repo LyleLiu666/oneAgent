@@ -43,7 +43,8 @@ func CreateTask(c *gin.Context) {
 		title = deriveTaskTitle(req.Prompt)
 	}
 
-	task, err := rt.Tasks.CreateTask(userID, req.Workspace, title, req.Prompt, req.ModelID, req.Limits)
+	limits := taskqueue.ResolveLimits(req.Limits)
+	task, err := rt.Tasks.CreateTask(userID, req.Workspace, title, req.Prompt, req.ModelID, limits)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -223,4 +224,3 @@ func deriveTaskTitle(prompt string) string {
 	}
 	return string(r[:60]) + "..."
 }
-

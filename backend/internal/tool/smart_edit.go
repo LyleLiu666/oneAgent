@@ -143,7 +143,13 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if _, err := os.Stat(target); os.IsNotExist(err) {
 			return nil, fmt.Errorf("文件不存在：%q。请先用 write_file 创建（或确认路径在 workspace 内）", op.FilePath)
 		}
-		if err := checkFilePreconditions(target, op.Preconditions); err != nil {
+		preconditions := op.Preconditions
+		if preconditions == nil {
+			if expected, ok := occExpectedSHA256(ctx, target); ok {
+				preconditions = &FilePreconditions{ExpectedSHA256: expected}
+			}
+		}
+		if err := checkFilePreconditions(target, preconditions); err != nil {
 			return nil, fmt.Errorf("edits[%d]: %w", i, err)
 		}
 
@@ -191,6 +197,14 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			FilePath:     path,
 			Replacements: replacementsByFile[path],
 		})
+	}
+
+	if OCCFromContext(ctx) != nil {
+		for _, path := range paths {
+			if sha, err := fileSHA256Hex(path); err == nil {
+				occRecordSHA256(ctx, path, sha)
+			}
+		}
 	}
 
 	if len(files) == 1 {
