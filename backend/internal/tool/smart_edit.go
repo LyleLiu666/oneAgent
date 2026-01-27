@@ -31,6 +31,7 @@ type editOperation struct {
 	OldString  string `json:"oldString"`
 	NewString  string `json:"newString"`
 	ReplaceAll bool   `json:"replaceAll,omitempty"`
+	Preconditions *FilePreconditions `json:"preconditions,omitempty"`
 }
 
 type editToolRequest struct {
@@ -68,6 +69,21 @@ func smartEditDefinition() Definition {
 								"replaceAll": map[string]any{
 									"type":        "boolean",
 									"description": "是否替换所有匹配（true=全部替换；false=仅替换第一个/最佳匹配）。",
+								},
+								"preconditions": map[string]any{
+									"type":        "object",
+									"description": "（可选）条件写入（OCC）：当文件状态不满足时拒绝写入。",
+									"properties": map[string]any{
+										"expected_exists": map[string]any{
+											"type":        "boolean",
+											"description": "期望文件是否存在。",
+										},
+										"expected_sha256": map[string]any{
+											"type":        "string",
+											"description": "期望文件内容 sha256（hex）。不匹配则拒绝写入。",
+										},
+									},
+									"additionalProperties": false,
 								},
 							},
 							"required":             []string{"filePath", "oldString", "newString"},
@@ -126,6 +142,9 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		// Ensure file exists
 		if _, err := os.Stat(target); os.IsNotExist(err) {
 			return nil, fmt.Errorf("文件不存在：%q。请先用 write_file 创建（或确认路径在 workspace 内）", op.FilePath)
+		}
+		if err := checkFilePreconditions(target, op.Preconditions); err != nil {
+			return nil, fmt.Errorf("edits[%d]: %w", i, err)
 		}
 
 		oldRunes := runeCount(op.OldString)

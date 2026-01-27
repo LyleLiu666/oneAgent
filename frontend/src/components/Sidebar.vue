@@ -14,6 +14,7 @@ import {
   Sun,
   Moon,
   Bot,
+  ListTodo,
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -31,6 +32,7 @@ const isMobileOpen = ref(false)
 const navItems = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Chat', path: '/chat', icon: MessageSquare },
+  { name: 'Tasks', path: '/tasks', icon: ListTodo },
   { name: 'Ledger', path: '/ledger', icon: ScrollText },
   { name: 'Settings', path: '/settings', icon: Settings },
 

@@ -34,6 +34,21 @@ func writeFileDefinition() Definition {
 						"type":        "boolean",
 						"description": "（可选）是否以追加方式写入。true=追加；false=覆盖（默认）。用于分段写入大文件。",
 					},
+					"preconditions": map[string]any{
+						"type":        "object",
+						"description": "（可选）条件写入（OCC）：当文件状态不满足时拒绝写入。",
+						"properties": map[string]any{
+							"expected_exists": map[string]any{
+								"type":        "boolean",
+								"description": "期望文件是否存在。用于避免覆盖/避免重复创建。",
+							},
+							"expected_sha256": map[string]any{
+								"type":        "string",
+								"description": "期望文件内容 sha256（hex）。不匹配则拒绝写入，避免基于旧版本写入。",
+							},
+						},
+						"additionalProperties": false,
+					},
 				},
 				"required":             []string{"filePath", "content"},
 				"additionalProperties": false,
@@ -48,6 +63,7 @@ type writeFileRequest struct {
 	FilePath string `json:"filePath"`
 	Content  string `json:"content"`
 	Append   bool   `json:"append,omitempty"`
+	Preconditions *FilePreconditions `json:"preconditions,omitempty"`
 }
 
 type writeFileResult struct {
@@ -84,6 +100,10 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 
 	_, target, err := resolvePathForWrite(ctx, req.FilePath)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := checkFilePreconditions(target, req.Preconditions); err != nil {
 		return nil, err
 	}
 
