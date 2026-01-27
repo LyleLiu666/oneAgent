@@ -67,7 +67,7 @@
 - Task attempt / learning / digest 在用户不在线时也能“可被看见”（UI badge 或通知）
 
 **建议落地路径（从低到高）**
-1) UI 上增加 “今日 digest / learning job 状态” 的明显入口与 badge
+1) UI 上增加 “今日 digest / learning job 状态 / SOP proposed 数量” 的明显入口与 badge（已落地：`add-ledger-status-badges`）
 2) schedule job 输出日报文件（本地），并在 UI 提示“有新日报”
 3) webhook/企业 IM 通知（后续 change）
 
@@ -126,4 +126,3 @@
 3) P1.1 完成通知/日报（先 UI badge）
 4) P1.3 默认 limits（防失控）
 5) P2.* skill 治理与复利强化
-

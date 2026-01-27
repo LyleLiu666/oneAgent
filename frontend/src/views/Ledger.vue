@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { FileText, ListChecks, ScrollText, RefreshCcw, Search, Wand2 } from 'lucide-vue-next'
 import {
+  getLedgerStatusToday,
   getTodayDigest,
   listReceipts,
   type Receipt,
@@ -17,6 +18,30 @@ import {
 } from '@/api/client'
 
 const activeTab = ref<'receipts' | 'digest' | 'sop'>('receipts')
+
+// Ledger status badges
+const statusLoading = ref(false)
+const statusError = ref('')
+const ledgerStatus = ref<{ day_key: string; digest_exists: boolean; learning_job_status: string; sop_proposed_count: number } | null>(null)
+
+const loadLedgerStatus = async () => {
+  statusLoading.value = true
+  statusError.value = ''
+  try {
+    const st = await getLedgerStatusToday()
+    ledgerStatus.value = st
+  } catch (e: any) {
+    statusError.value = e?.message || 'Failed to load ledger status'
+    ledgerStatus.value = null
+  } finally {
+    statusLoading.value = false
+  }
+}
+
+const hasDigestBadge = computed(() => !!ledgerStatus.value?.digest_exists)
+const sopProposedCount = computed(() => Number(ledgerStatus.value?.sop_proposed_count || 0))
+const learningStatus = computed(() => String(ledgerStatus.value?.learning_job_status || 'none'))
+const hasLearningBadge = computed(() => ['queued', 'running', 'failed'].includes(learningStatus.value))
 
 // Receipts state
 const receiptsLoading = ref(false)
@@ -135,6 +160,7 @@ const saveEdit = async (s: Suggestion) => {
     })
     editOpen.value[s.suggestion_id] = false
     await loadSopSuggestionsList()
+    await loadLedgerStatus()
   } catch (e: any) {
     sopError.value = e?.message || 'Failed to save edit'
   } finally {
@@ -148,6 +174,7 @@ const setSuggestionStatus = async (suggestionId: string, status: SuggestionStatu
   try {
     await updateSopSuggestionStatus(suggestionId, { status, merged_into_suggestion_id: mergedInto })
     await loadSopSuggestionsList()
+    await loadLedgerStatus()
   } catch (e: any) {
     sopError.value = e?.message || 'Failed to update status'
   } finally {
@@ -161,6 +188,7 @@ const generateOneSuggestion = async () => {
   try {
     await generateSopSuggestions({ count: 1, lookback_days: 7 })
     await loadSopSuggestionsList()
+    await loadLedgerStatus()
   } catch (e: any) {
     sopError.value = e?.message || 'Failed to generate suggestion'
   } finally {
@@ -174,6 +202,7 @@ const loadMoreParkedSuggestions = async () => {
   try {
     await loadMoreSopSuggestions({ count: 3 })
     await loadSopSuggestionsList()
+    await loadLedgerStatus()
   } catch (e: any) {
     sopError.value = e?.message || 'Failed to load more suggestions'
   } finally {
@@ -201,6 +230,7 @@ const formatTime = (iso: string) => {
 
 onMounted(async () => {
   await loadReceipts()
+  await loadLedgerStatus()
 })
 </script>
 
@@ -209,7 +239,16 @@ onMounted(async () => {
     <div class="max-w-6xl mx-auto">
       <div class="flex items-start justify-between gap-4 mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-surface-100">Work Ledger</h1>
+          <div class="flex items-center gap-3">
+            <h1 class="text-2xl font-bold text-surface-100">Work Ledger</h1>
+            <span
+              v-if="hasLearningBadge"
+              data-testid="ledger-badge-learning"
+              class="px-2 py-1 rounded-full text-xs font-medium bg-amber-500/15 text-amber-300"
+            >
+              Learning: {{ learningStatus }}
+            </span>
+          </div>
           <p class="text-sm text-surface-500">Receipts, daily digest, and SOP suggestions</p>
         </div>
       </div>
@@ -235,6 +274,11 @@ onMounted(async () => {
           <div class="inline-flex items-center gap-2">
             <FileText class="w-4 h-4" />
             Digest
+            <span
+              v-if="hasDigestBadge"
+              data-testid="ledger-badge-digest"
+              class="w-2 h-2 rounded-full bg-emerald-400"
+            ></span>
           </div>
         </button>
         <button
@@ -246,6 +290,13 @@ onMounted(async () => {
           <div class="inline-flex items-center gap-2">
             <ListChecks class="w-4 h-4" />
             SOP
+            <span
+              v-if="sopProposedCount > 0"
+              data-testid="ledger-badge-sop-count"
+              class="px-2 py-0.5 rounded-full text-xs font-semibold bg-primary-500/15 text-primary-300"
+            >
+              {{ sopProposedCount }}
+            </span>
           </div>
         </button>
       </div>
@@ -609,4 +660,3 @@ onMounted(async () => {
     </div>
   </div>
 </template>
-

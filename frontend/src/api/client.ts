@@ -421,6 +421,17 @@ export async function getDigest(dayKey: string, refresh: boolean = false): Promi
     return api(`/api/ledger/digests/${encodeURIComponent(dayKey)}${q}`)
 }
 
+export interface LedgerStatusToday {
+    day_key: string
+    digest_exists: boolean
+    learning_job_status: string
+    sop_proposed_count: number
+}
+
+export async function getLedgerStatusToday(): Promise<LedgerStatusToday> {
+    return api('/api/ledger/status/today')
+}
+
 export type ReceiptKind = 'subagent_run'
 
 export type ReceiptStatus = 'succeeded' | 'failed' | 'canceled' | 'timed_out' | 'interrupted'

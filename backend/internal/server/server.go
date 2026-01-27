@@ -79,6 +79,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/ledger/receipts/:id", handler.GetReceipt)
 		api.GET("/ledger/digests/today", handler.GetDigestToday)
 		api.GET("/ledger/digests/:day", handler.GetDigest)
+		api.GET("/ledger/status/today", handler.GetLedgerStatusToday)
 		api.GET("/ledger/learning/jobs/today", handler.GetLearningJobToday)
 		api.POST("/ledger/learning/jobs/run_today", handler.RunLearningJobToday)
 

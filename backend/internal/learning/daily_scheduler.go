@@ -3,6 +3,8 @@ package learning
 import (
 	"context"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
@@ -19,6 +21,10 @@ import (
 // - if the server starts after schedule time and no successful job exists today, run shortly after startup
 func StartDailyScheduler(rt *runtime.Runtime) {
 	if rt == nil || rt.WorkLedger == nil {
+		return
+	}
+	// Allow disabling in tests/controlled environments to avoid time-dependent behavior.
+	if strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_DAILY_LEARNING")) == "1" {
 		return
 	}
 	eval := &LLMCompressibilityEvaluator{Settings: rt.Settings}

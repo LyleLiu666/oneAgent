@@ -6,6 +6,12 @@ import { shallowMount } from '@vue/test-utils'
 import * as apiClient from '@/api/client'
 
 vi.mock('@/api/client', () => ({
+  getLedgerStatusToday: vi.fn(async () => ({
+    day_key: '1970-01-01',
+    digest_exists: false,
+    learning_job_status: 'none',
+    sop_proposed_count: 0,
+  })),
   getTodayDigest: vi.fn(),
   listReceipts: vi.fn(async () => []),
   listSopSuggestions: vi.fn(async () => []),
@@ -47,6 +53,7 @@ it('loads receipts and shows details after selection', async () => {
   await flushPromises()
 
   expect(apiClient.listReceipts).toHaveBeenCalled()
+  expect((apiClient as any).getLedgerStatusToday).toHaveBeenCalled()
 
   const items = wrapper.findAll('[data-testid="receipt-item"]')
   expect(items.length).toBe(1)
@@ -109,3 +116,29 @@ it('edits a proposed SOP suggestion and saves via API', async () => {
   wrapper.unmount()
 })
 
+it('shows digest and SOP badges from status endpoint', async () => {
+  vi.stubGlobal('localStorage', {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  })
+
+  ;(apiClient as any).getLedgerStatusToday.mockResolvedValueOnce({
+    day_key: '2099-01-01',
+    digest_exists: true,
+    learning_job_status: 'none',
+    sop_proposed_count: 3,
+  })
+
+  const { default: Ledger } = await import('@/views/Ledger.vue')
+  const wrapper = shallowMount(Ledger)
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="ledger-badge-digest"]').exists()).toBe(true)
+  const sopBadge = wrapper.find('[data-testid="ledger-badge-sop-count"]')
+  expect(sopBadge.exists()).toBe(true)
+  expect(sopBadge.text()).toContain('3')
+
+  wrapper.unmount()
+})
