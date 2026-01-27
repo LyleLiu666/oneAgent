@@ -137,6 +137,92 @@ func GetSuggestion(c *gin.Context) {
 	c.JSON(http.StatusOK, sug)
 }
 
+type updateSuggestionRequest struct {
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+	RiskNotes   *string `json:"risk_notes,omitempty"`
+	DraftSkill  *string `json:"draft_skill,omitempty"`
+}
+
+func UpdateSuggestion(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.WorkLedger == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "work ledger not initialized"})
+		return
+	}
+
+	principal := strings.TrimSpace(middleware.GetUserID(c))
+	if principal == "" {
+		principal = "local"
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	current, err := rt.WorkLedger.GetSuggestion(id)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(current.PrincipalID) != principal {
+		c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
+		return
+	}
+
+	switch current.Status {
+	case workledger.SuggestionStatusProposed, workledger.SuggestionStatusParked:
+		// ok
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only proposed/parked suggestions can be edited"})
+		return
+	}
+
+	var req updateSuggestionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if req.Title == nil && req.Description == nil && req.RiskNotes == nil && req.DraftSkill == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no fields to update"})
+		return
+	}
+
+	updated, err := rt.WorkLedger.UpdateSuggestion(id, func(sug *workledger.Suggestion) error {
+		if req.Title != nil {
+			v := strings.TrimSpace(*req.Title)
+			if v == "" {
+				return errors.New("title cannot be empty")
+			}
+			sug.Title = v
+		}
+		if req.Description != nil {
+			sug.Description = strings.TrimSpace(*req.Description)
+		}
+		if req.RiskNotes != nil {
+			sug.RiskNotes = strings.TrimSpace(*req.RiskNotes)
+		}
+		if req.DraftSkill != nil {
+			v := strings.TrimSpace(*req.DraftSkill)
+			if v == "" {
+				return errors.New("draft_skill cannot be empty")
+			}
+			sug.DraftSkill = v
+		}
+
+		dayKey := strings.TrimSpace(sug.Meta.DayKey)
+		sug.Scores = workledger.ComputeSuggestionScores(rt.WorkLedger, principal, dayKey, sug.Title, sug.DraftSkill, sug.EvidenceReceiptIDs)
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	_ = rt.WorkLedger.ApplyInboxCap(principal, updated.Meta.DayKey, 10)
+	c.JSON(http.StatusOK, updated)
+}
+
 type updateStatusRequest struct {
 	Status       string `json:"status"`
 	MergedIntoID string `json:"merged_into_suggestion_id,omitempty"`

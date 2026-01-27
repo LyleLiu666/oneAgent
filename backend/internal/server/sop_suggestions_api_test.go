@@ -286,7 +286,135 @@ func TestServer_SOPSuggesionsAPI_ApproveMaterializesSkill(t *testing.T) {
 	if got.Source != skill.SourceOneAgent {
 		t.Fatalf("expected source=.oneagent, got %+v", got)
 	}
-	if got.Path != approved.Meta.MaterializedSkillPath {
+	metaPath := approved.Meta.MaterializedSkillPath
+	gotPath := got.Path
+	if resolved, err := filepath.EvalSymlinks(metaPath); err == nil && resolved != "" {
+		metaPath = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(gotPath); err == nil && resolved != "" {
+		gotPath = resolved
+	}
+	if metaPath != gotPath {
 		t.Fatalf("expected path=%q, got %q", approved.Meta.MaterializedSkillPath, got.Path)
+	}
+}
+
+func TestServer_SOPSuggesionsAPI_EditThenApproveUsesEditedDraft(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ONEAGENT_HOME", home)
+	t.Setenv("HOME", home)
+
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+	prevCfg := config.AppConfig
+	config.AppConfig = cfg
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	body := map[string]any{
+		"title":                "SOP: refactor auth",
+		"description":          "Refactor with tests",
+		"draft_skill":          "# Skill\n\n## SOP\n1. Old\n",
+		"evidence_receipt_ids": []string{"r1", "r2"},
+	}
+	b, _ := json.Marshal(body)
+	res, err := http.Post(srv.URL+"/api/ledger/sop_suggestions", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST sop_suggestions: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST status=%d", res.StatusCode)
+	}
+	var created workledger.Suggestion
+	if err := json.NewDecoder(res.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+
+	// Edit before approval.
+	edit := map[string]any{
+		"title":       "SOP: refactor auth (edited)",
+		"draft_skill": "# Skill\n\n## SOP\n1. Edited\n",
+	}
+	b, _ = json.Marshal(edit)
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/ledger/sop_suggestions/"+created.SuggestionID, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT edit: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("PUT edit status=%d", res.StatusCode)
+	}
+	var edited workledger.Suggestion
+	if err := json.NewDecoder(res.Body).Decode(&edited); err != nil {
+		t.Fatalf("decode edited: %v", err)
+	}
+	if edited.Title != "SOP: refactor auth (edited)" {
+		t.Fatalf("expected edited title, got %q", edited.Title)
+	}
+	if edited.DraftSkill != "# Skill\n\n## SOP\n1. Edited" {
+		t.Fatalf("expected edited draft_skill, got %q", edited.DraftSkill)
+	}
+
+	// Approve uses edited draft.
+	up := map[string]any{"status": "approved"}
+	b, _ = json.Marshal(up)
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/api/ledger/sop_suggestions/"+created.SuggestionID+"/status", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST approve: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST approve status=%d", res.StatusCode)
+	}
+	var approved workledger.Suggestion
+	if err := json.NewDecoder(res.Body).Decode(&approved); err != nil {
+		t.Fatalf("decode approved: %v", err)
+	}
+	if approved.Meta.MaterializedSkillPath == "" {
+		t.Fatalf("expected materialized path")
+	}
+	data, err := os.ReadFile(approved.Meta.MaterializedSkillPath)
+	if err != nil {
+		t.Fatalf("read skill: %v", err)
+	}
+	if !bytes.Contains(data, []byte("1. Edited")) {
+		t.Fatalf("expected materialized SKILL.md to contain edited draft, got:\n%s", string(data))
+	}
+
+	// Editing after approval is rejected (avoid drift vs materialized skill).
+	edit2 := map[string]any{"draft_skill": "# Skill\n\n## SOP\n1. Should fail\n"}
+	b, _ = json.Marshal(edit2)
+	req, _ = http.NewRequest(http.MethodPut, srv.URL+"/api/ledger/sop_suggestions/"+created.SuggestionID, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT edit after approve: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusOK {
+		t.Fatalf("expected edit after approve to fail")
 	}
 }

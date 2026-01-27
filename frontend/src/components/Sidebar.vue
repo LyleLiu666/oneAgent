@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import {
   Home,
   MessageSquare,
+  ScrollText,
   Settings,
   LogOut,
   ChevronLeft,
@@ -30,6 +31,7 @@ const isMobileOpen = ref(false)
 const navItems = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Chat', path: '/chat', icon: MessageSquare },
+  { name: 'Ledger', path: '/ledger', icon: ScrollText },
   { name: 'Settings', path: '/settings', icon: Settings },
 
 ]

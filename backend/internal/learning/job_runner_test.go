@@ -20,7 +20,7 @@ func (f fakeEvaluator) Evaluate(ctx context.Context, principalID string, sug wor
 	}
 	return CompressibilityResult{
 		CompressionPrompt: "simple prompt",
-		Verdict:           VerdictNotEquivalent,
+		Verdict:           CompressibilityVerdictNotEquivalent,
 		Reason:            "needs SOP",
 	}, nil
 }
@@ -38,7 +38,7 @@ func TestRunDailyJobWithEvaluator_EvaluatorErrorsDoNotFailJob(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		_, err := store.CreateReceipt(workledger.CreateReceiptInput{
 			PrincipalID: "local",
-			Kind:        workledger.ReceiptKindTaskAttempt,
+			Kind:        workledger.ReceiptKindSubagentRun,
 			Status:      workledger.ReceiptStatusSucceeded,
 			FinishedAt:  now.Add(-time.Duration(i) * time.Minute),
 			Summary:     "usable",
@@ -79,7 +79,7 @@ func TestRunDailyJobWithEvaluator_IdempotentAfterSuccess(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		_, err := store.CreateReceipt(workledger.CreateReceiptInput{
 			PrincipalID: "local",
-			Kind:        workledger.ReceiptKindTaskAttempt,
+			Kind:        workledger.ReceiptKindSubagentRun,
 			Status:      workledger.ReceiptStatusSucceeded,
 			FinishedAt:  now.Add(-time.Duration(i) * time.Minute),
 			Summary:     "usable",

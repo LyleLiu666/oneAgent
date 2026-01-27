@@ -421,6 +421,53 @@ export async function getDigest(dayKey: string, refresh: boolean = false): Promi
     return api(`/api/ledger/digests/${encodeURIComponent(dayKey)}${q}`)
 }
 
+export type ReceiptKind = 'subagent_run'
+
+export type ReceiptStatus = 'succeeded' | 'failed' | 'canceled' | 'timed_out' | 'interrupted'
+
+export interface ReceiptArtifacts {
+    findings_path?: string
+    trace_log_path?: string
+    test_report_path?: string
+    diff_ref?: string
+}
+
+export interface ReceiptSignals {
+    duration_ms?: number
+}
+
+export interface Receipt {
+    receipt_id: string
+    principal_id: string
+    workspace_root?: string
+    kind: ReceiptKind
+    status: ReceiptStatus
+    started_at: string
+    finished_at: string
+    summary: string
+    artifacts?: ReceiptArtifacts
+    signals?: ReceiptSignals
+}
+
+export async function listReceipts(params?: {
+    workspace?: string
+    status?: ReceiptStatus
+    q?: string
+    limit?: number
+}): Promise<Receipt[]> {
+    const qs = new URLSearchParams()
+    if (params?.workspace) qs.set('workspace', params.workspace)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.q) qs.set('q', params.q)
+    if (params?.limit) qs.set('limit', String(params.limit))
+    const q = qs.toString()
+    return api(`/api/ledger/receipts${q ? `?${q}` : ''}`)
+}
+
+export async function getReceipt(receiptId: string): Promise<Receipt> {
+    return api(`/api/ledger/receipts/${encodeURIComponent(receiptId)}`)
+}
+
 export type SuggestionStatus =
     | 'proposed'
     | 'parked'
@@ -440,8 +487,13 @@ export interface SuggestionScores {
 export interface SuggestionMeta {
     day_key?: string
     compression_prompt?: string
+    compression_verdict?: string
+    compression_reason?: string
+    compression_evaluated_at?: string
     similar_skill_ids?: string[]
     delta_vs_top1?: string
+    materialized_skill_id?: string
+    materialized_skill_path?: string
 }
 
 export interface Suggestion {
@@ -506,8 +558,32 @@ export async function updateSopSuggestionStatus(
     })
 }
 
+export async function updateSopSuggestion(
+    suggestionId: string,
+    payload: { title?: string; description?: string; risk_notes?: string; draft_skill?: string }
+): Promise<Suggestion> {
+    return api(`/api/ledger/sop_suggestions/${encodeURIComponent(suggestionId)}`, {
+        method: 'PUT',
+        body: payload,
+    })
+}
+
 export async function loadMoreSopSuggestions(payload?: { day_key?: string; count?: number }): Promise<Suggestion[]> {
     return api('/api/ledger/sop_suggestions/load_more', { method: 'POST', body: payload || {} })
+}
+
+export interface SimilarSuggestion {
+    suggestion_id: string
+    title: string
+    status: SuggestionStatus
+    similarity: number
+}
+
+export async function getSimilarSopSuggestions(suggestionId: string, limit: number = 5): Promise<SimilarSuggestion[]> {
+    const qs = new URLSearchParams()
+    if (limit > 0) qs.set('limit', String(limit))
+    const q = qs.toString()
+    return api(`/api/ledger/sop_suggestions/${encodeURIComponent(suggestionId)}/similar${q ? `?${q}` : ''}`)
 }
 
 

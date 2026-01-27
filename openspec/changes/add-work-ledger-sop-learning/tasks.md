@@ -12,6 +12,6 @@
 - [x] 1.6.2 Implement scoring signals: scarcity (similarity to existing), depth (Prompt Compressibility Test), evidence strength
 - [x] 1.6.3 Implement “Generate more / Load more” to pull top-ranked parked suggestions back into Inbox (user-triggered only)
 - [x] 1.7 Ensure learning is an independent pipeline (best-effort, idempotent, failures do NOT affect task/subagent delivery)
-- [ ] 1.8 Add UI: Work Ledger (list/search/detail) + SOP Suggestions (review/approve/edit/reject/merge/archive) + Digest
+- [x] 1.8 Add UI: Work Ledger (list/search/detail) + SOP Suggestions (review/approve/edit/reject/merge/archive) + Digest
 - [x] 1.9 On approve: materialize SOP as personal skill package and ensure skill discovery/recall picks it up (active-only)
 - [x] 1.10 Add tests for receipt persistence, evidence gating, dedupe/merge/archive, approval-to-skill, digest output, and pipeline independence

@@ -22,6 +22,12 @@ const routes = [
     component: () => import("@/views/Settings.vue"),
     meta: { requiresAuth: true },
   },
+  {
+    path: "/ledger",
+    name: "Ledger",
+    component: () => import("@/views/Ledger.vue"),
+    meta: { requiresAuth: true },
+  },
 
   {
     path: "/:pathMatch(.*)*",

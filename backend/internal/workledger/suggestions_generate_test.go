@@ -19,7 +19,7 @@ func TestStore_GenerateSuggestionsV1_EvidenceGating(t *testing.T) {
 	// Not usable: failed even with artifacts.
 	_, err = store.CreateReceipt(CreateReceiptInput{
 		PrincipalID: "local",
-		Kind:        ReceiptKindTaskAttempt,
+		Kind:        ReceiptKindSubagentRun,
 		Status:      ReceiptStatusFailed,
 		FinishedAt:  now.Add(-10 * time.Minute),
 		Summary:     "failed receipt",
@@ -35,7 +35,7 @@ func TestStore_GenerateSuggestionsV1_EvidenceGating(t *testing.T) {
 	// Not usable: succeeded but missing artifacts.
 	_, err = store.CreateReceipt(CreateReceiptInput{
 		PrincipalID: "local",
-		Kind:        ReceiptKindTaskAttempt,
+		Kind:        ReceiptKindSubagentRun,
 		Status:      ReceiptStatusSucceeded,
 		FinishedAt:  now.Add(-9 * time.Minute),
 		Summary:     "missing artifacts",
@@ -48,7 +48,7 @@ func TestStore_GenerateSuggestionsV1_EvidenceGating(t *testing.T) {
 	// Usable #1.
 	r1, err := store.CreateReceipt(CreateReceiptInput{
 		PrincipalID: "local",
-		Kind:        ReceiptKindTaskAttempt,
+		Kind:        ReceiptKindSubagentRun,
 		Status:      ReceiptStatusSucceeded,
 		FinishedAt:  now.Add(-2 * time.Minute),
 		Summary:     "usable 1",
@@ -64,7 +64,7 @@ func TestStore_GenerateSuggestionsV1_EvidenceGating(t *testing.T) {
 	// Usable #2.
 	r2, err := store.CreateReceipt(CreateReceiptInput{
 		PrincipalID: "local",
-		Kind:        ReceiptKindTaskAttempt,
+		Kind:        ReceiptKindSubagentRun,
 		Status:      ReceiptStatusSucceeded,
 		FinishedAt:  now.Add(-1 * time.Minute),
 		Summary:     "usable 2",
@@ -117,7 +117,7 @@ func TestStore_GenerateSuggestionsV1_DedupWithinDay(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		_, err := store.CreateReceipt(CreateReceiptInput{
 			PrincipalID: "local",
-			Kind:        ReceiptKindTaskAttempt,
+			Kind:        ReceiptKindSubagentRun,
 			Status:      ReceiptStatusSucceeded,
 			FinishedAt:  now.Add(-time.Duration(i) * time.Minute),
 			Summary:     "usable",

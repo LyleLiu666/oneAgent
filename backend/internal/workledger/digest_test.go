@@ -68,7 +68,7 @@ func TestStore_GenerateDigest_IncludesEvidenceAndFailures(t *testing.T) {
 	ok, err := store.CreateReceipt(CreateReceiptInput{
 		PrincipalID:   "local",
 		WorkspaceRoot: "/tmp/ws",
-		Kind:          ReceiptKindTaskAttempt,
+		Kind:          ReceiptKindSubagentRun,
 		Status:        ReceiptStatusSucceeded,
 		FinishedAt:    now,
 		Summary:       "refactor auth",
@@ -84,7 +84,7 @@ func TestStore_GenerateDigest_IncludesEvidenceAndFailures(t *testing.T) {
 	bad, err := store.CreateReceipt(CreateReceiptInput{
 		PrincipalID:   "local",
 		WorkspaceRoot: "/tmp/ws",
-		Kind:          ReceiptKindTaskAttempt,
+		Kind:          ReceiptKindSubagentRun,
 		Status:        ReceiptStatusFailed,
 		FinishedAt:    now,
 		Summary:       "add tests (failed)",
