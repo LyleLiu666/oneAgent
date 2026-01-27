@@ -214,3 +214,45 @@
   - `prompts/models/<provider>.md`（针对 Claude/OpenAI/DeepSeek 的差异化约束）
 - 组合方式：按启用工具集 + provider 选择性拼装；并写测试保证关键约束（比如 “不要输出 CDATA”“不要 heredoc 写文件”）确实出现在 prompt 中。
 
+---
+
+## 0) 建议开发顺序（地基 → 上层）& 主要坑（2026-01-27）
+
+> 目标：先把“稳定性地基”补齐，再做“资产化闭环”的上层能力，避免后面返工。
+
+### A. 当前还没做完/未开始的 active changes（按地基→上层排序）
+
+#### P0 地基：读得准 + 写得稳（影响一切改代码任务）
+
+1) `add-read-file-tool`（新增 `read_file` 工具）
+- **价值**：解决“只能靠 rg/shell 拼上下文 → 易截断/不完整 → edit 误改/失败”的根因。
+- **关键坑**
+  - 路径/作用域：workspace enabled 时相对路径必须防 `..` 与 symlink escape；绝对路径允许只读（对齐 workspace spec）。
+  - 分页一致性：`offset_lines/limit_lines` 的基准（0-based/1-based）要统一；返回必须携带 `start_line/end_line` 可追溯。
+  - `max_bytes` 截断：必须保证 UTF-8 安全截断，并明确标记 `truncated=true`。
+  - 二进制/超大文件：v1 建议直接报错/提示（避免把二进制塞进上下文）。
+
+2) `add-atomic-write-file`（write_file overwrite + SBE 写回改为原子替换）
+- **价值**：避免长任务的低概率 silent corruption（半写文件）毁掉后续所有步骤与证据链。
+- **关键坑**
+  - 必须“同目录 temp + rename”，跨目录 rename 可能不是原子。
+  - Windows 文件占用/权限：rename/replace 可能失败；失败必须不污染原文件并给可操作提示。
+  - 文件 mode/属性：原子替换可能改变权限；需有明确策略（至少不要意外丢失可执行权限）。
+  - temp 残留与清理：崩溃后残留不可避免；要 best-effort 清理或下次写时清理同前缀 temp。
+
+#### P1 上层：把学习资产闭环跑通（留存与复用）
+
+3) `add-work-ledger-sop-learning`（已有基础能力，但仍缺关键闭环）
+- **建议的内部推进顺序**
+  - 3.1 `1.9` approve → materialize personal skill + recall（真正闭环阀门）
+  - 3.2 `1.10` tests（把“强制证据/旁路学习/幂等”写进 CI）
+  - 3.3 `1.8` UI（展示证据链、压缩测试结果、similar 辅助治理）
+  - 3.4 `1.6` 治理完善（dedupe/merge/archive 的规则与 hard filter + tests）
+- **关键坑**
+  - “证据可复核”要从约定升级为硬门槛：receipt 必须存在且 artifacts 可打开；否则不得进入学习候选。
+  - skill 物化的命名/去重/覆盖策略必须 deterministic（建议带 suggestion_id）。
+  - recall 只吃 active/approved：merged/archived/deprecated 必须硬过滤并有测试。
+
+### B. 一句话总结排序
+- **先** `read_file` → **再** 原子写 → **再** “approved→skill→recall”闭环 → **最后** UI/治理细化。
+

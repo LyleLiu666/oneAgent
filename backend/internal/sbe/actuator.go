@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/liu_y/oneAgent/backend/internal/fsutil"
 )
 
 // ApplyEditBlocks applies a list of edit blocks and returns total replacements.
@@ -92,7 +94,7 @@ func applyReplacement(sourceLines []string, match *MatchResult, replacement []st
 
 func writeLines(filePath string, lines []string) error {
 	output := strings.Join(lines, "\n")
-	if err := os.WriteFile(filePath, []byte(output), 0644); err != nil {
+	if err := fsutil.AtomicWriteFile(filePath, []byte(output), 0644); err != nil {
 		return fmt.Errorf("write file error: %w", err)
 	}
 	return nil

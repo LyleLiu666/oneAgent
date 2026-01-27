@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/builtinskills"
+	"github.com/liu_y/oneAgent/backend/internal/config"
 )
 
 type DiscoverOptions struct {
@@ -18,7 +19,7 @@ type DiscoverOptions struct {
 }
 
 // Discover loads skills from configured sources and applies the precedence rule:
-// <workspace>/.oneagent > <workspace>/skills > <workspace>/.claude > ~/.claude > ~/.codex > .builtin
+// <workspace>/.oneagent > <workspace>/skills > <workspace>/.claude > ONEAGENT_HOME/.oneagent > ~/.claude > ~/.codex > .builtin
 // (dedup by normalized name).
 func Discover(ctx context.Context, opts DiscoverOptions) (*Catalog, error) {
 	sources := buildSources(opts.WorkspaceRoot)
@@ -101,6 +102,21 @@ func buildSources(workspaceRoot string) []sourceRoot {
 				Root:   filepath.Join(workspaceRoot, ".claude", "skills"),
 			},
 		)
+	}
+
+	// oneAgent personal skills (ONEAGENT_HOME/.oneagent/skills).
+	oneagentHome := ""
+	if cfg := config.AppConfig; cfg != nil {
+		oneagentHome = strings.TrimSpace(cfg.Home)
+	}
+	if oneagentHome == "" {
+		oneagentHome = strings.TrimSpace(os.Getenv("ONEAGENT_HOME"))
+	}
+	if oneagentHome != "" {
+		sources = append(sources, sourceRoot{
+			Source: SourceOneAgent,
+			Root:   filepath.Join(oneagentHome, ".oneagent", "skills"),
+		})
 	}
 
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {

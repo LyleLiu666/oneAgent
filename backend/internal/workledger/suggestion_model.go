@@ -30,6 +30,9 @@ type SuggestionMeta struct {
 	CompressionEvaluatedAt time.Time `json:"compression_evaluated_at,omitempty"`
 	SimilarSkillIDs        []string  `json:"similar_skill_ids,omitempty"`
 	DeltaVsTop1            string    `json:"delta_vs_top1,omitempty"`
+
+	MaterializedSkillID   string `json:"materialized_skill_id,omitempty"`
+	MaterializedSkillPath string `json:"materialized_skill_path,omitempty"`
 }
 
 type Suggestion struct {

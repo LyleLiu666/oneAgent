@@ -1,6 +1,7 @@
 package scope
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,6 +42,28 @@ func TestResolveWritePath_SymlinkEscapeDenied(t *testing.T) {
 	}
 }
 
+func TestResolveReadPath_SymlinkEscapeDenied(t *testing.T) {
+	root := t.TempDir()
+
+	outside := filepath.Join(filepath.Dir(root), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write outside: %v", err)
+	}
+
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(filepath.Dir(root), link); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	_, err := ResolveReadPath(root, filepath.Join("link", "outside.txt"))
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !errors.Is(err, ErrPathOutsideWorkspace) {
+		t.Fatalf("expected ErrPathOutsideWorkspace, got %v", err)
+	}
+}
+
 func TestResolveWritePath_ScopePatterns(t *testing.T) {
 	root := t.TempDir()
 
@@ -60,4 +83,3 @@ func TestResolveWritePath_ScopePatterns(t *testing.T) {
 		t.Fatalf("expected ErrPathOutsideScope, got %v", err)
 	}
 }
-

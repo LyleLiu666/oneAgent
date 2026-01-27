@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/liu_y/oneAgent/backend/internal/config"
 )
 
 func TestParseSkill_Frontmatter(t *testing.T) {
@@ -148,8 +150,15 @@ Second paragraph.
 }
 
 func TestDiscover_MultiSourcePrecedence(t *testing.T) {
+	prevCfg := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
+	oneagentHome := t.TempDir()
+	t.Setenv("ONEAGENT_HOME", oneagentHome)
+	config.AppConfig = &config.Config{Home: oneagentHome}
 
 	workspace := t.TempDir()
 
@@ -158,8 +167,9 @@ func TestDiscover_MultiSourcePrecedence(t *testing.T) {
 	wsClaude := filepath.Join(workspace, ".claude", "skills", "same", "SKILL.md")
 	wsSkills := filepath.Join(workspace, "skills", "same", "SKILL.md")
 	oneagent := filepath.Join(workspace, ".oneagent", "skills", "same", "SKILL.md")
+	homeOneAgent := filepath.Join(oneagentHome, ".oneagent", "skills", "same", "SKILL.md")
 
-	for _, p := range []string{claude, codex, wsClaude, wsSkills, oneagent} {
+	for _, p := range []string{claude, codex, wsClaude, wsSkills, oneagent, homeOneAgent} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -180,6 +190,9 @@ func TestDiscover_MultiSourcePrecedence(t *testing.T) {
 	if err := os.WriteFile(oneagent, []byte("---\nname: same\ndescription: from oneagent\n---\n"), 0o644); err != nil {
 		t.Fatalf("write oneagent: %v", err)
 	}
+	if err := os.WriteFile(homeOneAgent, []byte("---\nname: same\ndescription: from oneagent home\n---\n"), 0o644); err != nil {
+		t.Fatalf("write home oneagent: %v", err)
+	}
 
 	cat, err := Discover(context.Background(), DiscoverOptions{WorkspaceRoot: workspace})
 	if err != nil {
@@ -195,16 +208,24 @@ func TestDiscover_MultiSourcePrecedence(t *testing.T) {
 }
 
 func TestDiscover_WorkspaceSkillsPrecedence(t *testing.T) {
+	prevCfg := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
+	oneagentHome := t.TempDir()
+	t.Setenv("ONEAGENT_HOME", oneagentHome)
+	config.AppConfig = &config.Config{Home: oneagentHome}
 
 	workspace := t.TempDir()
 
 	homeClaude := filepath.Join(home, ".claude", "skills", "same", "SKILL.md")
 	wsClaude := filepath.Join(workspace, ".claude", "skills", "same", "SKILL.md")
 	wsSkills := filepath.Join(workspace, "skills", "same", "SKILL.md")
+	homeOneAgent := filepath.Join(oneagentHome, ".oneagent", "skills", "same", "SKILL.md")
 
-	for _, p := range []string{homeClaude, wsClaude, wsSkills} {
+	for _, p := range []string{homeClaude, wsClaude, wsSkills, homeOneAgent} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -218,6 +239,9 @@ func TestDiscover_WorkspaceSkillsPrecedence(t *testing.T) {
 	}
 	if err := os.WriteFile(wsSkills, []byte("---\nname: same\ndescription: from workspace skills\n---\n"), 0o644); err != nil {
 		t.Fatalf("write workspace skills: %v", err)
+	}
+	if err := os.WriteFile(homeOneAgent, []byte("---\nname: same\ndescription: from oneagent home\n---\n"), 0o644); err != nil {
+		t.Fatalf("write home oneagent: %v", err)
 	}
 
 	cat, err := Discover(context.Background(), DiscoverOptions{WorkspaceRoot: workspace})
@@ -233,9 +257,59 @@ func TestDiscover_WorkspaceSkillsPrecedence(t *testing.T) {
 	}
 }
 
-func TestDiscover_IncludesBuiltinSkills(t *testing.T) {
+func TestDiscover_OneAgentHomePrecedence(t *testing.T) {
+	prevCfg := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
+	oneagentHome := t.TempDir()
+	t.Setenv("ONEAGENT_HOME", oneagentHome)
+	config.AppConfig = &config.Config{Home: oneagentHome}
+
+	homeClaude := filepath.Join(home, ".claude", "skills", "same", "SKILL.md")
+	homeCodex := filepath.Join(home, ".codex", "skills", "same", "SKILL.md")
+	homeOneAgent := filepath.Join(oneagentHome, ".oneagent", "skills", "same", "SKILL.md")
+
+	for _, p := range []string{homeClaude, homeCodex, homeOneAgent} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+
+	if err := os.WriteFile(homeCodex, []byte("---\nname: same\ndescription: from home codex\n---\n"), 0o644); err != nil {
+		t.Fatalf("write home codex: %v", err)
+	}
+	if err := os.WriteFile(homeClaude, []byte("---\nname: same\ndescription: from home claude\n---\n"), 0o644); err != nil {
+		t.Fatalf("write home claude: %v", err)
+	}
+	if err := os.WriteFile(homeOneAgent, []byte("---\nname: same\ndescription: from oneagent home\n---\n"), 0o644); err != nil {
+		t.Fatalf("write home oneagent: %v", err)
+	}
+
+	cat, err := Discover(context.Background(), DiscoverOptions{})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	got, ok := cat.ByID("same")
+	if !ok {
+		t.Fatalf("expected skill to be discoverable by id")
+	}
+	if got.Description != "from oneagent home" || got.Source != SourceOneAgent {
+		t.Fatalf("expected ONEAGENT_HOME to win over ~/.claude/.codex, got %+v", got)
+	}
+}
+
+func TestDiscover_IncludesBuiltinSkills(t *testing.T) {
+	prevCfg := config.AppConfig
+	t.Cleanup(func() { config.AppConfig = prevCfg })
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	oneagentHome := t.TempDir()
+	t.Setenv("ONEAGENT_HOME", oneagentHome)
+	config.AppConfig = &config.Config{Home: oneagentHome}
 
 	cat, err := Discover(context.Background(), DiscoverOptions{})
 	if err != nil {

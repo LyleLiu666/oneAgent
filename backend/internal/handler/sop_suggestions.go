@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
+	"github.com/liu_y/oneAgent/backend/internal/sopskill"
 	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
@@ -52,15 +53,15 @@ func CreateSuggestion(c *gin.Context) {
 	}
 
 	sug, err := rt.WorkLedger.CreateSuggestion(workledger.CreateSuggestionInput{
-		PrincipalID:       principal,
-		WorkspaceRoot:     strings.TrimSpace(req.WorkspaceRoot),
-		Title:             strings.TrimSpace(req.Title),
-		Description:       strings.TrimSpace(req.Description),
-		RiskNotes:         strings.TrimSpace(req.RiskNotes),
+		PrincipalID:        principal,
+		WorkspaceRoot:      strings.TrimSpace(req.WorkspaceRoot),
+		Title:              strings.TrimSpace(req.Title),
+		Description:        strings.TrimSpace(req.Description),
+		RiskNotes:          strings.TrimSpace(req.RiskNotes),
 		EvidenceReceiptIDs: req.EvidenceIDs,
 		DraftSkill:         strings.TrimSpace(req.DraftSkill),
-		Scores: workledger.ComputeSuggestionScores(rt.WorkLedger, principal, dayKey, req.Title, req.DraftSkill, req.EvidenceIDs),
-		Meta: workledger.SuggestionMeta{DayKey: dayKey},
+		Scores:             workledger.ComputeSuggestionScores(rt.WorkLedger, principal, dayKey, req.Title, req.DraftSkill, req.EvidenceIDs),
+		Meta:               workledger.SuggestionMeta{DayKey: dayKey},
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -94,11 +95,11 @@ func ListSuggestions(c *gin.Context) {
 	}
 
 	list, err := rt.WorkLedger.ListSuggestions(workledger.ListSuggestionsQuery{
-		PrincipalID:    principal,
-		DayKey:         dayKey,
-		Status:         workledger.SuggestionStatus(status),
-		IncludeParked:  includeParked,
-		Limit:          limit,
+		PrincipalID:   principal,
+		DayKey:        dayKey,
+		Status:        workledger.SuggestionStatus(status),
+		IncludeParked: includeParked,
+		Limit:         limit,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -137,8 +138,8 @@ func GetSuggestion(c *gin.Context) {
 }
 
 type updateStatusRequest struct {
-	Status         string `json:"status"`
-	MergedIntoID   string `json:"merged_into_suggestion_id,omitempty"`
+	Status       string `json:"status"`
+	MergedIntoID string `json:"merged_into_suggestion_id,omitempty"`
 }
 
 func UpdateSuggestionStatus(c *gin.Context) {
@@ -191,6 +192,41 @@ func UpdateSuggestionStatus(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusOK, merged)
+		return
+	}
+
+	if status == workledger.SuggestionStatusApproved {
+		// Approve is strong-consistent: materialize first, then update status.
+		if strings.TrimSpace(current.Meta.MaterializedSkillID) == "" || strings.TrimSpace(current.Meta.MaterializedSkillPath) == "" {
+			m, err := sopskill.MaterializeSuggestion(rt.Config.Home, current)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			updated, err := rt.WorkLedger.UpdateSuggestion(id, func(sug *workledger.Suggestion) error {
+				sug.Status = workledger.SuggestionStatusApproved
+				sug.MergedIntoSuggestionID = ""
+				sug.Meta.MaterializedSkillID = m.SkillID
+				sug.Meta.MaterializedSkillPath = m.SkillPath
+				return nil
+			})
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, updated)
+			return
+		}
+		updated, err := rt.WorkLedger.UpdateSuggestion(id, func(sug *workledger.Suggestion) error {
+			sug.Status = workledger.SuggestionStatusApproved
+			sug.MergedIntoSuggestionID = ""
+			return nil
+		})
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, updated)
 		return
 	}
 

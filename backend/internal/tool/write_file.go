@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/liu_y/oneAgent/backend/internal/fsutil"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 )
 
@@ -136,7 +137,7 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			result.TotalLines = totalLines
 		}
 	} else {
-		if err := os.WriteFile(target, contentBytes, 0o644); err != nil {
+		if err := fsutil.AtomicWriteFile(target, contentBytes, 0o644); err != nil {
 			return nil, fmt.Errorf("write file error: %w", err)
 		}
 		result.TotalBytes = int64(len(contentBytes))

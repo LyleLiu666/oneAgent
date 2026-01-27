@@ -60,7 +60,13 @@ func ResolveReadPath(workspaceRoot, input string) (string, error) {
 		return "", ErrWorkspaceNotSet
 	}
 
-	abs := filepath.Clean(filepath.Join(root, trimmed))
+	abs, err := secureJoin(root, trimmed)
+	if err != nil {
+		if errors.Is(err, ErrPathOutsideWorkspace) {
+			return "", ErrPathOutsideWorkspace
+		}
+		return "", err
+	}
 	if !isWithinRoot(root, abs) {
 		return "", ErrPathOutsideWorkspace
 	}
@@ -193,4 +199,3 @@ func secureJoin(root, rel string) (string, error) {
 	}
 	return current, nil
 }
-

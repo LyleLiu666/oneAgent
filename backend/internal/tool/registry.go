@@ -23,6 +23,7 @@ const (
 	ToolIDSkillRead  = "skill_read"
 	ToolIDSubagent   = "subagent"
 	ToolIDWriteFile  = "write_file"
+	ToolIDReadFile   = "read_file"
 )
 
 // Context keys for passing user information to tool handlers
@@ -81,6 +82,7 @@ var registry = map[string]Definition{
 	ToolIDSearch:     searchDefinition(),
 	ToolIDRunCommand: runCommandDefinition(),
 	ToolIDSkillRead:  skillReadDefinition(),
+	ToolIDReadFile:   readFileDefinition(),
 	ToolIDWriteFile:  writeFileDefinition(),
 }
 
