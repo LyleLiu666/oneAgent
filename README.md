@@ -2,6 +2,10 @@
 
 oneAgent 以“本地工具形应用”为默认交付：一个 `oneagent` 可执行文件即可启动（不依赖 Docker/Keycloak/Postgres）。
 
+定位：一个能“挂机干活”的 agentic 助手——支持 workspace 边界、skills、子 agent，以及 **长任务 Task Queue（可取消/可恢复 + Outcome Observer 验收）**。
+
+文档索引：`docs/README.md`
+
 ## Quick Start（本地工具默认路径）
 
 ### Prerequisites
@@ -13,10 +17,14 @@ oneAgent 以“本地工具形应用”为默认交付：一个 `oneagent` 可�
 
 ```bash
 make build
-./dist/oneagent serve
+./dist/oneagent serve --open --workspace .
 ```
 
 访问：`http://localhost:8080`
+
+说明：
+- `--open`：启动后自动打开浏览器
+- `--workspace .`：设置默认 workspace（文件工具与命令工具的默认作用域/写入边界）；也可在 UI 顶部随时修改
 
 ### Release（产物打包）
 
@@ -39,6 +47,15 @@ ls dist/release
 默认新会话不启用 workspace（仅对话）。如需使用 `edit/write_file/rg/run_command` 等工具修改或搜索本地文件：
 - 在 Chat 顶部输入 `Workspace path (server)`（服务运行机器上的绝对路径，例如你的项目目录）
 - 后端会将其保存到 session metadata，并将文件工具/命令工具默认限制在该目录内
+
+## Tasks（长任务队列 / 可取消 / 可恢复）
+
+适用场景：你希望 oneAgent 后台跑几十分钟到数小时，最终交付可复核产物（diff/测试报告/文档等），而不是人一直盯着对话。
+
+- UI：Chat 页顶部的 `Tasks` 面板（默认折叠）可创建任务、查看事件、取消/恢复。
+- 调度：**同 workspace 串行 FIFO**；**跨 workspace 并行**（默认不做硬限制）。
+- 验收：任务完成会产出 `findings_path` / `trace_log_path`（交付件），并由 read-only 的 Outcome Observer 给出 pass/fail（不跑命令）。
+- 数据落盘：`ONEAGENT_HOME/.oneagent/data/tasks/<task_id>/`（含 `task.json` 与 `events.jsonl`）。
 
 ## Skills（技能）
 
@@ -63,6 +80,7 @@ cd backend
 go run ./cmd/oneagent skills search --query "create-skill"           # 内置 skills（不依赖 workspace）
 go run ./cmd/oneagent skills search --query "tech-spec-architect"    # 内置 skills（不依赖 workspace）
 go run ./cmd/oneagent skills search --query "my-skill" --workspace "$(pwd)/.."   # workspace skills
+go run ./cmd/oneagent skills status --workspace "$(pwd)/.."          # 可用性/缺失依赖/安装建议（eligible 过滤）
 ```
 
 ## Data Layout
@@ -89,6 +107,11 @@ go run ./cmd/oneagent skills search --query "my-skill" --workspace "$(pwd)/.."  
 | `LOG_RETENTION_DAYS` | 日志保留天数 | `30` |
 
 注意：`DATABASE_URL`（Postgres）在本地工具模式下不支持，设置后会拒绝启动。
+
+## Windows
+
+- oneAgent 的命令执行仅支持 `bash`；在 Windows 上通过 Git Bash 执行（不支持 PowerShell）。
+- Windows release 会内置 portable Git/Git Bash（含第三方 license/NOTICE），确保“开箱即用”的一致体验。
 
 ## Project Structure
 
@@ -125,7 +148,17 @@ oneAgent/
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `POST` | `/api/chat` | Streaming chat (SSE) |
+| `GET` | `/api/config` | Runtime defaults (default workspace/base URL) |
 | `GET` | `/api/sessions` | List chat sessions |
 | `GET` | `/api/sessions/:id` | Get session with messages |
 | `DELETE` | `/api/sessions/:id` | Delete session |
+| `GET/POST/PUT/DELETE` | `/api/llm/providers` | LLM providers CRUD |
+| `GET/POST/PUT/DELETE` | `/api/llm/models` | LLM models CRUD |
+| `GET` | `/api/tools` | List tools |
+| `POST` | `/api/tasks` | Create task |
+| `GET` | `/api/tasks` | List tasks (filter by workspace) |
+| `GET` | `/api/tasks/:id` | Get task |
+| `POST` | `/api/tasks/:id/cancel` | Cancel task |
+| `POST` | `/api/tasks/:id/resume` | Resume task |
+| `GET` | `/api/tasks/:id/events` | Task events |
 | `GET` | `/api/me` | Get current user info |

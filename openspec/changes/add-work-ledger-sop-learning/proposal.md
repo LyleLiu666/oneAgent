@@ -13,8 +13,10 @@
 - 提供按用户（个人）维度的 ledger 查询与检索能力（列表、过滤、全文检索）。
 - v1 先做**单机版（单用户）**：不引入账号/SSO；`principal_id` 可视为隐式常量（例如 `local`）。
 - 提供 “完成通知/日报（Digest）” 的基础能力：从 ledger 生成日级汇总，让用户定期回来“收割成果”。
-- 增加 “Receipt → SOP” 的自动提炼：当系统检测到重复模式时生成 **SOP Suggestion（建议）**，进入**中间态**（draft/proposed），只有用户人工确认后才会启用为 Active SOP。
-- 启用后的 SOP 以 “个人 skills 包” 的形式落盘并接入 skills discovery/recall（便于在后续任务中复用）。
+- 增加 “Receipt → SOP” 的自动提炼：当系统检测到重复模式时生成 **SOP Suggestion（建议）**，进入**中间态**（proposed），只有用户人工确认后才会启用为 Active SOP。
+- 增加 **SOP/Skill 治理能力**：去重、合并、废弃（drop/archived）、过时淘汰，确保“可用提示词资产”不会无限膨胀与污染召回。
+- 强制 **Evidence-first**：只有具备可复核证据（findings/trace/test report/diff 等）且通过验收的交付，才允许进入“可学习/可沉淀”的候选集合；避免“有点意思就存”的噪声。
+- 保证 **学习管线独立**：学习/提炼/治理必须是独立管线（best-effort），其失败不得影响 Task/Subagent 的交付与稳定性。
 
 ## Impact
 - Affected specs:

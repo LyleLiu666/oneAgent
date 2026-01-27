@@ -4,7 +4,7 @@
 1) `<workspace>/.oneagent/skills/**/SKILL.md`
 2) `<workspace>/skills/**/SKILL.md`
 3) `<workspace>/.claude/skills/**/SKILL.md`
-4) `ONEAGENT_HOME/.oneagent/skills/**/SKILL.md`（oneAgent-managed personal skills）
+4) `ONEAGENT_HOME/.oneagent/skills/**/SKILL.md`（oneAgent-managed personal skills，active）
 5) `~/.claude/skills/**/SKILL.md`
 6) `~/.codex/skills/**/SKILL.md`
 7) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
@@ -14,8 +14,12 @@
 - **WHEN** 系统加载技能目录
 - **THEN** 技能列表中包含该技能（source=`.oneagent_home` 或等价 source）
 
+#### Scenario: 归档的个人 skills 不参与发现
+- **GIVEN** `ONEAGENT_HOME/.oneagent/skills-archived/old-sop/SKILL.md` 存在
+- **WHEN** 系统加载技能目录
+- **THEN** 技能列表中不包含该技能（archived skills 不得参与 discovery/recall）
+
 #### Scenario: workspace skills 覆盖个人 skills
 - **GIVEN** `ONEAGENT_HOME/.oneagent/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
 - **WHEN** 系统加载技能目录
 - **THEN** 仅保留 `<workspace>/.oneagent` 版本作为最终生效技能（同名覆盖）
-
