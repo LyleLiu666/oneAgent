@@ -148,3 +148,56 @@ it('queues a new task using current workspace and model', async () => {
 
     wrapper.unmount()
 })
+
+it('shows updates when a task finishes after baseline', async () => {
+    const { default: TaskQueuePanel } = await import('@/components/TaskQueuePanel.vue')
+
+    ;(apiClient.listTasks as any).mockResolvedValueOnce([
+        {
+            id: 'task-1',
+            user_id: 'local',
+            workspace: '/tmp/ws',
+            title: 'T1',
+            prompt: 'do it',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            attempts: [{ id: 'a1', status: 'running', created_at: new Date().toISOString() }],
+        },
+    ])
+
+    const wrapper = shallowMount(TaskQueuePanel, {
+        props: {
+            workspace: '/tmp/ws',
+            modelId: 'model-1',
+        },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('[data-testid="tasks-toggle"]').trigger('click')
+    await flushPromises()
+
+    ;(apiClient.listTasks as any).mockResolvedValueOnce([
+        {
+            id: 'task-1',
+            user_id: 'local',
+            workspace: '/tmp/ws',
+            title: 'T1',
+            prompt: 'do it',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            attempts: [
+                { id: 'a1', status: 'succeeded', created_at: new Date().toISOString(), finished_at: new Date().toISOString() },
+            ],
+        },
+    ])
+
+    await wrapper.get('button[title="Refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="task-updates"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Updates')
+    expect(wrapper.text()).toContain('succeeded')
+
+    wrapper.unmount()
+})

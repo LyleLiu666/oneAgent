@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Folder, ListTodo, RefreshCw, RotateCcw, X, Plus } from 'lucide-vue-next'
 
 import {
@@ -13,6 +13,12 @@ import {
   type TaskAttempt,
   type TaskEvent,
 } from '@/api/client'
+import {
+  diffTaskUpdates,
+  saveTaskSnapshotsToStorage,
+  type TaskSnapshot,
+  type TaskUpdate,
+} from '@/lib/taskUpdates'
 
 type WorkspaceSummary = {
   workspace: string
@@ -23,10 +29,15 @@ type WorkspaceSummary = {
 }
 
 const STORAGE_KEY = 'oneagent-workspaces'
+const TASK_SNAPSHOT_KEY = 'oneagent-task-snapshots'
 
 const tasksLoading = ref(false)
 const tasksError = ref('')
 const tasks = ref<Task[]>([])
+
+const notifyInitialized = ref(false)
+const taskSnapshots = ref<Record<string, TaskSnapshot>>({})
+const taskUpdates = ref<TaskUpdate[]>([])
 
 const workspacesManual = ref<string[]>([])
 const workspaceNew = ref('')
@@ -76,13 +87,36 @@ const refreshTasks = async () => {
   tasksLoading.value = true
   try {
     const list = await listTasks()
-    tasks.value = Array.isArray(list) ? list : []
+    const nextTasks = Array.isArray(list) ? list : []
+
+    if (!notifyInitialized.value) {
+      // Establish baseline without emitting notifications.
+      const { next } = diffTaskUpdates({}, nextTasks)
+      taskSnapshots.value = next
+      saveTaskSnapshotsToStorage(TASK_SNAPSHOT_KEY, taskSnapshots.value)
+      notifyInitialized.value = true
+    } else {
+      const { next, updates } = diffTaskUpdates(taskSnapshots.value, nextTasks)
+      taskSnapshots.value = next
+      saveTaskSnapshotsToStorage(TASK_SNAPSHOT_KEY, next)
+      if (updates.length) {
+        const seen = new Set(taskUpdates.value.map((u) => `${u.taskId}:${u.attemptId}:${u.status}`))
+        const merged = [...updates.filter((u) => !seen.has(`${u.taskId}:${u.attemptId}:${u.status}`)), ...taskUpdates.value]
+        taskUpdates.value = merged.slice(0, 10)
+      }
+    }
+
+    tasks.value = nextTasks
   } catch (e: any) {
     tasksError.value = String(e?.data?.error || e?.message || 'Failed to load tasks')
     tasks.value = []
   } finally {
     tasksLoading.value = false
   }
+}
+
+const clearTaskUpdates = () => {
+  taskUpdates.value = []
 }
 
 const refreshSelected = async () => {
@@ -219,6 +253,22 @@ onMounted(async () => {
     workspaceSelected.value = allWorkspaces.value[0] || ''
   }
 })
+
+let timer: number | undefined
+onMounted(() => {
+  timer = window.setInterval(() => {
+    void refreshTasks()
+    if (selectedTaskId.value) {
+      void refreshSelected()
+    }
+  }, 2000)
+})
+onUnmounted(() => {
+  if (timer != null) {
+    window.clearInterval(timer)
+    timer = undefined
+  }
+})
 </script>
 
 <template>
@@ -238,6 +288,26 @@ onMounted(async () => {
           <RefreshCw class="w-4 h-4" />
           Refresh
         </button>
+      </div>
+
+      <div
+        v-if="taskUpdates.length"
+        data-testid="task-updates"
+        class="mb-4 rounded-2xl border border-surface-700/40 bg-surface-950/40 p-4"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div class="text-sm font-semibold text-surface-100">Updates</div>
+          <button class="text-xs text-surface-400 hover:text-surface-200" @click="clearTaskUpdates">Clear</button>
+        </div>
+        <div class="mt-2 space-y-2">
+          <div v-for="u in taskUpdates" :key="`${u.taskId}:${u.attemptId}:${u.status}`" class="text-sm text-surface-200">
+            <span class="font-mono text-surface-400">{{ u.status }}</span>
+            <span class="mx-2 text-surface-600">·</span>
+            <span class="text-surface-100">{{ u.title }}</span>
+            <span class="mx-2 text-surface-600">·</span>
+            <span class="text-surface-400 truncate">{{ u.workspace }}</span>
+          </div>
+        </div>
       </div>
 
       <div v-if="tasksError" class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
@@ -354,7 +424,9 @@ onMounted(async () => {
                   <div class="text-xs text-surface-500 mt-1 truncate">{{ t.prompt }}</div>
                 </div>
                 <div class="text-xs text-surface-400">
-                  {{ t.attempts?.length ? t.attempts[t.attempts.length - 1].status : 'queued' }}
+                  <span class="inline-flex items-center rounded-full px-2 py-0.5 border border-surface-700/40 bg-surface-900/40">
+                    {{ t.attempts?.length ? t.attempts[t.attempts.length - 1].status : 'queued' }}
+                  </span>
                 </div>
               </div>
             </button>
@@ -432,4 +504,3 @@ onMounted(async () => {
     </div>
   </div>
 </template>
-

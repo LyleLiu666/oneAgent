@@ -109,3 +109,54 @@ it('queues a task for selected workspace', async () => {
   wrapper.unmount()
 })
 
+it('shows updates when a task finishes after baseline', async () => {
+  vi.stubGlobal('localStorage', {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  })
+
+  const { default: TaskWorkbench } = await import('@/views/TaskWorkbench.vue')
+
+  ;(apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: 't1',
+      user_id: 'local',
+      workspace: '/tmp/wsA',
+      title: 'A1',
+      prompt: 'do A',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [{ id: 'a1', status: 'running', created_at: new Date().toISOString() }],
+    },
+  ])
+
+  const wrapper = shallowMount(TaskWorkbench)
+  await flushPromises()
+
+  // Manual refresh returns succeeded; updates should appear.
+  ;(apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: 't1',
+      user_id: 'local',
+      workspace: '/tmp/wsA',
+      title: 'A1',
+      prompt: 'do A',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: 'a1', status: 'succeeded', created_at: new Date().toISOString(), finished_at: new Date().toISOString() },
+      ],
+    },
+  ])
+
+  await wrapper.get('[data-testid="task-workbench-refresh"]').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid=\"task-updates\"]').exists()).toBe(true)
+  expect(wrapper.text()).toContain('Updates')
+  expect(wrapper.text()).toContain('succeeded')
+
+  wrapper.unmount()
+})

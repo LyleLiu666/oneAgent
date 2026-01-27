@@ -13,6 +13,7 @@ import {
     type TaskAttempt,
     type TaskEvent,
 } from '@/api/client'
+import { diffTaskUpdates, saveTaskSnapshotsToStorage, type TaskSnapshot, type TaskUpdate } from '@/lib/taskUpdates'
 
 const props = defineProps<{
     workspace: string
@@ -28,6 +29,11 @@ const submitting = ref(false)
 const tasks = ref<Task[]>([])
 const tasksLoading = ref(false)
 const tasksError = ref('')
+
+const TASK_SNAPSHOT_KEY = 'oneagent-task-snapshots'
+const notifyInitialized = ref(false)
+const taskSnapshots = ref<Record<string, TaskSnapshot>>({})
+const taskUpdates = ref<TaskUpdate[]>([])
 
 const selectedTaskId = ref<string>('')
 const selectedTask = ref<Task | null>(null)
@@ -65,7 +71,26 @@ const refreshTasks = async () => {
 
     tasksLoading.value = true
     try {
-        tasks.value = await listTasks(ws)
+        const nextTasks = await listTasks(ws)
+
+        if (!notifyInitialized.value) {
+            // Establish baseline without emitting notifications.
+            const { next } = diffTaskUpdates({}, nextTasks)
+            taskSnapshots.value = next
+            saveTaskSnapshotsToStorage(TASK_SNAPSHOT_KEY, next)
+            notifyInitialized.value = true
+        } else {
+            const { next, updates } = diffTaskUpdates(taskSnapshots.value, nextTasks)
+            taskSnapshots.value = next
+            saveTaskSnapshotsToStorage(TASK_SNAPSHOT_KEY, next)
+            if (updates.length) {
+                const seen = new Set(taskUpdates.value.map((u) => `${u.taskId}:${u.attemptId}:${u.status}`))
+                const merged = [...updates.filter((u) => !seen.has(`${u.taskId}:${u.attemptId}:${u.status}`)), ...taskUpdates.value]
+                taskUpdates.value = merged.slice(0, 10)
+            }
+        }
+
+        tasks.value = nextTasks
     } catch (e: any) {
         tasksError.value = String(e?.data?.error || e?.message || 'Failed to load tasks')
         tasks.value = []
@@ -148,6 +173,10 @@ const doResume = async () => {
     }
 }
 
+const clearTaskUpdates = () => {
+    taskUpdates.value = []
+}
+
 watch(
     () => effectiveWorkspace.value,
     async () => {
@@ -220,6 +249,30 @@ onUnmounted(() => {
 
             <div v-if="open" class="mt-3 space-y-3">
                 <div v-if="tasksError" class="text-xs text-red-400">{{ tasksError }}</div>
+
+                <div
+                    v-if="taskUpdates.length"
+                    data-testid="task-updates"
+                    class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3"
+                >
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="text-xs font-semibold text-surface-200">Updates</div>
+                        <button class="text-[11px] text-surface-400 hover:text-surface-200" @click="clearTaskUpdates">
+                            Clear
+                        </button>
+                    </div>
+                    <div class="mt-2 space-y-1">
+                        <div
+                            v-for="u in taskUpdates"
+                            :key="`${u.taskId}:${u.attemptId}:${u.status}`"
+                            class="text-xs text-surface-200 truncate"
+                        >
+                            <span class="font-mono text-surface-400">{{ u.status }}</span>
+                            <span class="mx-2 text-surface-600">·</span>
+                            <span class="text-surface-100">{{ u.title }}</span>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div class="space-y-2">
