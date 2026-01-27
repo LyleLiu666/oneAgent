@@ -222,6 +222,12 @@ func (s *Store) UpdateSuggestionStatus(id string, status SuggestionStatus, merge
 	if strings.TrimSpace(string(status)) == "" {
 		return Suggestion{}, errors.New("status is required")
 	}
+	if !isValidSuggestionStatus(status) {
+		return Suggestion{}, errors.New("invalid status")
+	}
+	if status == SuggestionStatusMerged {
+		return Suggestion{}, errors.New("use MergeSuggestions for merged status")
+	}
 
 	mu := s.suggestionLock(id)
 	mu.Lock()
@@ -237,15 +243,96 @@ func (s *Store) UpdateSuggestionStatus(id string, status SuggestionStatus, merge
 	}
 
 	sug.Status = status
-	if status == SuggestionStatusMerged {
-		sug.MergedIntoSuggestionID = strings.TrimSpace(mergedInto)
-	}
+	sug.MergedIntoSuggestionID = ""
 	sug.UpdatedAt = time.Now().UTC()
 
 	if err := writeJSONAtomic(s.suggestionJSONPath(id), sug, 0o600); err != nil {
 		return Suggestion{}, err
 	}
 	return sug, nil
+}
+
+func (s *Store) MergeSuggestions(fromID, intoID string) (Suggestion, Suggestion, error) {
+	if s == nil {
+		return Suggestion{}, Suggestion{}, errors.New("store is nil")
+	}
+	fromID = strings.TrimSpace(fromID)
+	intoID = strings.TrimSpace(intoID)
+	if fromID == "" || intoID == "" {
+		return Suggestion{}, Suggestion{}, errors.New("from_id and into_id are required")
+	}
+	if fromID == intoID {
+		return Suggestion{}, Suggestion{}, errors.New("cannot merge into itself")
+	}
+
+	first, second := fromID, intoID
+	if second < first {
+		first, second = second, first
+	}
+
+	m1 := s.suggestionLock(first)
+	m2 := s.suggestionLock(second)
+	m1.Lock()
+	m2.Lock()
+	defer m2.Unlock()
+	defer m1.Unlock()
+
+	from, err := s.readSuggestionLocked(fromID)
+	if err != nil {
+		return Suggestion{}, Suggestion{}, err
+	}
+	into, err := s.readSuggestionLocked(intoID)
+	if err != nil {
+		return Suggestion{}, Suggestion{}, err
+	}
+	if strings.TrimSpace(from.PrincipalID) != strings.TrimSpace(into.PrincipalID) {
+		return Suggestion{}, Suggestion{}, errors.New("principal_id mismatch")
+	}
+
+	now := time.Now().UTC()
+
+	from.Status = SuggestionStatusMerged
+	from.MergedIntoSuggestionID = intoID
+	from.UpdatedAt = now
+
+	into.EvidenceReceiptIDs = dedupStrings(append(into.EvidenceReceiptIDs, from.EvidenceReceiptIDs...))
+	into.EvidenceCount = len(into.EvidenceReceiptIDs)
+	into.UpdatedAt = now
+
+	if err := writeJSONAtomic(s.suggestionJSONPath(fromID), from, 0o600); err != nil {
+		return Suggestion{}, Suggestion{}, err
+	}
+	if err := writeJSONAtomic(s.suggestionJSONPath(intoID), into, 0o600); err != nil {
+		return Suggestion{}, Suggestion{}, err
+	}
+	return from, into, nil
+}
+
+func (s *Store) readSuggestionLocked(id string) (Suggestion, error) {
+	data, err := os.ReadFile(s.suggestionJSONPath(id))
+	if err != nil {
+		return Suggestion{}, err
+	}
+	var sug Suggestion
+	if err := json.Unmarshal(data, &sug); err != nil {
+		return Suggestion{}, fmt.Errorf("decode suggestion: %w", err)
+	}
+	return sug, nil
+}
+
+func isValidSuggestionStatus(sug SuggestionStatus) bool {
+	switch sug {
+	case SuggestionStatusProposed,
+		SuggestionStatusParked,
+		SuggestionStatusApproved,
+		SuggestionStatusRejected,
+		SuggestionStatusMerged,
+		SuggestionStatusDeprecated,
+		SuggestionStatusArchived:
+		return true
+	default:
+		return false
+	}
 }
 
 // LoadMoreParked moves the highest ranked parked suggestions back into the inbox (proposed),

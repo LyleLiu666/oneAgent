@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
@@ -32,6 +33,11 @@ type Runtime struct {
 	TaskRunner *taskqueue.TaskRunner
 
 	WorkLedger *workledger.Store
+
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bgWG     sync.WaitGroup
+	bgOnce   sync.Once
 }
 
 func Init(cfg *config.Config) (*Runtime, error) {
@@ -104,16 +110,42 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		Tasks:     tasks,
 		WorkLedger: ledger,
 	}
+	rt.bgCtx, rt.bgCancel = context.WithCancel(context.Background())
 	return rt, nil
+}
+
+// Go runs a background goroutine tied to the runtime lifecycle.
+// It is canceled when Runtime.Close is called.
+func (r *Runtime) Go(fn func(ctx context.Context)) {
+	if r == nil || fn == nil {
+		return
+	}
+	r.bgWG.Add(1)
+	go func() {
+		defer r.bgWG.Done()
+		fn(r.bgCtx)
+	}()
+}
+
+// GoOnce starts a background goroutine only once per runtime instance.
+func (r *Runtime) GoOnce(fn func(ctx context.Context)) {
+	if r == nil || fn == nil {
+		return
+	}
+	r.bgOnce.Do(func() { r.Go(fn) })
 }
 
 func (r *Runtime) Close() error {
 	if r == nil {
 		return nil
 	}
+	if r.bgCancel != nil {
+		r.bgCancel()
+	}
 	if r.TaskRunner != nil {
 		r.TaskRunner.Stop()
 	}
+	r.bgWG.Wait()
 	var firstErr error
 	if r.Settings != nil {
 		if err := r.Settings.Close(); err != nil && firstErr == nil {

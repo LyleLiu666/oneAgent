@@ -76,3 +76,52 @@ func TestStore_Suggestions_InboxCapAndLoadMore(t *testing.T) {
 	}
 }
 
+func TestStore_Suggestions_Merge(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewStore(filepath.Join(base, "ledger"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	dayKey := DayKey(time.Now())
+
+	s1, err := store.CreateSuggestion(CreateSuggestionInput{
+		PrincipalID:        "local",
+		Title:              "S1",
+		DraftSkill:         "# Skill\n\ncontent",
+		EvidenceReceiptIDs: []string{"r1", "r2"},
+		Scores:             SuggestionScores{TotalScore: 0.9},
+		Meta:              SuggestionMeta{DayKey: dayKey},
+	})
+	if err != nil {
+		t.Fatalf("CreateSuggestion(s1): %v", err)
+	}
+	s2, err := store.CreateSuggestion(CreateSuggestionInput{
+		PrincipalID:        "local",
+		Title:              "S2",
+		DraftSkill:         "# Skill\n\ncontent2",
+		EvidenceReceiptIDs: []string{"r2", "r3"},
+		Scores:             SuggestionScores{TotalScore: 0.8},
+		Meta:              SuggestionMeta{DayKey: dayKey},
+	})
+	if err != nil {
+		t.Fatalf("CreateSuggestion(s2): %v", err)
+	}
+
+	merged, canonical, err := store.MergeSuggestions(s2.SuggestionID, s1.SuggestionID)
+	if err != nil {
+		t.Fatalf("MergeSuggestions: %v", err)
+	}
+	if merged.Status != SuggestionStatusMerged {
+		t.Fatalf("expected merged status, got %q", merged.Status)
+	}
+	if merged.MergedIntoSuggestionID != s1.SuggestionID {
+		t.Fatalf("expected merged_into=%q, got %q", s1.SuggestionID, merged.MergedIntoSuggestionID)
+	}
+	if canonical.SuggestionID != s1.SuggestionID {
+		t.Fatalf("expected canonical id %q, got %q", s1.SuggestionID, canonical.SuggestionID)
+	}
+	if canonical.EvidenceCount != 3 {
+		t.Fatalf("expected canonical evidence_count=3, got %d", canonical.EvidenceCount)
+	}
+}

@@ -11,6 +11,7 @@ const (
 	SuggestionStatusRejected   SuggestionStatus = "rejected"
 	SuggestionStatusMerged     SuggestionStatus = "merged"
 	SuggestionStatusDeprecated SuggestionStatus = "deprecated"
+	SuggestionStatusArchived   SuggestionStatus = "archived"
 )
 
 type SuggestionScores struct {
@@ -54,4 +55,3 @@ type Suggestion struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
-

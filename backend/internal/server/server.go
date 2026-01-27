@@ -83,6 +83,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/ledger/sop_suggestions/generate", handler.GenerateSuggestions)
 		api.GET("/ledger/sop_suggestions", handler.ListSuggestions)
 		api.GET("/ledger/sop_suggestions/:id", handler.GetSuggestion)
+		api.GET("/ledger/sop_suggestions/:id/similar", handler.GetSimilarSuggestions)
 		api.POST("/ledger/sop_suggestions/:id/status", handler.UpdateSuggestionStatus)
 		api.POST("/ledger/sop_suggestions/load_more", handler.LoadMoreSuggestions)
 

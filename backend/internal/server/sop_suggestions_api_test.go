@@ -99,5 +99,48 @@ func TestServer_SOPSuggesionsAPI_Smoke(t *testing.T) {
 	if updated.Status != workledger.SuggestionStatusRejected {
 		t.Fatalf("expected rejected, got %q", updated.Status)
 	}
-}
 
+	// Create another suggestion then merge it into the first.
+	body2 := map[string]any{
+		"title":               "SOP: refactor auth v2",
+		"description":         "Another variant",
+		"draft_skill":         "# Skill\n\n## SOP\n1. ...\n",
+		"evidence_receipt_ids": []string{"r3"},
+	}
+	b, _ = json.Marshal(body2)
+	res2, err := http.Post(srv.URL+"/api/ledger/sop_suggestions", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST sop_suggestions 2: %v", err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusOK {
+		t.Fatalf("POST 2 status=%d", res2.StatusCode)
+	}
+	var created2 workledger.Suggestion
+	if err := json.NewDecoder(res2.Body).Decode(&created2); err != nil {
+		t.Fatalf("decode created2: %v", err)
+	}
+
+	mergeReq := map[string]any{
+		"status":                      "merged",
+		"merged_into_suggestion_id":   created.SuggestionID,
+	}
+	b, _ = json.Marshal(mergeReq)
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/api/ledger/sop_suggestions/"+created2.SuggestionID+"/status", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST merge: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST merge status=%d", res.StatusCode)
+	}
+	var merged workledger.Suggestion
+	if err := json.NewDecoder(res.Body).Decode(&merged); err != nil {
+		t.Fatalf("decode merged: %v", err)
+	}
+	if merged.Status != workledger.SuggestionStatusMerged {
+		t.Fatalf("expected merged status, got %q", merged.Status)
+	}
+}

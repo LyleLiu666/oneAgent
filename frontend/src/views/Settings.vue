@@ -8,6 +8,7 @@ import {
   Cpu,
   Search,
   FileText,
+  ListChecks,
 } from 'lucide-vue-next'
 import {
   getProviders,
@@ -20,6 +21,12 @@ import {
   updateBochaSettings,
   bochaSearch,
   getTodayDigest,
+  listSopSuggestions,
+  generateSopSuggestions,
+  updateSopSuggestionStatus,
+  loadMoreSopSuggestions,
+  type Suggestion,
+  type SuggestionStatus,
 } from '@/api/client'
 
 interface LLMModel {
@@ -61,7 +68,7 @@ const providerTypeOptions = [
 ]
 
 // Tab state
-const activeTab = ref<'providers' | 'search' | 'digest'>('providers')
+const activeTab = ref<'providers' | 'search' | 'digest' | 'sop'>('providers')
 
 // LLM Providers state
 const providers = ref<LLMProvider[]>([])
@@ -110,6 +117,69 @@ const loadDigest = async (refresh: boolean = false) => {
     digestDayKey.value = ''
   } finally {
     digestLoading.value = false
+  }
+}
+
+// SOP Suggestions state
+const sopLoading = ref(false)
+const sopError = ref('')
+const sopIncludeParked = ref(false)
+const sopItems = ref<Suggestion[]>([])
+
+const loadSopSuggestionsList = async () => {
+  sopLoading.value = true
+  sopError.value = ''
+  try {
+    const list = await listSopSuggestions({
+      status: 'proposed',
+      include_parked: sopIncludeParked.value,
+      limit: 50,
+    })
+    sopItems.value = Array.isArray(list) ? list : []
+  } catch (e: any) {
+    sopError.value = e?.message || 'Failed to load SOP suggestions'
+    sopItems.value = []
+  } finally {
+    sopLoading.value = false
+  }
+}
+
+const generateOneSuggestion = async () => {
+  sopLoading.value = true
+  sopError.value = ''
+  try {
+    await generateSopSuggestions({ count: 1, lookback_days: 7 })
+    await loadSopSuggestionsList()
+  } catch (e: any) {
+    sopError.value = e?.message || 'Failed to generate suggestion'
+  } finally {
+    sopLoading.value = false
+  }
+}
+
+const loadMoreParkedSuggestions = async () => {
+  sopLoading.value = true
+  sopError.value = ''
+  try {
+    await loadMoreSopSuggestions({ count: 3 })
+    await loadSopSuggestionsList()
+  } catch (e: any) {
+    sopError.value = e?.message || 'Failed to load more suggestions'
+  } finally {
+    sopLoading.value = false
+  }
+}
+
+const setSuggestionStatus = async (suggestionId: string, status: SuggestionStatus) => {
+  sopLoading.value = true
+  sopError.value = ''
+  try {
+    await updateSopSuggestionStatus(suggestionId, { status })
+    await loadSopSuggestionsList()
+  } catch (e: any) {
+    sopError.value = e?.message || 'Failed to update status'
+  } finally {
+    sopLoading.value = false
   }
 }
 
@@ -372,6 +442,18 @@ onMounted(async () => {
         >
           <FileText class="w-4 h-4" />
           Digest
+        </button>
+        <button
+          @click="activeTab = 'sop'; if (sopItems.length === 0) loadSopSuggestionsList()"
+          :class="[
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+            activeTab === 'sop'
+              ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+              : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+          ]"
+        >
+          <ListChecks class="w-4 h-4" />
+          SOP
         </button>
       </div>
 
@@ -721,6 +803,111 @@ onMounted(async () => {
             <div v-else-if="digestError" class="text-sm text-red-400">{{ digestError }}</div>
             <div v-else class="prose prose-invert max-w-none">
               <pre class="whitespace-pre-wrap text-sm bg-surface-900/60 border border-surface-700/50 rounded-xl p-4">{{ digestMarkdown || '(empty)' }}</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- SOP Suggestions Tab -->
+        <div v-show="activeTab === 'sop'" class="glass rounded-2xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-surface-700/50">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <ListChecks class="w-5 h-5 text-primary-400" />
+                <div>
+                  <h2 class="font-semibold text-surface-100">SOP Suggestions</h2>
+                  <p class="text-sm text-surface-500">Proposed SOPs (manual review required)</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  class="px-3 py-2 rounded-lg text-xs font-medium bg-surface-800/70 text-surface-100 hover:bg-surface-700/70"
+                  :disabled="sopLoading"
+                  @click="generateOneSuggestion"
+                >
+                  {{ sopLoading ? 'Working…' : 'Generate' }}
+                </button>
+                <button
+                  class="px-3 py-2 rounded-lg text-xs font-medium bg-surface-800/70 text-surface-100 hover:bg-surface-700/70"
+                  :disabled="sopLoading"
+                  @click="loadMoreParkedSuggestions"
+                >
+                  Load more
+                </button>
+              </div>
+            </div>
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <label class="flex items-center gap-2 text-xs text-surface-400">
+                <input v-model="sopIncludeParked" type="checkbox" class="accent-primary-500" @change="loadSopSuggestionsList" />
+                Include parked
+              </label>
+              <button
+                class="px-3 py-2 rounded-lg text-xs font-medium bg-surface-900/60 border border-surface-700/50 text-surface-200 hover:bg-surface-800/60"
+                :disabled="sopLoading"
+                @click="loadSopSuggestionsList"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="p-6 space-y-4">
+            <div v-if="sopLoading" class="text-sm text-surface-500">Loading…</div>
+            <div v-else-if="sopError" class="text-sm text-red-400">{{ sopError }}</div>
+            <div v-else-if="sopItems.length === 0" class="text-sm text-surface-500">
+              No suggestions yet. Click Generate to propose one from recent receipts.
+            </div>
+            <div v-else class="space-y-4">
+              <div v-for="s in sopItems" :key="s.suggestion_id" class="glass-card p-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-surface-100 truncate">{{ s.title }}</p>
+                    <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-surface-500">
+                      <span class="px-2 py-0.5 rounded-full bg-surface-800/70">{{ s.status }}</span>
+                      <span class="px-2 py-0.5 rounded-full bg-surface-800/70">evidence: {{ s.evidence_count }}</span>
+                      <span v-if="s.scores" class="px-2 py-0.5 rounded-full bg-surface-800/70">score: {{ s.scores.total_score.toFixed(2) }}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button
+                      v-if="s.status !== 'approved'"
+                      class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25"
+                      :disabled="sopLoading"
+                      @click="setSuggestionStatus(s.suggestion_id, 'approved')"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      v-if="s.status !== 'rejected'"
+                      class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-red-500/10 text-red-200 hover:bg-red-500/20"
+                      :disabled="sopLoading"
+                      @click="setSuggestionStatus(s.suggestion_id, 'rejected')"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      v-if="s.status === 'proposed'"
+                      class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-surface-800 text-surface-300 hover:bg-surface-700"
+                      :disabled="sopLoading"
+                      @click="setSuggestionStatus(s.suggestion_id, 'parked')"
+                    >
+                      Park
+                    </button>
+                    <button
+                      v-if="s.status !== 'archived'"
+                      class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-surface-800 text-surface-300 hover:bg-surface-700"
+                      :disabled="sopLoading"
+                      @click="setSuggestionStatus(s.suggestion_id, 'archived')"
+                    >
+                      Archive
+                    </button>
+                  </div>
+                </div>
+
+                <details class="rounded-lg bg-surface-900/60 border border-surface-700/50">
+                  <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">Draft</summary>
+                  <pre class="whitespace-pre-wrap text-xs text-surface-100 px-3 pb-3">{{ s.draft_skill }}</pre>
+                </details>
+              </div>
             </div>
           </div>
         </div>

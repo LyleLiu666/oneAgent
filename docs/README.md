@@ -17,6 +17,7 @@
 - Backend：`docs/backend/README.md`
 - Frontend：`docs/frontend/01-frontend-architecture.md`
 - 部署：`docs/deployment/01-deployment.md`
+- 对照分析与规划（openagentic-sdk）：`docs/openagentic-sdk-compare.md`
 
 ## 变更规范（OpenSpec）
 

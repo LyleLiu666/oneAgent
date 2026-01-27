@@ -428,6 +428,7 @@ export type SuggestionStatus =
     | 'rejected'
     | 'merged'
     | 'deprecated'
+    | 'archived'
 
 export interface SuggestionScores {
     scarcity_score: number

@@ -179,7 +179,22 @@ func UpdateSuggestionStatus(c *gin.Context) {
 		return
 	}
 
-	updated, err := rt.WorkLedger.UpdateSuggestionStatus(id, status, strings.TrimSpace(req.MergedIntoID))
+	if status == workledger.SuggestionStatusMerged {
+		intoID := strings.TrimSpace(req.MergedIntoID)
+		if intoID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "merged_into_suggestion_id is required for merged"})
+			return
+		}
+		merged, _, err := rt.WorkLedger.MergeSuggestions(id, intoID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, merged)
+		return
+	}
+
+	updated, err := rt.WorkLedger.UpdateSuggestionStatus(id, status, "")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
