@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   Home,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
+import { getLedgerStatusToday } from '@/api/client'
 
 const router = useRouter()
 const route = useRoute()
@@ -67,6 +68,31 @@ if (savedState) {
 }
 
 const sidebarWidth = computed(() => (isCollapsed.value ? 'w-16' : 'w-64'))
+
+const sopBadgeCount = ref(0)
+
+const refreshLedgerStatus = async () => {
+  try {
+    const st = await getLedgerStatusToday()
+    sopBadgeCount.value = Number(st?.sop_proposed_count || 0)
+  } catch {
+    // keep last known
+  }
+}
+
+let statusTimer: number | undefined
+onMounted(() => {
+  void refreshLedgerStatus()
+  statusTimer = window.setInterval(() => {
+    void refreshLedgerStatus()
+  }, 30_000)
+})
+onUnmounted(() => {
+  if (statusTimer != null) {
+    window.clearInterval(statusTimer)
+    statusTimer = undefined
+  }
+})
 </script>
 
 <template>
@@ -154,9 +180,16 @@ const sidebarWidth = computed(() => (isCollapsed.value ? 'w-16' : 'w-64'))
               />
               <span
                 v-if="!isCollapsed"
-                class="whitespace-nowrap overflow-hidden font-medium"
+                class="whitespace-nowrap overflow-hidden font-medium flex items-center gap-2"
               >
                 {{ item.name }}
+                <span
+                  v-if="item.path === '/governance/sop' && sopBadgeCount > 0"
+                  data-testid="sidebar-sop-badge"
+                  class="inline-flex items-center justify-center rounded-full bg-primary-500/15 text-primary-300 border border-primary-500/20 px-2 py-0.5 text-[11px]"
+                >
+                  {{ sopBadgeCount }}
+                </span>
               </span>
             </button>
           </li>
