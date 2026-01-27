@@ -157,6 +157,43 @@ func TestServer_SOPSuggesionsAPI_Smoke(t *testing.T) {
 	if merged.Status != workledger.SuggestionStatusMerged {
 		t.Fatalf("expected merged status, got %q", merged.Status)
 	}
+
+	// Archived MUST NOT create personal skills.
+	body3 := map[string]any{
+		"title":                "SOP: archived",
+		"description":          "Should not materialize",
+		"draft_skill":          "# Skill\n\n## SOP\n1. ...\n",
+		"evidence_receipt_ids": []string{"r4"},
+	}
+	b, _ = json.Marshal(body3)
+	res3, err := http.Post(srv.URL+"/api/ledger/sop_suggestions", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST sop_suggestions 3: %v", err)
+	}
+	defer res3.Body.Close()
+	if res3.StatusCode != http.StatusOK {
+		t.Fatalf("POST 3 status=%d", res3.StatusCode)
+	}
+	var created3 workledger.Suggestion
+	if err := json.NewDecoder(res3.Body).Decode(&created3); err != nil {
+		t.Fatalf("decode created3: %v", err)
+	}
+
+	up = map[string]any{"status": "archived"}
+	b, _ = json.Marshal(up)
+	req, _ = http.NewRequest(http.MethodPost, srv.URL+"/api/ledger/sop_suggestions/"+created3.SuggestionID+"/status", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST archive: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST archive status=%d", res.StatusCode)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".oneagent", "skills")); err == nil {
+		t.Fatalf("expected no .oneagent/skills dir after archive")
+	}
 }
 
 func TestServer_SOPSuggesionsAPI_ApproveMaterializesSkill(t *testing.T) {
