@@ -578,6 +578,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
 			ctx = tool.ContextWithRuntimeLayout(ctx, h.rt.Layout)
+			ctx = tool.ContextWithWorkLedger(ctx, h.rt.WorkLedger)
 			ctx = tool.ContextWithLLMClient(ctx, resolvedModel.Client)
 			ctx = tool.ContextWithModelName(ctx, resolvedModel.ModelName)
 			ctx = tool.ContextWithSystemPrompt(ctx, systemPrompt)

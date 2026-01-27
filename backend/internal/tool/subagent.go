@@ -11,6 +11,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
+	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
 type subagentToolRequest struct {
@@ -122,6 +123,9 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 
 	userID := strings.TrimSpace(UserIDFromContext(ctx))
+	if userID == "" {
+		userID = "local"
+	}
 
 	layout := RuntimeLayoutFromContext(ctx)
 	if layout == nil {
@@ -319,5 +323,44 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	if runErr != nil {
 		out.Error = runErr.Error()
 	}
+
+	if ledger := WorkLedgerFromContext(ctx); ledger != nil {
+		summary := strings.TrimSpace(out.Summary)
+		if summary == "" {
+			if runErr != nil {
+				summary = "subagent failed: " + runErr.Error()
+			} else {
+				summary = "subagent finished"
+			}
+		}
+		status := workledger.ReceiptStatusSucceeded
+		if runErr != nil {
+			status = workledger.ReceiptStatusFailed
+		}
+		finished := time.Now()
+		started := finished.Add(-time.Duration(maxInt64(0, result.DurationMs)) * time.Millisecond)
+		_, _ = ledger.CreateReceipt(workledger.CreateReceiptInput{
+			PrincipalID:   userID,
+			WorkspaceRoot: workspaceRoot,
+			Kind:          workledger.ReceiptKindSubagentRun,
+			Status:        status,
+			StartedAt:     started,
+			FinishedAt:    finished,
+			Summary:       summary,
+			Artifacts: workledger.ReceiptArtifacts{
+				FindingsPath: strings.TrimSpace(out.FindingsPath),
+				TraceLogPath: strings.TrimSpace(out.TraceLogPath),
+			},
+			Signals: workledger.ReceiptSignals{DurationMs: result.DurationMs},
+		})
+	}
+
 	return out, nil
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }

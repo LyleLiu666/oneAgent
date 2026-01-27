@@ -14,6 +14,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 	"github.com/liu_y/oneAgent/backend/internal/handler"
+	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
 func ensureTaskQueue(rt *runtime.Runtime) error {
@@ -85,6 +86,38 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 
 		res, runErr := subagent.Run(toolCtx, req)
 		_ = modelName // reserved for future observer/executor tuning
+
+		if rt.WorkLedger != nil {
+			summary := strings.TrimSpace(res.Summary)
+			if summary == "" {
+				if runErr != nil {
+					summary = "subagent failed: " + runErr.Error()
+				} else {
+					summary = "subagent finished"
+				}
+			}
+			status := workledger.ReceiptStatusSucceeded
+			if runErr != nil {
+				status = workledger.ReceiptStatusFailed
+			}
+			finished := time.Now()
+			started := finished.Add(-time.Duration(maxInt64(0, res.DurationMs)) * time.Millisecond)
+			_, _ = rt.WorkLedger.CreateReceipt(workledger.CreateReceiptInput{
+				PrincipalID:   userID,
+				WorkspaceRoot: task.Workspace,
+				Kind:          workledger.ReceiptKindSubagentRun,
+				Status:        status,
+				StartedAt:     started,
+				FinishedAt:    finished,
+				Summary:       summary,
+				Artifacts: workledger.ReceiptArtifacts{
+					FindingsPath: strings.TrimSpace(res.FindingsPath),
+					TraceLogPath: strings.TrimSpace(res.TraceLogPath),
+				},
+				Signals: workledger.ReceiptSignals{DurationMs: res.DurationMs},
+			})
+		}
+
 		return taskqueue.AttemptResult{
 			RunID:        res.RunID,
 			Summary:      res.Summary,
@@ -125,6 +158,13 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		DecideOutcome:  decideOutcome,
 	}
 	return rt.TaskRunner.Start()
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func buildSubagentToolset() ([]llm.Tool, map[string]subagent.ToolHandler, error) {
@@ -234,4 +274,3 @@ func resolveLLMClient(ctx context.Context, settings *settingsdb.DB, userID, mode
 
 	return client, m.Model, nil
 }
-

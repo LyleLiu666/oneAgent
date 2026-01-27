@@ -400,6 +400,27 @@ export async function getTaskEvents(taskId: string): Promise<TaskEvent[]> {
     return api(`/api/tasks/${taskId}/events`)
 }
 
+// ============================================================================
+// Work Ledger (Receipts / Digest)
+// ============================================================================
+
+export interface Digest {
+    principal_id: string
+    day_key: string
+    generated_at?: string
+    markdown: string
+}
+
+export async function getTodayDigest(refresh: boolean = false): Promise<Digest> {
+    const q = refresh ? '?refresh=1' : ''
+    return api(`/api/ledger/digests/today${q}`)
+}
+
+export async function getDigest(dayKey: string, refresh: boolean = false): Promise<Digest> {
+    const q = refresh ? '?refresh=1' : ''
+    return api(`/api/ledger/digests/${encodeURIComponent(dayKey)}${q}`)
+}
+
 
 
 // ============================================================================

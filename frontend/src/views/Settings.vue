@@ -7,6 +7,7 @@ import {
   Trash2,
   Cpu,
   Search,
+  FileText,
 } from 'lucide-vue-next'
 import {
   getProviders,
@@ -18,6 +19,7 @@ import {
   getBochaSettings,
   updateBochaSettings,
   bochaSearch,
+  getTodayDigest,
 } from '@/api/client'
 
 interface LLMModel {
@@ -59,7 +61,7 @@ const providerTypeOptions = [
 ]
 
 // Tab state
-const activeTab = ref<'providers' | 'search'>('providers')
+const activeTab = ref<'providers' | 'search' | 'digest'>('providers')
 
 // LLM Providers state
 const providers = ref<LLMProvider[]>([])
@@ -88,6 +90,28 @@ const testQuery = ref('今天天气怎么样')
 const testLoading = ref(false)
 const testResult = ref<string | null>(null)
 const showTestDialog = ref(false)
+
+// Digest state
+const digestLoading = ref(false)
+const digestError = ref('')
+const digestMarkdown = ref('')
+const digestDayKey = ref('')
+
+const loadDigest = async (refresh: boolean = false) => {
+  digestLoading.value = true
+  digestError.value = ''
+  try {
+    const d: any = await getTodayDigest(refresh)
+    digestMarkdown.value = String(d?.markdown || '')
+    digestDayKey.value = String(d?.day_key || '')
+  } catch (e: any) {
+    digestError.value = e?.message || 'Failed to load digest'
+    digestMarkdown.value = ''
+    digestDayKey.value = ''
+  } finally {
+    digestLoading.value = false
+  }
+}
 
 const providerTypeLabel = (value: string) => {
   const match = providerTypeOptions.find((option) => option.value === value)
@@ -336,6 +360,18 @@ onMounted(async () => {
         >
           <Search class="w-4 h-4" />
           Search Services
+        </button>
+        <button
+          @click="activeTab = 'digest'; if (!digestMarkdown) loadDigest(false)"
+          :class="[
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+            activeTab === 'digest'
+              ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+              : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+          ]"
+        >
+          <FileText class="w-4 h-4" />
+          Digest
         </button>
       </div>
 
@@ -652,6 +688,39 @@ onMounted(async () => {
             <!-- Placeholder for future search services -->
             <div class="text-center py-8 text-surface-500 text-sm">
               More search services coming soon...
+            </div>
+          </div>
+        </div>
+
+        <!-- Digest Tab -->
+        <div v-show="activeTab === 'digest'" class="glass rounded-2xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-surface-700/50">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <FileText class="w-5 h-5 text-primary-400" />
+                <div>
+                  <h2 class="font-semibold text-surface-100">Daily Digest</h2>
+                  <p class="text-sm text-surface-500">A quick summary of today's receipts</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span v-if="digestDayKey" class="text-xs text-surface-500">{{ digestDayKey }}</span>
+                <button
+                  class="px-3 py-2 rounded-lg text-xs font-medium bg-surface-800/70 text-surface-100 hover:bg-surface-700/70"
+                  :disabled="digestLoading"
+                  @click="loadDigest(true)"
+                >
+                  {{ digestLoading ? 'Loading…' : 'Refresh' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="p-6 space-y-3">
+            <div v-if="digestLoading" class="text-sm text-surface-500">Loading…</div>
+            <div v-else-if="digestError" class="text-sm text-red-400">{{ digestError }}</div>
+            <div v-else class="prose prose-invert max-w-none">
+              <pre class="whitespace-pre-wrap text-sm bg-surface-900/60 border border-surface-700/50 rounded-xl p-4">{{ digestMarkdown || '(empty)' }}</pre>
             </div>
           </div>
         </div>

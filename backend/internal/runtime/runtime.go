@@ -14,6 +14,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
+	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
 type Runtime struct {
@@ -29,6 +30,8 @@ type Runtime struct {
 
 	Tasks      *taskqueue.Store
 	TaskRunner *taskqueue.TaskRunner
+
+	WorkLedger *workledger.Store
 }
 
 func Init(cfg *config.Config) (*Runtime, error) {
@@ -84,6 +87,12 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		return nil, err
 	}
 
+	ledger, err := workledger.NewStore(layout.LedgerDir)
+	if err != nil {
+		_ = settings.Close()
+		return nil, err
+	}
+
 	rt := &Runtime{
 		Config:    cfg,
 		Layout:    layout,
@@ -93,6 +102,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		LLMLog:    llmLogger,
 		Skills:    skill.NewManager(30 * time.Second),
 		Tasks:     tasks,
+		WorkLedger: ledger,
 	}
 	return rt, nil
 }

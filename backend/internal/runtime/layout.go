@@ -23,6 +23,7 @@ type Layout struct {
 
 	SessionsDir string
 	TasksDir    string
+	LedgerDir   string
 
 	TraceLogsDir   string
 	LLMLogsDir     string
@@ -46,6 +47,7 @@ func EnsureLayout(home string) (*Layout, error) {
 		AuthTokenPath:  filepath.Join(oneagentDir, "config", "auth_token"),
 		SessionsDir:    filepath.Join(oneagentDir, "data", "sessions"),
 		TasksDir:       filepath.Join(oneagentDir, "data", "tasks"),
+		LedgerDir:      filepath.Join(oneagentDir, "data", "ledger"),
 		TraceLogsDir:   filepath.Join(oneagentDir, "logs", "trace"),
 		LLMLogsDir:     filepath.Join(oneagentDir, "logs", "llm"),
 		SubagentLogsDir: filepath.Join(oneagentDir, "logs", "subagent"),
@@ -63,6 +65,7 @@ func EnsureLayout(home string) (*Layout, error) {
 		{path: layout.TmpDir, mode: 0o700},
 		{path: layout.SessionsDir, mode: 0o700},
 		{path: layout.TasksDir, mode: 0o700},
+		{path: layout.LedgerDir, mode: 0o700},
 		{path: layout.TraceLogsDir, mode: 0o700},
 		{path: layout.LLMLogsDir, mode: 0o700},
 		{path: layout.SubagentLogsDir, mode: 0o700},

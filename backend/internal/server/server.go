@@ -72,6 +72,19 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/tasks/:id/resume", handler.ResumeTask)
 		api.GET("/tasks/:id/events", handler.GetTaskEvents)
 
+		// Work ledger.
+		api.GET("/ledger/receipts", handler.ListReceipts)
+		api.GET("/ledger/receipts/:id", handler.GetReceipt)
+		api.GET("/ledger/digests/today", handler.GetDigestToday)
+		api.GET("/ledger/digests/:day", handler.GetDigest)
+
+		// SOP suggestions.
+		api.POST("/ledger/sop_suggestions", handler.CreateSuggestion)
+		api.GET("/ledger/sop_suggestions", handler.ListSuggestions)
+		api.GET("/ledger/sop_suggestions/:id", handler.GetSuggestion)
+		api.POST("/ledger/sop_suggestions/:id/status", handler.UpdateSuggestionStatus)
+		api.POST("/ledger/sop_suggestions/load_more", handler.LoadMoreSuggestions)
+
 		api.GET("/llm/providers", handler.ListProviders)
 		api.POST("/llm/providers", handler.CreateProvider)
 		api.PUT("/llm/providers/:id", handler.UpdateProvider)
