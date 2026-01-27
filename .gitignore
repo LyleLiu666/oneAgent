@@ -53,3 +53,9 @@ claude-wrapper.exe
 
 # Docker
 docker-compose.override.yml
+
+**/AGENTS.md
+
+.agent
+.claude
+/docs
