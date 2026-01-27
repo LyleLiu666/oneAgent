@@ -11,65 +11,36 @@ if [[ "${OUT_DIR}" != /* ]]; then
 fi
 
 VERSION="${VERSION:-}"
-if [[ -z "${VERSION}" ]]; then
-  if command -v git >/dev/null 2>&1; then
-    VERSION="$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || true)"
-  fi
-  VERSION="${VERSION:-dev}"
-fi
-
-COMMIT="unknown"
-if command -v git >/dev/null 2>&1; then
-  COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
-fi
-DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-echo "[release] version=${VERSION} commit=${COMMIT} date=${DATE}"
-
-mkdir -p "${OUT_DIR}"
-
-echo "[release] build frontend + sync assets"
-cd "${ROOT_DIR}"
-make sync-frontend >/dev/null
-
-LDFLAGS=(
-  "-s" "-w"
-  "-X" "github.com/liu_y/oneAgent/backend/internal/buildinfo.Version=${VERSION}"
-  "-X" "github.com/liu_y/oneAgent/backend/internal/buildinfo.Commit=${COMMIT}"
-  "-X" "github.com/liu_y/oneAgent/backend/internal/buildinfo.Date=${DATE}"
-)
-
-TARGETS=(
-  "darwin/amd64"
-  "darwin/arm64"
-  "linux/amd64"
-  "linux/arm64"
-  "windows/amd64"
-)
-
-echo "[release] build matrix: ${TARGETS[*]}"
-
-pushd "${ROOT_DIR}/backend" >/dev/null
-for target in "${TARGETS[@]}"; do
-  GOOS="${target%/*}"
-  GOARCH="${target#*/}"
-  OUT="${OUT_DIR}/oneagent_${VERSION}_${GOOS}_${GOARCH}"
-  if [[ "${GOOS}" == "windows" ]]; then
-    OUT="${OUT}.exe"
-  fi
-  echo "[release] go build ${GOOS}/${GOARCH} -> ${OUT}"
-  env CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
-    go build -trimpath -ldflags "${LDFLAGS[*]}" -o "${OUT}" ./cmd/oneagent
-done
-popd >/dev/null
-
 PORTABLE_GIT_URL="${PORTABLE_GIT_URL:-}"
 BUNDLE_PORTABLE_GIT="${BUNDLE_PORTABLE_GIT:-1}"
+PORTABLE_GIT_URL_FILE="${PORTABLE_GIT_URL_FILE:-${ROOT_DIR}/scripts/portable_git_url.txt}"
+
+COMMIT="unknown"
 
 resolve_portable_git_url() {
   if [[ -n "${PORTABLE_GIT_URL}" ]]; then
     echo "${PORTABLE_GIT_URL}"
     return
+  fi
+
+  if [[ -n "${PORTABLE_GIT_URL_FILE}" && -f "${PORTABLE_GIT_URL_FILE}" ]]; then
+    local pinned
+    pinned="$(python3 - <<'PY' "${PORTABLE_GIT_URL_FILE}"
+import sys
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        print(s)
+        break
+PY
+)"
+    if [[ -n "${pinned}" ]]; then
+      echo "${pinned}"
+      return
+    fi
   fi
 
   # Prefer authenticated GitHub API access when available (helps avoid rate limits in CI).
@@ -99,44 +70,6 @@ ensure_portable_git_downloaded() {
   curl -L --fail --retry 3 --retry-delay 2 -o "${dest}" "${url}"
 }
 
-echo "[release] package windows zips (PortableGit: ${BUNDLE_PORTABLE_GIT})"
-for target in "${TARGETS[@]}"; do
-  GOOS="${target%/*}"
-  GOARCH="${target#*/}"
-  if [[ "${GOOS}" != "windows" ]]; then
-    continue
-  fi
-
-  BIN="${OUT_DIR}/oneagent_${VERSION}_${GOOS}_${GOARCH}.exe"
-  if [[ ! -f "${BIN}" ]]; then
-    echo "[release] ERROR: missing windows binary: ${BIN}" >&2
-    exit 1
-  fi
-
-  PKG_DIR="${OUT_DIR}/oneagent_${VERSION}_${GOOS}_${GOARCH}"
-  rm -rf "${PKG_DIR}"
-  mkdir -p "${PKG_DIR}/bundled"
-  cp "${BIN}" "${PKG_DIR}/oneagent.exe"
-
-  if [[ "${BUNDLE_PORTABLE_GIT}" == "1" ]]; then
-    PORTABLE_GIT_CACHE="${OUT_DIR}/PortableGit.7z.exe"
-    ensure_portable_git_downloaded "${PORTABLE_GIT_CACHE}"
-    cp "${PORTABLE_GIT_CACHE}" "${PKG_DIR}/bundled/PortableGit.7z.exe"
-    cp "${ROOT_DIR}/scripts/NOTICE_GIT_FOR_WINDOWS.txt" "${PKG_DIR}/bundled/NOTICE_GIT_FOR_WINDOWS.txt"
-  fi
-
-  ZIP_NAME="oneagent_${VERSION}_${GOOS}_${GOARCH}.zip"
-  rm -f "${OUT_DIR}/${ZIP_NAME}"
-  (
-    cd "${OUT_DIR}"
-    zip -r "${ZIP_NAME}" "$(basename "${PKG_DIR}")" >/dev/null
-  )
-done
-
-CHECKSUM_FILE="${OUT_DIR}/checksums_${VERSION}.txt"
-rm -f "${CHECKSUM_FILE}"
-touch "${CHECKSUM_FILE}"
-
 sha256_file() {
   local file="$1"
   if command -v shasum >/dev/null 2>&1; then
@@ -151,22 +84,122 @@ sha256_file() {
   exit 1
 }
 
-echo "[release] checksums -> ${CHECKSUM_FILE}"
-for target in "${TARGETS[@]}"; do
-  GOOS="${target%/*}"
-  GOARCH="${target#*/}"
-  FILE="oneagent_${VERSION}_${GOOS}_${GOARCH}"
-  if [[ "${GOOS}" == "windows" ]]; then
-    FILE="${FILE}.zip"
+main() {
+  if [[ -z "${VERSION}" ]]; then
+    if command -v git >/dev/null 2>&1; then
+      VERSION="$(git -C "${ROOT_DIR}" describe --tags --always --dirty 2>/dev/null || true)"
+    fi
+    VERSION="${VERSION:-dev}"
   fi
-  if [[ "${GOOS}" == "windows" ]]; then
+
+  if command -v git >/dev/null 2>&1; then
+    COMMIT="$(git -C "${ROOT_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
+  fi
+  DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  echo "[release] version=${VERSION} commit=${COMMIT} date=${DATE}"
+
+  mkdir -p "${OUT_DIR}"
+
+  echo "[release] build frontend + sync assets"
+  cd "${ROOT_DIR}"
+  make sync-frontend >/dev/null
+
+  LDFLAGS=(
+    "-s" "-w"
+    "-X" "github.com/liu_y/oneAgent/backend/internal/buildinfo.Version=${VERSION}"
+    "-X" "github.com/liu_y/oneAgent/backend/internal/buildinfo.Commit=${COMMIT}"
+    "-X" "github.com/liu_y/oneAgent/backend/internal/buildinfo.Date=${DATE}"
+  )
+
+  TARGETS=(
+    "darwin/amd64"
+    "darwin/arm64"
+    "linux/amd64"
+    "linux/arm64"
+    "windows/amd64"
+  )
+
+  echo "[release] build matrix: ${TARGETS[*]}"
+
+  pushd "${ROOT_DIR}/backend" >/dev/null
+  for target in "${TARGETS[@]}"; do
+    GOOS="${target%/*}"
+    GOARCH="${target#*/}"
+    OUT="${OUT_DIR}/oneagent_${VERSION}_${GOOS}_${GOARCH}"
+    if [[ "${GOOS}" == "windows" ]]; then
+      OUT="${OUT}.exe"
+    fi
+    echo "[release] go build ${GOOS}/${GOARCH} -> ${OUT}"
+    env CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+      go build -trimpath -ldflags "${LDFLAGS[*]}" -o "${OUT}" ./cmd/oneagent
+  done
+  popd >/dev/null
+
+  echo "[release] package windows zips (PortableGit: ${BUNDLE_PORTABLE_GIT})"
+  for target in "${TARGETS[@]}"; do
+    GOOS="${target%/*}"
+    GOARCH="${target#*/}"
+    if [[ "${GOOS}" != "windows" ]]; then
+      continue
+    fi
+
+    BIN="${OUT_DIR}/oneagent_${VERSION}_${GOOS}_${GOARCH}.exe"
+    if [[ ! -f "${BIN}" ]]; then
+      echo "[release] ERROR: missing windows binary: ${BIN}" >&2
+      exit 1
+    fi
+
+    PKG_DIR="${OUT_DIR}/oneagent_${VERSION}_${GOOS}_${GOARCH}"
+    rm -rf "${PKG_DIR}"
+    mkdir -p "${PKG_DIR}/bundled"
+    cp "${BIN}" "${PKG_DIR}/oneagent.exe"
+
+    if [[ "${BUNDLE_PORTABLE_GIT}" == "1" ]]; then
+      PORTABLE_GIT_CACHE="${OUT_DIR}/PortableGit.7z.exe"
+      ensure_portable_git_downloaded "${PORTABLE_GIT_CACHE}"
+      cp "${PORTABLE_GIT_CACHE}" "${PKG_DIR}/bundled/PortableGit.7z.exe"
+      cp "${ROOT_DIR}/scripts/NOTICE_GIT_FOR_WINDOWS.txt" "${PKG_DIR}/bundled/NOTICE_GIT_FOR_WINDOWS.txt"
+    fi
+
+    ZIP_NAME="oneagent_${VERSION}_${GOOS}_${GOARCH}.zip"
+    rm -f "${OUT_DIR}/${ZIP_NAME}"
+    (
+      cd "${OUT_DIR}"
+      zip -r "${ZIP_NAME}" "$(basename "${PKG_DIR}")" >/dev/null
+    )
+  done
+
+  CHECKSUM_FILE="${OUT_DIR}/checksums_${VERSION}.txt"
+  rm -f "${CHECKSUM_FILE}"
+  touch "${CHECKSUM_FILE}"
+
+  echo "[release] checksums -> ${CHECKSUM_FILE}"
+  for target in "${TARGETS[@]}"; do
+    GOOS="${target%/*}"
+    GOARCH="${target#*/}"
+    FILE="oneagent_${VERSION}_${GOOS}_${GOARCH}"
+    if [[ "${GOOS}" == "windows" ]]; then
+      FILE="${FILE}.zip"
+    fi
+    if [[ "${GOOS}" == "windows" ]]; then
+      SUM="$(sha256_file "${OUT_DIR}/${FILE}")"
+      echo "${SUM}  ${FILE}" >> "${CHECKSUM_FILE}"
+      continue
+    fi
+
     SUM="$(sha256_file "${OUT_DIR}/${FILE}")"
     echo "${SUM}  ${FILE}" >> "${CHECKSUM_FILE}"
-    continue
+  done
+
+  echo "[release] done: ${OUT_DIR}"
+}
+
+if [[ "${ONEAGENT_RELEASE_LIB:-}" == "1" ]]; then
+  if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
   fi
+  exit 0
+fi
 
-  SUM="$(sha256_file "${OUT_DIR}/${FILE}")"
-  echo "${SUM}  ${FILE}" >> "${CHECKSUM_FILE}"
-done
-
-echo "[release] done: ${OUT_DIR}"
+main "$@"

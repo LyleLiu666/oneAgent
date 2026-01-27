@@ -1,0 +1,8 @@
+# Optional: pin a specific PortableGit download URL for reproducible Windows bundles.
+#
+# If this file contains a non-empty, non-comment line, `scripts/release_local.sh` will use it
+# (unless PORTABLE_GIT_URL is set in the environment).
+#
+# Example:
+# https://github.com/git-for-windows/git/releases/download/v2.xx.x.windows.x/PortableGit-2.xx.x-64-bit.7z.exe
+

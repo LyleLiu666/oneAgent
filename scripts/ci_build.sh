@@ -7,6 +7,9 @@ echo "[ci] backend tests"
 cd "${ROOT_DIR}/backend"
 go test ./...
 
+echo "[ci] release script self-test"
+cd "${ROOT_DIR}"
+bash scripts/release_local_selftest.sh
+
 echo "[ci] windows cross-build"
 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build ./...
-
