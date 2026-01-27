@@ -21,6 +21,10 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		return nil, fmt.Errorf("runtime is required")
 	}
 
+	if err := ensureTaskQueue(rt); err != nil {
+		return nil, err
+	}
+
 	router := gin.Default()
 	router.Use(middleware.InjectRuntime(rt))
 
@@ -59,6 +63,14 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/sessions/:id", chatHandler.GetSession)
 		api.DELETE("/sessions/:id", chatHandler.DeleteSession)
 		api.POST("/sessions/:id/truncate", chatHandler.TruncateSession)
+
+		// Task queue.
+		api.POST("/tasks", handler.CreateTask)
+		api.GET("/tasks", handler.ListTasks)
+		api.GET("/tasks/:id", handler.GetTask)
+		api.POST("/tasks/:id/cancel", handler.CancelTask)
+		api.POST("/tasks/:id/resume", handler.ResumeTask)
+		api.GET("/tasks/:id/events", handler.GetTaskEvents)
 
 		api.GET("/llm/providers", handler.ListProviders)
 		api.POST("/llm/providers", handler.CreateProvider)

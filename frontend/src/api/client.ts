@@ -269,6 +269,15 @@ export async function getTools() {
     return api('/api/tools')
 }
 
+export interface RuntimeConfig {
+    default_workspace?: string
+    base_url?: string
+}
+
+export async function getConfig(): Promise<RuntimeConfig> {
+    return api('/api/config')
+}
+
 export async function chooseWorkspaceDir() {
     return api('/api/workspace/choose', { method: 'POST' })
 }
@@ -297,6 +306,98 @@ export async function updateModel(
 
 export async function deleteModel(modelId: string) {
     return api(`/api/llm/models/${modelId}`, { method: 'DELETE' })
+}
+
+// ============================================================================
+// Task Queue
+// ============================================================================
+
+export type AttemptStatus =
+    | 'queued'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'canceled'
+    | 'timed_out'
+    | 'interrupted'
+
+export interface TaskLimits {
+    max_steps?: number
+    max_runtime_seconds?: number
+}
+
+export interface TaskObserverDecision {
+    pass: boolean
+    reason?: string
+    evidence?: string[]
+}
+
+export interface TaskAttempt {
+    id: string
+    status: AttemptStatus
+    created_at: string
+    started_at?: string
+    finished_at?: string
+    resumed_from_attempt_id?: string
+    run_id?: string
+    summary?: string
+    findings_path?: string
+    trace_log_path?: string
+    observer?: TaskObserverDecision
+    error?: string
+}
+
+export interface Task {
+    id: string
+    user_id: string
+    workspace: string
+    title: string
+    prompt: string
+    model_id?: string
+    limits?: TaskLimits
+    created_at: string
+    updated_at: string
+    attempts: TaskAttempt[]
+}
+
+export interface TaskEvent {
+    ts: string
+    task_id: string
+    attempt_id?: string
+    type: string
+    message?: string
+    data?: Record<string, any>
+}
+
+export async function createTask(payload: {
+    workspace: string
+    title?: string
+    prompt: string
+    model_id?: string
+    limits?: TaskLimits
+}): Promise<Task> {
+    return api('/api/tasks', { method: 'POST', body: payload })
+}
+
+export async function listTasks(workspace?: string): Promise<Task[]> {
+    const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : ''
+    return api(`/api/tasks${query}`)
+}
+
+export async function getTask(taskId: string): Promise<Task> {
+    return api(`/api/tasks/${taskId}`)
+}
+
+export async function cancelTask(taskId: string): Promise<Task> {
+    return api(`/api/tasks/${taskId}/cancel`, { method: 'POST' })
+}
+
+export async function resumeTask(taskId: string): Promise<Task> {
+    return api(`/api/tasks/${taskId}/resume`, { method: 'POST' })
+}
+
+export async function getTaskEvents(taskId: string): Promise<TaskEvent[]> {
+    return api(`/api/tasks/${taskId}/events`)
 }
 
 

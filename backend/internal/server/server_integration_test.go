@@ -92,6 +92,56 @@ func TestServer_SmokeE2E(t *testing.T) {
 	}
 }
 
+func TestServer_ConfigEndpoint(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "8080",
+		Home:             home,
+		AuthMode:         "none",
+		DefaultWorkspace: home,
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/config", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/config: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/config status=%d", res.StatusCode)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode /api/config: %v", err)
+	}
+	if got["default_workspace"] != home {
+		t.Fatalf("expected default_workspace=%q, got=%v", home, got["default_workspace"])
+	}
+	if got["base_url"] != "http://localhost:8080" {
+		t.Fatalf("expected base_url=http://localhost:8080, got=%v", got["base_url"])
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

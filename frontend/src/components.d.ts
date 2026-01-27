@@ -12,6 +12,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Sidebar: typeof import('./components/Sidebar.vue')['default']
+    TaskQueuePanel: typeof import('./components/TaskQueuePanel.vue')['default']
     ThinkingProcess: typeof import('./components/ThinkingProcess.vue')['default']
     ToolMessage: typeof import('./components/ToolMessage.vue')['default']
     TraceLog: typeof import('./components/TraceLog.vue')['default']

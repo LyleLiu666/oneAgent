@@ -1,0 +1,452 @@
+package taskqueue
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+)
+
+type DecisionMaker interface {
+	Decide(ctx context.Context, in ObserveInput) (ObserverDecision, error)
+}
+
+type AttemptResult struct {
+	RunID        string
+	Summary      string
+	FindingsPath string
+	TraceLogPath string
+}
+
+type ExecuteAttemptFunc func(ctx context.Context, task Task, attempt Attempt, resumedFrom *Attempt) (AttemptResult, error)
+
+type TaskRunner struct {
+	Store *Store
+
+	DecideOutcome func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error)
+
+	ExecuteAttempt ExecuteAttemptFunc
+
+	started atomic.Bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+
+	mu      sync.Mutex
+	workers map[string]*workspaceWorker
+	wg      sync.WaitGroup
+
+	running sync.Map // map[string]context.CancelFunc (key=task_id)
+}
+
+type workspaceWorker struct {
+	workspace string
+	queue     chan string
+}
+
+func (r *TaskRunner) Start() error {
+	if r == nil {
+		return errors.New("runner is nil")
+	}
+	if r.Store == nil {
+		return errors.New("store is required")
+	}
+	if r.DecideOutcome == nil {
+		return errors.New("decide outcome function is required")
+	}
+	if r.ExecuteAttempt == nil {
+		return errors.New("execute attempt function is required")
+	}
+
+	if r.started.Swap(true) {
+		return nil
+	}
+
+	r.ctx, r.cancel = context.WithCancel(context.Background())
+	r.workers = make(map[string]*workspaceWorker)
+
+	// Recovery on (re)start:
+	// - running -> interrupted (no auto-resume)
+	// - queued  -> enqueue
+	tasks, err := r.Store.ListTasks("", "")
+	if err != nil {
+		return err
+	}
+
+	for _, task := range tasks {
+		latest := task.LatestAttempt()
+		if latest == nil {
+			continue
+		}
+		switch latest.Status {
+		case AttemptRunning:
+			attemptID := latest.ID
+			now := Now()
+			_, err := r.Store.UpdateTask(task.ID, func(tk *Task) error {
+				a := tk.LatestAttempt()
+				if a == nil || a.ID != attemptID || a.Status != AttemptRunning {
+					return nil
+				}
+				a.Status = AttemptInterrupted
+				a.FinishedAt = &now
+				if a.Error == "" {
+					a.Error = "interrupted: server restarted"
+				}
+				return nil
+			})
+			if err == nil {
+				_ = r.Store.AppendEvent(Event{
+					TaskID:    task.ID,
+					AttemptID: attemptID,
+					Type:      "attempt.interrupted",
+					Message:   "Server restarted; attempt marked interrupted",
+				})
+			}
+
+		case AttemptQueued:
+			_ = r.Enqueue(task.ID)
+		}
+	}
+
+	return nil
+}
+
+func (r *TaskRunner) Stop() {
+	if r == nil {
+		return
+	}
+	if r.cancel != nil {
+		r.cancel()
+	}
+
+	r.running.Range(func(_, v any) bool {
+		if cancel, ok := v.(context.CancelFunc); ok {
+			cancel()
+		}
+		return true
+	})
+
+	r.wg.Wait()
+}
+
+func (r *TaskRunner) Enqueue(taskID string) error {
+	if r == nil || r.Store == nil {
+		return errors.New("runner not initialized")
+	}
+	if r.ctx == nil || r.ctx.Err() != nil {
+		return errors.New("runner is stopped")
+	}
+	task, err := r.Store.GetTask(taskID)
+	if err != nil {
+		return err
+	}
+	latest := task.LatestAttempt()
+	if latest == nil {
+		return errors.New("task has no attempts")
+	}
+	if latest.Status != AttemptQueued {
+		return nil
+	}
+	ws := task.Workspace
+	if ws == "" {
+		return errors.New("task workspace is required")
+	}
+
+	worker := r.ensureWorker(ws)
+	select {
+	case worker.queue <- taskID:
+		return nil
+	case <-r.ctx.Done():
+		return errors.New("runner is stopped")
+	}
+}
+
+func (r *TaskRunner) Cancel(taskID string) (Task, error) {
+	if r == nil || r.Store == nil {
+		return Task{}, errors.New("runner not initialized")
+	}
+
+	task, err := r.Store.GetTask(taskID)
+	if err != nil {
+		return Task{}, err
+	}
+	latest := task.LatestAttempt()
+	if latest == nil {
+		return Task{}, errors.New("task has no attempts")
+	}
+	attemptID := latest.ID
+
+	switch latest.Status {
+	case AttemptQueued:
+		now := Now()
+		updated, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
+			a := tk.LatestAttempt()
+			if a == nil || a.ID != attemptID || a.Status != AttemptQueued {
+				return nil
+			}
+			a.Status = AttemptCanceled
+			a.FinishedAt = &now
+			return nil
+		})
+		if err != nil {
+			return Task{}, err
+		}
+		_ = r.Store.AppendEvent(Event{
+			TaskID:    taskID,
+			AttemptID: attemptID,
+			Type:      "attempt.canceled",
+			Message:   "Attempt canceled while queued",
+		})
+		return updated, nil
+
+	case AttemptRunning:
+		if v, ok := r.running.Load(taskID); ok {
+			if cancel, ok := v.(context.CancelFunc); ok {
+				cancel()
+			}
+		}
+		_ = r.Store.AppendEvent(Event{
+			TaskID:    taskID,
+			AttemptID: attemptID,
+			Type:      "attempt.cancel_requested",
+			Message:   "Cancel requested",
+		})
+		return task, nil
+
+	default:
+		return task, nil
+	}
+}
+
+func (r *TaskRunner) Resume(taskID string) (Task, error) {
+	if r == nil || r.Store == nil {
+		return Task{}, errors.New("runner not initialized")
+	}
+
+	var (
+		newAttemptID string
+		fromAttempt  string
+	)
+
+	updated, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
+		latest := tk.LatestAttempt()
+		if latest == nil {
+			return errors.New("task has no attempts")
+		}
+		switch latest.Status {
+		case AttemptFailed, AttemptTimedOut, AttemptInterrupted:
+		default:
+			return fmt.Errorf("resume not allowed from status %q", latest.Status)
+		}
+
+		now := Now()
+		newAttemptID = NewID()
+		fromAttempt = latest.ID
+		tk.Attempts = append(tk.Attempts, Attempt{
+			ID:                  newAttemptID,
+			Status:              AttemptQueued,
+			CreatedAt:           now,
+			ResumedFromAttemptID: latest.ID,
+		})
+		return nil
+	})
+	if err != nil {
+		return Task{}, err
+	}
+
+	_ = r.Store.AppendEvent(Event{
+		TaskID:    taskID,
+		AttemptID: newAttemptID,
+		Type:      "attempt.queued",
+		Message:   "Attempt queued via resume",
+		Data: map[string]any{
+			"resumed_from_attempt_id": fromAttempt,
+		},
+	})
+
+	_ = r.Enqueue(taskID)
+	return updated, nil
+}
+
+func (r *TaskRunner) ensureWorker(workspace string) *workspaceWorker {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if w, ok := r.workers[workspace]; ok {
+		return w
+	}
+
+	w := &workspaceWorker{
+		workspace: workspace,
+		queue:     make(chan string, 64),
+	}
+	r.workers[workspace] = w
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.runWorker(workspace, w.queue)
+	}()
+
+	return w
+}
+
+func (r *TaskRunner) runWorker(workspace string, queue <-chan string) {
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case taskID := <-queue:
+			r.processTask(workspace, taskID)
+		}
+	}
+}
+
+func (r *TaskRunner) processTask(workspace string, taskID string) {
+	task, err := r.Store.GetTask(taskID)
+	if err != nil {
+		return
+	}
+	if task.Workspace != workspace {
+		return
+	}
+
+	latest := task.LatestAttempt()
+	if latest == nil {
+		_ = r.Store.AppendEvent(Event{TaskID: taskID, Type: "task.error", Message: "task has no attempts"})
+		return
+	}
+	attemptID := latest.ID
+
+	// Transition queued -> running (idempotent).
+	startedAt := Now()
+	updated, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
+		a := tk.LatestAttempt()
+		if a == nil || a.ID != attemptID || a.Status != AttemptQueued {
+			return nil
+		}
+		a.Status = AttemptRunning
+		a.StartedAt = &startedAt
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	after := updated.LatestAttempt()
+	if after == nil || after.ID != attemptID || after.Status != AttemptRunning {
+		return
+	}
+
+	_ = r.Store.AppendEvent(Event{
+		TaskID:    taskID,
+		AttemptID: attemptID,
+		Type:      "attempt.running",
+		Message:   "Attempt started",
+	})
+
+	attemptCtx, cancel := context.WithCancel(r.ctx)
+	r.running.Store(taskID, cancel)
+	defer func() {
+		r.running.Delete(taskID)
+		cancel()
+	}()
+
+	resumedFrom := findAttemptByID(updated.Attempts, after.ResumedFromAttemptID)
+	result, runErr := r.ExecuteAttempt(attemptCtx, updated, *after, resumedFrom)
+
+	ranAttempt := *after
+	ranAttempt.RunID = strings.TrimSpace(result.RunID)
+	ranAttempt.Summary = strings.TrimSpace(result.Summary)
+	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
+	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
+
+	finishedAt := Now()
+	finalStatus := AttemptFailed
+	finalError := ""
+
+	if runErr != nil {
+		finalError = runErr.Error()
+		if errors.Is(runErr, context.Canceled) || errors.Is(attemptCtx.Err(), context.Canceled) {
+			finalStatus = AttemptCanceled
+		} else if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+			finalStatus = AttemptTimedOut
+		} else {
+			finalStatus = AttemptFailed
+		}
+	} else {
+		decision, err := r.DecideOutcome(attemptCtx, updated, ranAttempt)
+		if err != nil {
+			finalStatus = AttemptFailed
+			finalError = err.Error()
+		} else if decision.Pass {
+			finalStatus = AttemptSucceeded
+		} else {
+			finalStatus = AttemptFailed
+		}
+		ranAttempt.Observer = &decision
+
+		// Enforce deliverable artifacts for succeeded attempts.
+		if finalStatus == AttemptSucceeded {
+			if strings.TrimSpace(ranAttempt.FindingsPath) == "" || !fileExists(ranAttempt.FindingsPath) {
+				finalStatus = AttemptFailed
+				finalError = "missing findings_path"
+			} else if strings.TrimSpace(ranAttempt.TraceLogPath) == "" || !fileExists(ranAttempt.TraceLogPath) {
+				finalStatus = AttemptFailed
+				finalError = "missing trace_log_path"
+			}
+		}
+	}
+
+	ranAttempt.Status = finalStatus
+	ranAttempt.FinishedAt = &finishedAt
+	ranAttempt.Error = strings.TrimSpace(finalError)
+	if ranAttempt.StartedAt == nil {
+		ranAttempt.StartedAt = &startedAt
+	}
+
+	if _, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
+		a := tk.LatestAttempt()
+		if a == nil || a.ID != attemptID {
+			return nil
+		}
+		*a = ranAttempt
+		return nil
+	}); err != nil {
+		return
+	}
+
+	_ = r.Store.AppendEvent(Event{
+		TaskID:    taskID,
+		AttemptID: attemptID,
+		Type:      "attempt.finished",
+		Message:   fmt.Sprintf("Attempt finished: %s", finalStatus),
+		Data: map[string]any{
+			"status": finalStatus,
+			"error":  finalError,
+		},
+	})
+}
+
+func findAttemptByID(attempts []Attempt, id string) *Attempt {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	for i := range attempts {
+		if attempts[i].ID == id {
+			return &attempts[i]
+		}
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
+	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 )
 
 type Runtime struct {
@@ -25,6 +26,9 @@ type Runtime struct {
 	Sessions *sessionstore.Store
 	LLMLog   *llmlog.Writer
 	Skills   *skill.Manager
+
+	Tasks      *taskqueue.Store
+	TaskRunner *taskqueue.TaskRunner
 }
 
 func Init(cfg *config.Config) (*Runtime, error) {
@@ -74,6 +78,12 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		return nil, err
 	}
 
+	tasks, err := taskqueue.NewStore(layout.TasksDir)
+	if err != nil {
+		_ = settings.Close()
+		return nil, err
+	}
+
 	rt := &Runtime{
 		Config:    cfg,
 		Layout:    layout,
@@ -82,6 +92,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		Sessions:  sessions,
 		LLMLog:    llmLogger,
 		Skills:    skill.NewManager(30 * time.Second),
+		Tasks:     tasks,
 	}
 	return rt, nil
 }
@@ -89,6 +100,9 @@ func Init(cfg *config.Config) (*Runtime, error) {
 func (r *Runtime) Close() error {
 	if r == nil {
 		return nil
+	}
+	if r.TaskRunner != nil {
+		r.TaskRunner.Stop()
 	}
 	var firstErr error
 	if r.Settings != nil {

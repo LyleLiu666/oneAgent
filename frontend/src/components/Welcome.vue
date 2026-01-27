@@ -1,8 +1,24 @@
 <script setup lang="ts">
-import { Bot } from 'lucide-vue-next'
+import { computed } from 'vue'
+import { Bot, Folder, Loader2 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 
 const { user } = useAuth()
+
+const props = defineProps<{
+  workspace?: string
+  workspaceSource?: string
+  showWorkspacePrompt?: boolean
+  workspaceChoosing?: boolean
+  workspaceChooseError?: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'choose-workspace'): void
+  (e: 'skip-workspace'): void
+}>()
+
+const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()))
 </script>
 
 <template>
@@ -28,6 +44,53 @@ const { user } = useAuth()
           <p class="text-lg text-surface-400 max-w-lg mx-auto leading-relaxed">
             I'm your advanced AI assistant. Ready to help you with coding, writing, analysis, and more.
           </p>
+        </div>
+      </div>
+
+      <div v-if="hasWorkspace || showWorkspacePrompt" class="space-y-3">
+        <div class="mx-auto max-w-2xl rounded-2xl bg-surface-900/40 backdrop-blur border border-surface-800 px-5 py-4 text-left">
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 text-surface-200">
+                <Folder class="w-4 h-4 text-surface-400" />
+                <p class="text-sm font-semibold">
+                  {{ hasWorkspace ? 'Workspace ready' : 'Choose a workspace' }}
+                </p>
+              </div>
+              <p v-if="hasWorkspace" class="mt-2 text-xs text-surface-400 break-words">
+                {{ workspace }}
+                <span v-if="workspaceSource" class="text-surface-500"> · {{ workspaceSource }}</span>
+              </p>
+              <p v-else class="mt-2 text-xs text-surface-400">
+                Pick a folder to enable file/search/command tools. Or skip for chat-only mode.
+              </p>
+              <p v-if="workspaceChooseError" class="mt-2 text-xs text-red-400">
+                {{ workspaceChooseError }}
+              </p>
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-lg bg-surface-900 text-surface-200 text-xs sm:text-sm px-3 py-2 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="workspaceChoosing"
+                title="Choose workspace folder"
+                @click="emit('choose-workspace')"
+              >
+                <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
+                <span v-else>Browse</span>
+              </button>
+              <button
+                v-if="!hasWorkspace"
+                type="button"
+                class="inline-flex items-center gap-2 rounded-lg bg-surface-900 text-surface-300 text-xs sm:text-sm px-3 py-2 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                title="Skip workspace (chat only)"
+                @click="emit('skip-workspace')"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

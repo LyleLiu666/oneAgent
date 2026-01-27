@@ -266,6 +266,8 @@ func runSkills(args []string) {
 	switch args[0] {
 	case "search":
 		runSkillsSearch(args[1:])
+	case "status", "check":
+		runSkillsStatus(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown skills command: %s\n\n", args[0])
 		printSkillsUsage()
@@ -323,6 +325,8 @@ func printSkillsUsage() {
 
 Usage:
   oneagent skills search --query "... " [--workspace <dir>] [--limit 8]
+  oneagent skills status [--workspace <dir>] [--json]
+  oneagent skills check  [--workspace <dir>] [--json]   # alias of status
 
 Example:
   oneagent skills search --query "review this PR" --limit 8

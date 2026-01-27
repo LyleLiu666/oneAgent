@@ -8,12 +8,20 @@ import * as apiClient from '@/api/client'
 
 vi.mock('@/api/client', () => ({
     streamChat: vi.fn(),
+    getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '' })),
     getSessions: vi.fn(async () => []),
     getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
     truncateSession: vi.fn(),
     getModels: vi.fn(async () => []),
     getTools: vi.fn(async () => []),
     chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
+    // Task queue (used by TaskQueuePanel).
+    createTask: vi.fn(),
+    listTasks: vi.fn(async () => []),
+    getTask: vi.fn(),
+    getTaskEvents: vi.fn(async () => []),
+    cancelTask: vi.fn(),
+    resumeTask: vi.fn(),
 }))
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))

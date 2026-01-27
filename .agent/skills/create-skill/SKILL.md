@@ -58,6 +58,43 @@ backend/internal/builtinskills/skills/<skill-id>/
 
 建议可选：
 - `tags`、`keywords`（帮助召回）
+- `requires`（声明依赖/可用性，用于 eligible 过滤与 status/check 输出）
+- `install`（声明结构化安装建议，用于 status/check 输出）
+
+`requires` 字段（可选）：
+- `os`: ["darwin"|"linux"|"windows"]（非空则限制 OS）
+- `bins`: 必需存在的可执行文件名列表（全部满足）
+- `any_bins`: 至少存在其一的可执行文件名列表（满足其一）
+- `env`: 必需存在的环境变量名列表
+
+`install` 字段（可选）：安装建议列表（机器可读），常用 `kind`：
+- `brew`（`formula`）
+- `go`（`module`）
+- `node`（`package`）
+- `uv`（`package`）
+- `download`（`url`）
+- `command`（`command`）
+
+示例：
+
+```yaml
+---
+name: apple-notes
+description: Manage Apple Notes via memo
+requires:
+  os: darwin
+  bins: [memo]
+  any_bins: [rg, grep]
+  env: [OPENAI_API_KEY]
+install:
+  - kind: brew
+    formula: antoniorodr/memo/memo
+    bins: [memo]
+  - kind: brew
+    formula: ripgrep
+    bins: [rg]
+---
+```
 
 正文建议：
 - 先写“什么时候用/不该用”
@@ -68,7 +105,9 @@ backend/internal/builtinskills/skills/<skill-id>/
 
 1. 召回是否能找到（Top-8）：
    - `cd backend && go run ./cmd/oneagent skills search --query "<skill-id>"`
-2. 对话中是否能读到（tool 输出）：
+2. 可用性与依赖是否清晰：
+   - `cd backend && go run ./cmd/oneagent skills status --workspace "<your-workspace>"`
+3. 对话中是否能读到（tool 输出）：
    - 在 chat 输入“请使用 <skill-id> 这个技能 …”
    - 确认模型先调用 `skill.read`，并拿到你写的 `SKILL.md`
 

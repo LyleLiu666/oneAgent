@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Send, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
-import { streamChat, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir } from '@/api/client'
+import { streamChat, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig } from '@/api/client'
+import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
 import ThinkingProcess from './ThinkingProcess.vue'
 import ToolMessage from './ToolMessage.vue'
+import TaskQueuePanel from './TaskQueuePanel.vue'
 
 const chatStore = useChatStore()
 
@@ -25,9 +27,20 @@ const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
 const toolsLoading = ref(false)
 const tools = ref<ToolOption[]>([])
-const workspacePath = ref(localStorage.getItem('oneagent-workspace') || '')
+const lastWorkspace = ref(localStorage.getItem('oneagent-workspace') || '')
+const workspacePath = ref(lastWorkspace.value)
 const workspaceChoosing = ref(false)
 const workspaceChooseError = ref('')
+const workspaceOnboardingDismissed = ref(false)
+const sessionWorkspace = ref('')
+
+const runtimeConfigLoading = ref(false)
+const runtimeConfigError = ref('')
+const serverDefaultWorkspace = ref('')
+const serverBaseURL = ref('')
+
+const toolPickerOpen = ref(false)
+const toolPickerEl = ref<HTMLElement | null>(null)
 
 interface ModelOption {
   id: string
@@ -100,8 +113,23 @@ const normalizeTrace = (raw: any): string | undefined => {
 }
 
 // Computed
+const workspaceOnboardingBlocking = computed(() => {
+  const isNewSession = !chatStore.currentSessionId
+  const isEmptyState = !loadingHistory.value && chatStore.messages.length === 0
+  return (
+    isNewSession &&
+    isEmptyState &&
+    !String(workspacePath.value || '').trim() &&
+    !workspaceOnboardingDismissed.value
+  )
+})
+
 const canSend = computed(
-  () => inputMessage.value.trim() && !chatStore.isLoading && !loadingHistory.value
+  () =>
+    inputMessage.value.trim() &&
+    !chatStore.isLoading &&
+    !loadingHistory.value &&
+    !workspaceOnboardingBlocking.value
 )
 
 const currentSessionTitle = computed(() => chatStore.currentSession?.title || 'New chat')
@@ -118,7 +146,41 @@ const selectedToolProtocol = computed({
   set: (value: string) => chatStore.setCurrentToolProtocol(value),
 })
 
+const workspaceSourceLabel = computed(() => {
+  const current = String(workspacePath.value || '').trim()
+  if (!current) return ''
+  if (String(sessionWorkspace.value || '').trim() === current) return 'session'
+  if (String(lastWorkspace.value || '').trim() === current) return 'last used'
+  if (String(serverDefaultWorkspace.value || '').trim() === current) return 'server default'
+  return 'custom'
+})
+
+const workspacePromptError = computed(() => {
+  const err = String(workspaceChooseError.value || runtimeConfigError.value || '').trim()
+  return err
+})
+
+const toolSummary = computed(() => {
+  const total = tools.value.length
+  const selected = selectedToolIds.value.length
+  if (total === 0) return 'Tools'
+  if (selected === 0) return `Tools (0/${total})`
+  if (selected === total) return `Tools (all)`
+  return `Tools (${selected}/${total})`
+})
+
 // Methods
+const handleDocumentClick = (event: MouseEvent) => {
+  if (!toolPickerOpen.value) return
+  const el = toolPickerEl.value
+  if (!el) {
+    toolPickerOpen.value = false
+    return
+  }
+  if (event.target instanceof Node && el.contains(event.target)) return
+  toolPickerOpen.value = false
+}
+
 const scrollToBottom = (smooth = true) => {
   nextTick(() => {
     if (messagesContainer.value) {
@@ -220,6 +282,48 @@ const loadTools = async () => {
   }
 }
 
+const selectAllTools = () => {
+  selectedToolIds.value = tools.value.map((t: ToolOption) => t.id)
+}
+
+const clearAllTools = () => {
+  selectedToolIds.value = []
+}
+
+const applyWorkspaceDefaultsForNewSession = () => {
+  if (chatStore.currentSessionId) return
+  if (chatStore.messages.length > 0) return
+
+  const resolved = resolveWorkspaceChoice({
+    sessionWorkspace: '',
+    localWorkspace: lastWorkspace.value,
+    serverDefaultWorkspace: serverDefaultWorkspace.value,
+  })
+
+  if (!String(workspacePath.value || '').trim() && resolved.path) {
+    workspacePath.value = resolved.path
+  }
+}
+
+const loadRuntimeConfig = async () => {
+  runtimeConfigLoading.value = true
+  runtimeConfigError.value = ''
+  try {
+    const raw: any = await getConfig()
+    serverDefaultWorkspace.value =
+      typeof raw?.default_workspace === 'string' ? String(raw.default_workspace) : ''
+    serverBaseURL.value = typeof raw?.base_url === 'string' ? String(raw.base_url) : ''
+  } catch (error) {
+    const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to load runtime config.'
+    runtimeConfigError.value = String(msg)
+    console.error('Failed to load runtime config:', error)
+  } finally {
+    runtimeConfigLoading.value = false
+  }
+
+  applyWorkspaceDefaultsForNewSession()
+}
+
 const loadSessionMessages = async (
   sessionId: string,
   showLoading = true,
@@ -247,10 +351,13 @@ const loadSessionMessages = async (
       selectedToolProtocol.value = 'json'
     }
     const sessionSystemPrompt = raw?.metadata?.system_prompt
-    const sessionWorkspace = raw?.metadata?.workspace
-    if (typeof sessionWorkspace === 'string' && sessionWorkspace.trim()) {
-      workspacePath.value = sessionWorkspace
+    const sessionWorkspaceRaw = raw?.metadata?.workspace
+    if (typeof sessionWorkspaceRaw === 'string' && sessionWorkspaceRaw.trim()) {
+      const normalized = String(sessionWorkspaceRaw).trim()
+      sessionWorkspace.value = normalized
+      workspacePath.value = normalized
     } else {
+      sessionWorkspace.value = ''
       workspacePath.value = ''
     }
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
@@ -382,12 +489,18 @@ const startNewSession = () => {
   chatStore.clearStreamingContent()
   chatStore.clearMessages()
   chatStore.setCurrentSession('')
+  sessionWorkspace.value = ''
+  workspaceOnboardingDismissed.value = false
+  applyWorkspaceDefaultsForNewSession()
 }
 
 watch(
   workspacePath,
   (value) => {
-    localStorage.setItem('oneagent-workspace', String(value || ''))
+    const trimmed = String(value || '').trim()
+    if (!trimmed) return
+    lastWorkspace.value = trimmed
+    localStorage.setItem('oneagent-workspace', trimmed)
   },
   { immediate: true }
 )
@@ -409,6 +522,9 @@ const chooseWorkspace = async () => {
     const path = res?.path
     if (typeof path === 'string' && path.trim()) {
       workspacePath.value = path
+      workspaceOnboardingDismissed.value = true
+      await nextTick()
+      inputEl.value?.focus()
     }
   } catch (error) {
     const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to choose workspace folder.'
@@ -417,6 +533,13 @@ const chooseWorkspace = async () => {
   } finally {
     workspaceChoosing.value = false
   }
+}
+
+const skipWorkspaceOnboarding = async () => {
+  workspaceOnboardingDismissed.value = true
+  workspacePath.value = ''
+  await nextTick()
+  inputEl.value?.focus()
 }
 
 const sendChat = async (rawMessage: string) => {
@@ -541,6 +664,10 @@ const sendChat = async (rawMessage: string) => {
       (event) => {
         if (event.type === 'session') {
           chatStore.setCurrentSession(event.data)
+          const current = String(workspacePath.value || '').trim()
+          if (current && !String(sessionWorkspace.value || '').trim()) {
+            sessionWorkspace.value = current
+          }
         } else if (event.type === 'msg') {
           sawMsgEvents = true
           const payload = safeJsonParse<StreamMsgEvent>(event.data)
@@ -831,6 +958,9 @@ const handleWelcomeSelect = (prompt: string) => {
 }
 
 onMounted(async () => {
+  document.addEventListener('click', handleDocumentClick)
+
+  await loadRuntimeConfig()
   await loadTools()
   await loadModels()
   await loadSessions()
@@ -844,6 +974,12 @@ onMounted(async () => {
       chatStore.clearMessages()
     }
   }
+
+  applyWorkspaceDefaultsForNewSession()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocumentClick)
 })
 </script>
 
@@ -887,21 +1023,18 @@ onMounted(async () => {
                 {{ model.name || model.model }}{{ model.provider?.name ? ` · ${model.provider.name}` : '' }}
               </option>
             </select>
-            <select
-              v-model="selectedToolProtocol"
-              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-              title="Tool protocol"
-            >
-              <option value="json">json tools</option>
-              <option value="xml">xml tools</option>
-            </select>
             <div class="flex items-center gap-2">
               <Folder class="w-4 h-4 text-surface-400" />
               <input
                 v-model="workspacePath"
                 class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-[220px] max-w-full"
                 placeholder="Workspace path (server)"
-                title="Workspace path on the server machine. File tools will be scoped to this directory."
+                :disabled="Boolean(sessionWorkspace)"
+                :title="
+                  sessionWorkspace
+                    ? 'Workspace is locked for this session. Start a new session to change it.'
+                    : 'Workspace path on the server machine. File tools will be scoped to this directory.'
+                "
               />
               <button
                 type="button"
@@ -909,38 +1042,86 @@ onMounted(async () => {
                   'bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed',
                   workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
                 ]"
-                :disabled="workspaceChoosing"
-                :title="workspaceChooseError || 'Choose workspace folder (server)'"
+                :disabled="workspaceChoosing || Boolean(sessionWorkspace)"
+                :title="
+                  sessionWorkspace
+                    ? 'Workspace is locked for this session. Start a new session to change it.'
+                    : workspaceChooseError || 'Choose workspace folder (server)'
+                "
                 @click="chooseWorkspace"
               >
                 <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
                 <span v-else>Browse</span>
               </button>
             </div>
-            <div v-if="tools.length > 0" class="flex items-center gap-2">
+            <div v-if="tools.length > 0" ref="toolPickerEl" class="relative flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-surface-400" />
-              <div class="flex items-center gap-2">
-                <label
-                  v-for="tool in tools"
-                  :key="tool.id"
-                  class="flex items-center gap-1 text-[11px] text-surface-300"
-                >
-                  <input
-                    v-model="selectedToolIds"
-                    type="checkbox"
-                    class="accent-primary-500"
-                    :value="tool.id"
-                    :disabled="toolsLoading"
-                  />
-                  <span class="max-w-[110px] truncate" :title="tool.description || tool.name">
-                    {{ tool.name }}
-                  </span>
-                </label>
+              <button
+                type="button"
+                class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                :disabled="toolsLoading"
+                :title="toolSummary"
+                @click.stop="toolPickerOpen = !toolPickerOpen"
+              >
+                {{ toolSummary }}
+              </button>
+              <div
+                v-if="toolPickerOpen"
+                class="absolute right-0 top-full mt-2 w-[320px] rounded-xl bg-surface-950 border border-surface-800 shadow-xl p-3 z-30"
+                @click.stop
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Protocol</p>
+                  <select
+                    v-model="selectedToolProtocol"
+                    class="bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                    title="Tool protocol"
+                  >
+                    <option value="json">json tools</option>
+                    <option value="xml">xml tools</option>
+                  </select>
+                </div>
+
+                <div class="mt-3 max-h-60 overflow-y-auto space-y-2 pr-1">
+                  <label
+                    v-for="tool in tools"
+                    :key="tool.id"
+                    class="flex items-center gap-2 text-xs text-surface-300"
+                  >
+                    <input
+                      v-model="selectedToolIds"
+                      type="checkbox"
+                      class="accent-primary-500"
+                      :value="tool.id"
+                      :disabled="toolsLoading"
+                    />
+                    <span class="truncate" :title="tool.description || tool.name">{{ tool.name }}</span>
+                  </label>
+                </div>
+
+                <div class="mt-3 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    class="text-xs text-surface-300 hover:text-surface-100"
+                    @click="selectAllTools"
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    class="text-xs text-surface-300 hover:text-surface-100"
+                    @click="clearAllTools"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      <TaskQueuePanel :workspace="workspacePath" :model-id="selectedModelId" />
 
       <!-- Messages area -->
       <div
@@ -956,6 +1137,13 @@ onMounted(async () => {
         <!-- Empty state -->
         <Welcome
           v-if="!loadingHistory && chatStore.messages.length === 0"
+          :workspace="workspacePath"
+          :workspace-source="workspaceSourceLabel"
+          :show-workspace-prompt="workspaceOnboardingBlocking"
+          :workspace-choosing="workspaceChoosing"
+          :workspace-choose-error="workspacePromptError"
+          @choose-workspace="chooseWorkspace"
+          @skip-workspace="skipWorkspaceOnboarding"
           @select="handleWelcomeSelect"
         />
 
@@ -1130,10 +1318,14 @@ onMounted(async () => {
                 ref="inputEl"
                 v-model="inputMessage"
                 @keydown="handleKeydown"
-                placeholder="Type your message..."
+                :placeholder="
+                  workspaceOnboardingBlocking
+                    ? 'Choose a workspace (or skip) to start...'
+                    : 'Type your message...'
+                "
                 rows="1"
                 class="w-full px-4 py-3 pr-12 text-base leading-6 overflow-y-auto bg-surface-800 rounded-xl text-surface-50 placeholder-surface-500 resize-y focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all border border-surface-700"
-                :disabled="chatStore.isLoading"
+                :disabled="chatStore.isLoading || workspaceOnboardingBlocking"
               />
             </div>
             <button
