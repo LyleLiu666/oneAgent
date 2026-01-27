@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -659,6 +660,10 @@ func TestE2E_LoginPage_WarnsLANRisk(t *testing.T) {
 
 	entries, err := fs.ReadDir(staticFS, "assets")
 	if err != nil {
+		// In CI backend job we don't build/copy frontend assets. The e2e job covers the embedded-assets path.
+		if errors.Is(err, fs.ErrNotExist) {
+			t.Skipf("embedded static assets not present; run `make sync-frontend` or rely on e2e job: %v", err)
+		}
 		t.Fatalf("read assets dir: %v", err)
 	}
 

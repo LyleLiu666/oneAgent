@@ -1877,6 +1877,9 @@ func (sb *StreamBroadcaster) Unsubscribe(ch chan StreamEvent) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
+	if _, ok := sb.clients[ch]; !ok {
+		return
+	}
 	delete(sb.clients, ch)
 	close(ch)
 }
