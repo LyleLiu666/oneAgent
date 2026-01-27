@@ -74,4 +74,3 @@ func TestRunDailyJob_Idempotent(t *testing.T) {
 		t.Fatalf("expected %d suggestions, got %d", job1.Stats.SuggestionsCreated, len(sugs))
 	}
 }
-

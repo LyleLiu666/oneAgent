@@ -20,7 +20,9 @@ const (
 )
 
 type LearningJobStats struct {
-	SuggestionsCreated int `json:"suggestions_created"`
+	SuggestionsCreated       int `json:"suggestions_created"`
+	CompressibilityEvaluated int `json:"compressibility_evaluated,omitempty"`
+	CompressibilitySkipped   int `json:"compressibility_skipped,omitempty"`
 }
 
 type LearningJob struct {
@@ -33,7 +35,8 @@ type LearningJob struct {
 	StartedAt  time.Time `json:"started_at,omitempty"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
 
-	Error string `json:"error,omitempty"`
+	Error    string   `json:"error,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 
 	Stats LearningJobStats `json:"stats,omitempty"`
 }

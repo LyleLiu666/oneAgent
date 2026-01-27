@@ -24,9 +24,12 @@ type SuggestionScores struct {
 type SuggestionMeta struct {
 	DayKey string `json:"day_key,omitempty"`
 
-	CompressionPrompt string   `json:"compression_prompt,omitempty"`
-	SimilarSkillIDs   []string `json:"similar_skill_ids,omitempty"`
-	DeltaVsTop1       string   `json:"delta_vs_top1,omitempty"`
+	CompressionPrompt      string    `json:"compression_prompt,omitempty"`
+	CompressionVerdict     string    `json:"compression_verdict,omitempty"` // "equivalent" | "not_equivalent" | "uncertain"
+	CompressionReason      string    `json:"compression_reason,omitempty"`
+	CompressionEvaluatedAt time.Time `json:"compression_evaluated_at,omitempty"`
+	SimilarSkillIDs        []string  `json:"similar_skill_ids,omitempty"`
+	DeltaVsTop1            string    `json:"delta_vs_top1,omitempty"`
 }
 
 type Suggestion struct {

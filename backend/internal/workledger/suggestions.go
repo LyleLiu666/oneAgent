@@ -77,10 +77,10 @@ func (s *Store) CreateSuggestion(in CreateSuggestionInput) (Suggestion, error) {
 
 		Scores: in.Scores,
 		Meta: SuggestionMeta{
-			DayKey:             dayKey,
-			CompressionPrompt:  strings.TrimSpace(in.Meta.CompressionPrompt),
-			SimilarSkillIDs:    dedupStrings(in.Meta.SimilarSkillIDs),
-			DeltaVsTop1:        strings.TrimSpace(in.Meta.DeltaVsTop1),
+			DayKey:            dayKey,
+			CompressionPrompt: strings.TrimSpace(in.Meta.CompressionPrompt),
+			SimilarSkillIDs:   dedupStrings(in.Meta.SimilarSkillIDs),
+			DeltaVsTop1:       strings.TrimSpace(in.Meta.DeltaVsTop1),
 		},
 
 		CreatedAt: now,
@@ -320,6 +320,36 @@ func (s *Store) readSuggestionLocked(id string) (Suggestion, error) {
 	return sug, nil
 }
 
+func (s *Store) UpdateSuggestion(id string, fn func(*Suggestion) error) (Suggestion, error) {
+	if s == nil {
+		return Suggestion{}, errors.New("store is nil")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return Suggestion{}, errors.New("suggestion_id is required")
+	}
+	if fn == nil {
+		return Suggestion{}, errors.New("update fn is required")
+	}
+
+	mu := s.suggestionLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
+	sug, err := s.readSuggestionLocked(id)
+	if err != nil {
+		return Suggestion{}, err
+	}
+	if err := fn(&sug); err != nil {
+		return Suggestion{}, err
+	}
+	sug.UpdatedAt = time.Now().UTC()
+	if err := writeJSONAtomic(s.suggestionJSONPath(id), sug, 0o600); err != nil {
+		return Suggestion{}, err
+	}
+	return sug, nil
+}
+
 func isValidSuggestionStatus(sug SuggestionStatus) bool {
 	switch sug {
 	case SuggestionStatusProposed,
@@ -357,11 +387,11 @@ func (s *Store) LoadMoreParked(principalID, dayKey string, count int) ([]Suggest
 	}
 
 	parked, err := s.ListSuggestions(ListSuggestionsQuery{
-		PrincipalID:    principalID,
-		DayKey:         dayKey,
-		Status:         SuggestionStatusParked,
-		IncludeParked:  true,
-		Limit:          1000,
+		PrincipalID:   principalID,
+		DayKey:        dayKey,
+		Status:        SuggestionStatusParked,
+		IncludeParked: true,
+		Limit:         1000,
 	})
 	if err != nil {
 		return nil, err

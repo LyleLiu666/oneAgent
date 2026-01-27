@@ -21,12 +21,13 @@ func StartDailyScheduler(rt *runtime.Runtime) {
 	if rt == nil || rt.WorkLedger == nil {
 		return
 	}
+	eval := &LLMCompressibilityEvaluator{Settings: rt.Settings}
 	rt.GoOnceKey("learning.dailyScheduler", func(ctx context.Context) {
-		runLoop(ctx, rt.WorkLedger, "local", time.Now)
+		runLoop(ctx, rt.WorkLedger, "local", eval, time.Now)
 	})
 }
 
-func runLoop(ctx context.Context, store *workledger.Store, principalID string, nowFn func() time.Time) {
+func runLoop(ctx context.Context, store *workledger.Store, principalID string, eval CompressibilityEvaluator, nowFn func() time.Time) {
 	const hour = 2
 
 	for {
@@ -38,7 +39,7 @@ func runLoop(ctx context.Context, store *workledger.Store, principalID string, n
 
 		if shouldRun && shouldAutoRunToday(store, principalID, dayKey, now) {
 			// run best-effort
-			if _, err := RunDailyJob(ctx, store, principalID, now); err != nil {
+			if _, err := RunDailyJobWithEvaluator(ctx, store, principalID, now, eval); err != nil {
 				log.Printf("[learning] daily job failed: %v", err)
 			}
 			// sleep a little to avoid hot looping in case of clock issues

@@ -51,7 +51,8 @@ func RunLearningJobToday(c *gin.Context) {
 		principal = "local"
 	}
 
-	job, err := learning.RunDailyJob(c.Request.Context(), rt.WorkLedger, principal, time.Now())
+	eval := &learning.LLMCompressibilityEvaluator{Settings: rt.Settings}
+	job, err := learning.RunDailyJobWithEvaluator(c.Request.Context(), rt.WorkLedger, principal, time.Now(), eval)
 	// Return the job even if it failed, so users can inspect status/evidence.
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"job": job, "error": err.Error()})
@@ -59,4 +60,3 @@ func RunLearningJobToday(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, job)
 }
-

@@ -9,7 +9,7 @@
   - [x] Add “similar suggestions” API to support manual dedupe
   - [ ] Add recall gating tests once 1.9 is implemented
 - [x] 1.6.1 Implement Inbox (list view) + daily cap=10 + “Top-10 competition” replacement (explainable scores; overflow becomes parked)
-- [ ] 1.6.2 Implement scoring signals: scarcity (similarity to existing), depth (Prompt Compressibility Test), evidence strength
+- [x] 1.6.2 Implement scoring signals: scarcity (similarity to existing), depth (Prompt Compressibility Test), evidence strength
 - [x] 1.6.3 Implement “Generate more / Load more” to pull top-ranked parked suggestions back into Inbox (user-triggered only)
 - [x] 1.7 Ensure learning is an independent pipeline (best-effort, idempotent, failures do NOT affect task/subagent delivery)
 - [ ] 1.8 Add UI: Work Ledger (list/search/detail) + SOP Suggestions (review/approve/edit/reject/merge/archive) + Digest
