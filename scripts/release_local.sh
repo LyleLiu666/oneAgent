@@ -4,6 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${OUT_DIR:-${ROOT_DIR}/dist/release}"
 
+# Normalize OUT_DIR to an absolute path so relative paths keep working
+# even when we temporarily `cd` into subdirectories (e.g. backend/).
+if [[ "${OUT_DIR}" != /* ]]; then
+  OUT_DIR="${ROOT_DIR}/${OUT_DIR}"
+fi
+
 VERSION="${VERSION:-}"
 if [[ -z "${VERSION}" ]]; then
   if command -v git >/dev/null 2>&1; then
@@ -66,7 +72,13 @@ resolve_portable_git_url() {
     return
   fi
 
-  curl -sSL --fail "https://api.github.com/repos/git-for-windows/git/releases/latest" | \
+  # Prefer authenticated GitHub API access when available (helps avoid rate limits in CI).
+  CURL_AUTH=()
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    CURL_AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "X-GitHub-Api-Version: 2022-11-28")
+  fi
+
+  curl -sSL --fail "${CURL_AUTH[@]}" "https://api.github.com/repos/git-for-windows/git/releases/latest" | \
     python3 -c 'import json, re, sys; data=json.load(sys.stdin); pat=re.compile("^PortableGit-.*-64-bit\\.7z\\.exe$"); assets=data.get("assets", []); print(next((a.get("browser_download_url","") for a in assets if pat.match(a.get("name","") or "")), ""))'
 }
 

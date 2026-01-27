@@ -1,0 +1,68 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (default: dev or git describe)"
+        required: false
+        default: ""
+      bundle_portable_git:
+        description: "Bundle PortableGit into Windows zip (requires network download)"
+        required: false
+        default: "0"
+      portable_git_url:
+        description: "Optional pinned PortableGit URL (overrides latest)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps (deterministic)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build release artifacts
+        env:
+          OUT_DIR: ${{ github.workspace }}/dist/release
+          VERSION: ${{ inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || 'dev' }}
+          # Default to bundling PortableGit for tagged releases to ensure Git Bash is available on Windows.
+          # Manual runs default to 0 unless explicitly enabled.
+          BUNDLE_PORTABLE_GIT: ${{ (startsWith(github.ref, 'refs/tags/') && '1') || inputs.bundle_portable_git || '0' }}
+          PORTABLE_GIT_URL: ${{ inputs.portable_git_url || '' }}
+        run: bash scripts/release_local.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: oneagent-${{ github.ref_name }}
+          path: dist/release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/release/*
