@@ -8,64 +8,25 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 1) `<workspace>/.oneagent/skills/**/SKILL.md`
 2) `<workspace>/skills/**/SKILL.md`
 3) `<workspace>/.claude/skills/**/SKILL.md`
-4) `~/.claude/skills/**/SKILL.md`
-5) `~/.codex/skills/**/SKILL.md`
-6) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
+4) `ONEAGENT_HOME/.oneagent/skills/**/SKILL.md`（oneAgent-managed personal skills，active）
+5) `~/.claude/skills/**/SKILL.md`
+6) `~/.codex/skills/**/SKILL.md`
+7) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
 
-#### Scenario: 发现 ~/.claude skills
-- **GIVEN** 用户主目录存在 `~/.claude/skills/translator/SKILL.md`
+#### Scenario: 发现 ONEAGENT_HOME 下的个人 skills
+- **GIVEN** `ONEAGENT_HOME/.oneagent/skills/my-sop/SKILL.md` 存在
 - **WHEN** 系统加载技能目录
-- **THEN** 技能列表中包含该技能（source=`.claude`）
+- **THEN** 技能列表中包含该技能（source=`.oneagent_home` 或等价 source）
 
-#### Scenario: 发现 <workspace>/.oneagent skills
-- **GIVEN** 工作区根目录存在 `<workspace>/.oneagent/skills/code-review/SKILL.md`
+#### Scenario: 归档的个人 skills 不参与发现
+- **GIVEN** `ONEAGENT_HOME/.oneagent/skills-archived/old-sop/SKILL.md` 存在
 - **WHEN** 系统加载技能目录
-- **THEN** 技能列表中包含该技能（source=`.oneagent`）
+- **THEN** 技能列表中不包含该技能（archived skills 不得参与 discovery/recall）
 
-#### Scenario: 发现 <workspace>/skills
-- **GIVEN** 工作区根目录存在 `<workspace>/skills/tech-spec-architect/SKILL.md`
+#### Scenario: workspace skills 覆盖个人 skills
+- **GIVEN** `ONEAGENT_HOME/.oneagent/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
 - **WHEN** 系统加载技能目录
-- **THEN** 技能列表中包含该技能（source=`.workspace`）
-
-#### Scenario: 发现 <workspace>/.claude skills
-- **GIVEN** 工作区根目录存在 `<workspace>/.claude/skills/translator/SKILL.md`
-- **WHEN** 系统加载技能目录
-- **THEN** 技能列表中包含该技能（source=`.claude`）
-
-#### Scenario: 发现 ~/.codex skills
-- **GIVEN** 用户主目录存在 `~/.codex/skills/git-auto-commit/SKILL.md`
-- **WHEN** 系统加载技能目录
-- **THEN** 技能列表中包含该技能（source=`.codex`）
-
-#### Scenario: 冲突时以 .oneagent 覆盖 <workspace>/skills
-- **GIVEN** `<workspace>/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
-- **WHEN** 系统加载技能目录
-- **THEN** 仅保留 `.oneagent` 版本作为最终生效技能（同名覆盖）
-
-#### Scenario: 冲突时以 <workspace>/skills 覆盖 <workspace>/.claude
-- **GIVEN** `<workspace>/.claude/skills/translator/SKILL.md` 与 `<workspace>/skills/translator/SKILL.md` 同时存在
-- **WHEN** 系统加载技能目录
-- **THEN** 仅保留 `<workspace>/skills` 版本作为最终生效技能（同名覆盖）
-
-#### Scenario: 冲突时以 <workspace>/.claude 覆盖 ~/.claude
-- **GIVEN** `~/.claude/skills/translator/SKILL.md` 与 `<workspace>/.claude/skills/translator/SKILL.md` 同时存在
-- **WHEN** 系统加载技能目录
-- **THEN** 仅保留 `<workspace>/.claude` 版本作为最终生效技能（同名覆盖）
-
-#### Scenario: 冲突时以 .claude 覆盖 .codex
-- **GIVEN** `~/.codex/skills/translator/SKILL.md` 与 `~/.claude/skills/translator/SKILL.md` 同时存在
-- **WHEN** 系统加载技能目录
-- **THEN** 仅保留 `.claude` 版本作为最终生效技能（同名覆盖）
-
-#### Scenario: 冲突时以 workspace 覆盖内置 skills
-- **GIVEN** 内置 skills 中存在 `create-skill`，且 `<workspace>/.oneagent/skills/create-skill/SKILL.md` 同时存在
-- **WHEN** 系统加载技能目录
-- **THEN** 仅保留 workspace 版本作为最终生效技能（同名覆盖）
-
-#### Scenario: ~/.claude skills 为 symlink 目录
-- **GIVEN** `~/.claude/skills/code-review-excellence` 是一个 symlink，指向某个真实目录且该目录内包含 `SKILL.md`
-- **WHEN** 系统加载技能目录
-- **THEN** 技能列表中包含该技能（不得因 symlink 而漏掉）
+- **THEN** 仅保留 `<workspace>/.oneagent` 版本作为最终生效技能（同名覆盖）
 
 ### Requirement: 召回式技能推荐 (Recall Recommendation)
 系统必须 (MUST) 在聊天开始前使用“技能召回工具”从全量技能中召回 Top-8，并从中选择 Top-1 作为“推荐技能”（或无推荐），提供给主 agent。
@@ -121,3 +82,33 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **GIVEN** `~/.claude/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
 - **WHEN** agent 调用 `skill.read("translator")`
 - **THEN** 系统返回 `.oneagent` 版本的 `SKILL.md` 原文作为 tool output
+
+### Requirement: Skill Eligibility Metadata (requires/install)
+系统必须 (MUST) 支持在 `SKILL.md` 的 YAML frontmatter 中声明可选的 `requires` 与 `install` 元数据，用于判断技能在当前环境是否可用（eligible）以及向用户展示安装建议。
+
+`requires` 支持以下字段：
+- `os`: 允许的 OS 列表（非空时必须包含当前 OS）
+- `bins`: 必需存在的可执行文件名列表（全部满足）
+- `any_bins`: 至少存在其一的可执行文件名列表
+- `env`: 必需存在的环境变量名列表
+
+`install` 支持结构化安装建议（例如 brew/go/node/download/command），用于 status/check 输出。
+
+#### Scenario: 缺少依赖的 skill 不应被自动推荐
+- **GIVEN** 存在 skill A，声明 `requires.bins=["memo"]`
+- **AND** 当前运行环境缺少 `memo` 可执行文件
+- **WHEN** 系统构建本轮 TurnContext（volatile）的“技能建议”注入消息
+- **THEN** 系统不得把 skill A 作为自动推荐技能
+
+### Requirement: Skill Status/Check CLI
+系统必须 (MUST) 提供 CLI 用于检查技能可用性，并展示缺失依赖与安装建议：
+- `oneagent skills status`：列出技能可用性信息
+- `oneagent skills check`：`status` 的别名
+
+#### Scenario: status 输出包含 missing 与 install hints
+- **GIVEN** 存在 skill B，声明 `requires.bins=["memo"]` 且 `install` 提供 brew 安装方式
+- **AND** 当前环境缺少 `memo`
+- **WHEN** 用户运行 `oneagent skills status`
+- **THEN** 输出中包含 skill B 的 missing 信息（包含 `memo`）
+- **THEN** 输出中包含与 brew 对应的安装提示（例如 `brew install ...` 或 command）
+

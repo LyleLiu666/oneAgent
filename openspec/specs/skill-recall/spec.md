@@ -16,22 +16,20 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 1) `<workspace>/.oneagent/skills`
 2) `<workspace>/skills`
 3) `<workspace>/.claude/skills`
-4) `~/.claude/skills`
-5) `~/.codex/skills`
-6) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
+4) `ONEAGENT_HOME/.oneagent/skills`（oneAgent-managed personal skills，active）
+5) `~/.claude/skills`
+6) `~/.codex/skills`
+7) 内置 skills（随二进制发布，path 形如 `builtin:skills/<id>/SKILL.md`）
 
-技能召回工具应该 (SHOULD) 优先使用 `rg`（ripgrep）对 `SKILL.md` 内容进行匹配计分；在 `rg` 不可用时系统必须 (MUST) 降级为 `grep -R`（或等价实现）以保持基本可用，并通过 `doctor` 明确提示安装 `rg`；整个流程不得依赖外部网络。
-
-#### Scenario: rg 缺失时降级为 grep
-- **GIVEN** 运行环境未安装 `rg`
+#### Scenario: 个人 skills 可被召回
+- **GIVEN** `ONEAGENT_HOME/.oneagent/skills/my-sop/SKILL.md` 存在且内容匹配 query
 - **WHEN** 执行技能召回（基于本地文件）
-- **THEN** 工具仍可返回技能候选列表（允许性能下降）
-- **THEN** 系统能提供可操作的提示（例如提示安装 `rg`）
+- **THEN** 工具返回结果包含该技能
 
-#### Scenario: ~/.claude skills 为 symlink 目录
-- **GIVEN** `~/.claude/skills/code-review-excellence` 是一个 symlink，指向某个真实目录且该目录内包含 `SKILL.md`
-- **WHEN** 执行技能召回
-- **THEN** 召回结果不得因 symlink 而漏掉该技能
+#### Scenario: 归档的个人 skills 不参与召回
+- **GIVEN** `ONEAGENT_HOME/.oneagent/skills-archived/old-sop/SKILL.md` 存在且内容匹配 query
+- **WHEN** 执行技能召回（基于本地文件）
+- **THEN** 工具返回结果不包含该技能（archived skills 不得参与 recall）
 
 ### Requirement: 召回接口固定返回 Top-8 并返回可用字段
 技能召回工具必须 (MUST) 提供一个查询接口（CLI 或库 API），输入 query，输出 Top-8 技能候选列表，并包含至少以下字段：
@@ -59,3 +57,4 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **GIVEN** 技能来源中存在技能 `code-review-excellence`
 - **WHEN** 输入 query="请使用 code-review-excellence 这个技能，帮我 review 这个 PR"
 - **THEN** 工具可以将 `code-review-excellence` 解析为候选/推荐技能（可作为 override）
+

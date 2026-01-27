@@ -69,3 +69,82 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **WHEN** 用户执行 `oneagent doctor`
 - **THEN** 输出包含：版本、profile、AUTH_MODE、监听地址与端口、ONEAGENT_HOME、Settings 存储位置（例如 `ONEAGENT_HOME/.oneagent/settings.db`）、关键二进制是否可用（git/rg/jq/bash）
 
+### Requirement: Windows 下可运行（Local Tool）
+系统必须 (MUST) 支持在 Windows 下以本地工具形应用运行：`oneagent serve` 与 `oneagent doctor` 必须可用。
+
+#### Scenario: Windows 上 serve/doctor 可用
+- **GIVEN** 用户在 Windows 下安装了 oneAgent 可执行文件
+- **WHEN** 用户执行 `oneagent serve`
+- **THEN** 服务启动成功（UI + API）
+- **WHEN** 用户执行 `oneagent doctor`
+- **THEN** doctor 输出包含 Windows 平台的诊断信息与依赖可用性
+
+### Requirement: Quick-start serve flags（`--open` / `--workspace`）
+系统必须 (MUST) 为 `oneagent serve` 提供 quick-start flags，以降低“安装后第一次使用”的操作成本：
+- `--open`：服务启动成功后，自动打开默认浏览器访问 UI。
+- `--workspace <path>`：设置一个默认 workspace，供 UI 在首次进入/新会话时自动填充（用户仍可在会话级覆盖）。
+
+#### Scenario: `--open` 自动打开 UI
+- **WHEN** 用户执行 `oneagent serve --open`
+- **THEN** 服务启动成功后，系统尝试打开默认浏览器访问 UI
+- **THEN** 若打开失败，系统输出可操作的提示但服务仍保持运行
+
+#### Scenario: `--workspace` 提供默认 workspace
+- **WHEN** 用户执行 `oneagent serve --workspace /path/to/ws`
+- **THEN** 服务向 UI 暴露 default workspace = `/path/to/ws`
+- **THEN** UI 在未显式设置会话 workspace 的情况下，默认填充该 workspace
+
+### Requirement: 支持 OCC 自动预条件写入（L2）
+系统必须 (MUST) 支持基于文件指纹（sha256）的条件写入（OCC），并在启用 OCC 自动化时提供“read→write/edit”闭环以避免版本漂移。
+
+#### Scenario: read 后文件被外部修改，write 自动拒绝
+- **GIVEN** OCC 自动化启用且系统已通过 `read_file` 记录某文件的版本指纹
+- **WHEN** 该文件在工具写入前被外部修改
+- **THEN** 随后的 `write_file`/`edit` 在未显式提供 `preconditions` 时仍应自动带上 `expected_sha256` 并拒绝写入
+- **AND** 错误信息应提示需要重新读取文件后再修改
+
+#### Scenario: 连续多次 edit 不应因为 OCC 自我冲突失败
+- **GIVEN** OCC 自动化启用且系统已记录某文件指纹
+- **WHEN** 同一任务连续多次对该文件进行 `edit`/`write_file`
+- **THEN** 写入成功后系统应更新指纹，使后续编辑不会因“预期 sha 过旧”而失败
+
+### Requirement: 工具权限控制（禁用与破坏性命令保护）
+系统必须 (MUST) 提供最小可用的工具权限控制能力，以便在本地/单机模式下限制风险。
+
+#### Scenario: 通过环境变量禁用工具
+- **WHEN** 用户设置 `ONEAGENT_DISABLE_TOOL_BASH=1`（或等价）
+- **THEN** 系统不得向 LLM 暴露该工具
+- **AND** 若用户/系统显式请求该工具，应返回明确错误（包含 tool id 与禁用原因）
+
+#### Scenario: bash 默认拒绝 rm
+- **GIVEN** 未设置 `ONEAGENT_BASH_ALLOW_RM=1`
+- **WHEN** 用户/LLM 通过 bash 尝试执行包含 `rm` 的命令
+- **THEN** 系统应拒绝执行并返回明确错误
+
+### Requirement: Task queue 默认 limits（steps/runtime）
+系统必须 (MUST) 为 task queue 提供默认 limits（最大步骤数、最大运行时长），用于避免“无限运行/无限循环”导致资源失控。
+
+系统应该 (SHOULD) 允许通过环境变量覆盖默认 limits 与上限（cap），以便不同团队按安全/成本约束治理。
+
+#### Scenario: 创建 task 未指定 limits 时使用默认值
+- **WHEN** 用户创建 task 且未提供 `limits.max_steps` 与 `limits.max_runtime_seconds`
+- **THEN** 系统返回的 task 必须包含默认 limits
+- **AND** runner 执行该 task 时必须使用同样的默认 limits
+
+#### Scenario: 用户请求过大的 limits 会被 cap 限制
+- **GIVEN** 系统配置了 limits cap
+- **WHEN** 用户创建 task 时请求的 limits 超过 cap
+- **THEN** 系统应将 limits 限制在 cap 范围内（并在返回的 task 中反映）
+
+### Requirement: UI 内任务完成通知（无外部 webhook）
+系统必须 (MUST) 在 UI 内提供任务状态更新的可见性，帮助用户在不持续盯屏的情况下快速发现“已完成/失败/可续跑”的任务。
+
+#### Scenario: queued/running 进入终态时产生 UI 通知
+- **GIVEN** 用户打开 Task Workbench 或 Chat 内 Task Panel
+- **WHEN** 某 task 的最新 attempt 状态从 `queued` 或 `running` 变为终态（`succeeded` / `failed` / `timed_out` / `interrupted` / `canceled`）
+- **THEN** UI 应显示一条任务更新提示（包含 task 标题或 id、workspace、状态）
+
+#### Scenario: 首次加载不为历史任务产生通知
+- **WHEN** 用户首次打开页面并加载任务列表
+- **THEN** UI 仅建立“已知状态基线”，不为此前已完成的历史任务生成通知
+
