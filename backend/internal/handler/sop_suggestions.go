@@ -59,9 +59,7 @@ func CreateSuggestion(c *gin.Context) {
 		RiskNotes:         strings.TrimSpace(req.RiskNotes),
 		EvidenceReceiptIDs: req.EvidenceIDs,
 		DraftSkill:         strings.TrimSpace(req.DraftSkill),
-		Scores: workledger.SuggestionScores{
-			TotalScore: 0,
-		},
+		Scores: computeSuggestionScores(rt.WorkLedger, principal, dayKey, req.Title, req.DraftSkill, req.EvidenceIDs),
 		Meta: workledger.SuggestionMeta{DayKey: dayKey},
 	})
 	if err != nil {
@@ -221,4 +219,3 @@ func LoadMoreSuggestions(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, list)
 }
-

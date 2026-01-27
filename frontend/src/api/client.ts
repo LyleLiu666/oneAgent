@@ -421,6 +421,94 @@ export async function getDigest(dayKey: string, refresh: boolean = false): Promi
     return api(`/api/ledger/digests/${encodeURIComponent(dayKey)}${q}`)
 }
 
+export type SuggestionStatus =
+    | 'proposed'
+    | 'parked'
+    | 'approved'
+    | 'rejected'
+    | 'merged'
+    | 'deprecated'
+
+export interface SuggestionScores {
+    scarcity_score: number
+    depth_score: number
+    evidence_score: number
+    total_score: number
+}
+
+export interface SuggestionMeta {
+    day_key?: string
+    compression_prompt?: string
+    similar_skill_ids?: string[]
+    delta_vs_top1?: string
+}
+
+export interface Suggestion {
+    suggestion_id: string
+    principal_id: string
+    workspace_root?: string
+    title: string
+    description?: string
+    risk_notes?: string
+    status: SuggestionStatus
+    evidence_receipt_ids: string[]
+    evidence_count: number
+    draft_skill: string
+    merged_into_suggestion_id?: string
+    scores?: SuggestionScores
+    meta?: SuggestionMeta
+    created_at: string
+    updated_at: string
+}
+
+export async function listSopSuggestions(params?: {
+    day?: string
+    status?: SuggestionStatus
+    include_parked?: boolean
+    limit?: number
+}): Promise<Suggestion[]> {
+    const qs = new URLSearchParams()
+    if (params?.day) qs.set('day', params.day)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.include_parked) qs.set('include_parked', '1')
+    if (params?.limit) qs.set('limit', String(params.limit))
+    const q = qs.toString()
+    return api(`/api/ledger/sop_suggestions${q ? `?${q}` : ''}`)
+}
+
+export async function createSopSuggestion(payload: {
+    workspace_root?: string
+    title: string
+    description?: string
+    risk_notes?: string
+    draft_skill: string
+    evidence_receipt_ids: string[]
+    day_key?: string
+}): Promise<Suggestion> {
+    return api('/api/ledger/sop_suggestions', { method: 'POST', body: payload })
+}
+
+export async function generateSopSuggestions(payload?: {
+    lookback_days?: number
+    count?: number
+}): Promise<Suggestion[]> {
+    return api('/api/ledger/sop_suggestions/generate', { method: 'POST', body: payload || {} })
+}
+
+export async function updateSopSuggestionStatus(
+    suggestionId: string,
+    payload: { status: SuggestionStatus; merged_into_suggestion_id?: string }
+): Promise<Suggestion> {
+    return api(`/api/ledger/sop_suggestions/${encodeURIComponent(suggestionId)}/status`, {
+        method: 'POST',
+        body: payload,
+    })
+}
+
+export async function loadMoreSopSuggestions(payload?: { day_key?: string; count?: number }): Promise<Suggestion[]> {
+    return api('/api/ledger/sop_suggestions/load_more', { method: 'POST', body: payload || {} })
+}
+
 
 
 // ============================================================================

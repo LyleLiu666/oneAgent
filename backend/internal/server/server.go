@@ -80,6 +80,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 
 		// SOP suggestions.
 		api.POST("/ledger/sop_suggestions", handler.CreateSuggestion)
+		api.POST("/ledger/sop_suggestions/generate", handler.GenerateSuggestions)
 		api.GET("/ledger/sop_suggestions", handler.ListSuggestions)
 		api.GET("/ledger/sop_suggestions/:id", handler.GetSuggestion)
 		api.POST("/ledger/sop_suggestions/:id/status", handler.UpdateSuggestionStatus)
