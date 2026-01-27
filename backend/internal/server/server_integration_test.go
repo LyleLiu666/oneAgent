@@ -15,6 +15,7 @@ import (
 )
 
 func TestServer_SmokeE2E(t *testing.T) {
+	t.Setenv("ONEAGENT_DISABLE_DAILY_LEARNING", "1")
 	home := t.TempDir()
 	cfg := &config.Config{
 		Profile:          "local",
@@ -65,13 +66,15 @@ func TestServer_SmokeE2E(t *testing.T) {
 		t.Fatalf("GET /: %v", err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
+	// Frontend assets may not be bundled in backend-only CI. When bundled, "/" should serve index.html.
+	if res.StatusCode == http.StatusOK {
+		bodyBytes, _ := io.ReadAll(res.Body)
+		body := string(bodyBytes)
+		if !strings.Contains(body, "<!doctype html") && !strings.Contains(body, "<!DOCTYPE html") {
+			t.Fatalf("expected index.html, got body prefix: %q", body[:min(len(body), 120)])
+		}
+	} else if res.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET / status=%d", res.StatusCode)
-	}
-	bodyBytes, _ := io.ReadAll(res.Body)
-	body := string(bodyBytes)
-	if !strings.Contains(body, "<!doctype html") && !strings.Contains(body, "<!DOCTYPE html") {
-		t.Fatalf("expected index.html, got body prefix: %q", body[:min(len(body), 120)])
 	}
 
 	req, _ = http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/tools", nil)

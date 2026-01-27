@@ -157,14 +157,15 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 			return
 		}
 
-		// Fallback to index.html (SPA).
-		indexFile, err := web.Static.ReadFile("static/index.html")
-		if err != nil {
-			c.String(http.StatusInternalServerError, "Failed to load page")
-			return
-		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", indexFile)
-	})
+			// Fallback to index.html (SPA).
+			indexFile, err := web.Static.ReadFile("static/index.html")
+			if err != nil {
+				// If frontend assets were not bundled (e.g. backend-only CI), don't 500.
+				c.String(http.StatusNotFound, "Not found")
+				return
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", indexFile)
+		})
 
 	return router, nil
 }

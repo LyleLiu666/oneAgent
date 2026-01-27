@@ -13,6 +13,7 @@ import (
 )
 
 func TestServer_SOPSuggesionsGenerateAPI_Smoke(t *testing.T) {
+	t.Setenv("ONEAGENT_DISABLE_DAILY_LEARNING", "1")
 	home := t.TempDir()
 	cfg := &config.Config{
 		Profile:          "local",
