@@ -1029,7 +1029,7 @@ onUnmounted(() => {
           -->
       </div>
 
-      <div class="shrink-0 bg-surface-950/80 backdrop-blur session-header">
+      <div class="shrink-0 bg-surface-950/80 backdrop-blur session-header relative z-30">
         <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">会话</p>

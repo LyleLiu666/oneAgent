@@ -57,3 +57,30 @@ it('sets workspace path after clicking Browse', async () => {
     const input = wrapper.get('[data-testid="chat-workspace-path"]')
     expect((input.element as HTMLInputElement).value).toBe('/tmp/workspace')
 })
+
+it('keeps session header above messages (for tool popover)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    const header = wrapper.get('.session-header')
+    expect(header.classes()).toContain('relative')
+    expect(header.classes()).toContain('z-30')
+})
