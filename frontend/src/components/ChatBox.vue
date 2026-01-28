@@ -33,6 +33,9 @@ const workspaceChoosing = ref(false)
 const workspaceChooseError = ref('')
 const workspaceOnboardingDismissed = ref(false)
 const sessionWorkspace = ref('')
+const sessionPolicyID = ref('')
+const sessionPolicyHash = ref('')
+const sessionPolicyResolvedAt = ref('')
 
 const runtimeConfigLoading = ref(false)
 const runtimeConfigError = ref('')
@@ -122,6 +125,11 @@ const workspaceOnboardingBlocking = computed(() => {
     !String(workspacePath.value || '').trim() &&
     !workspaceOnboardingDismissed.value
   )
+})
+
+const shortSessionPolicyHash = computed(() => {
+  const h = String(sessionPolicyHash.value || '').trim()
+  return h.length >= 8 ? h.slice(0, 8) : h
 })
 
 const canSend = computed(
@@ -351,6 +359,9 @@ const loadSessionMessages = async (
       selectedToolProtocol.value = 'json'
     }
     const sessionSystemPrompt = raw?.metadata?.system_prompt
+    const policyID = raw?.metadata?.policy_id
+    const policyHash = raw?.metadata?.policy_hash
+    const policyResolvedAt = raw?.metadata?.policy_resolved_at
     const sessionWorkspaceRaw = raw?.metadata?.workspace
     if (typeof sessionWorkspaceRaw === 'string' && sessionWorkspaceRaw.trim()) {
       const normalized = String(sessionWorkspaceRaw).trim()
@@ -360,6 +371,10 @@ const loadSessionMessages = async (
       sessionWorkspace.value = ''
       workspacePath.value = ''
     }
+
+    sessionPolicyID.value = typeof policyID === 'string' ? String(policyID) : ''
+    sessionPolicyHash.value = typeof policyHash === 'string' ? String(policyHash) : ''
+    sessionPolicyResolvedAt.value = typeof policyResolvedAt === 'string' ? String(policyResolvedAt) : ''
     const rawMessages = Array.isArray(raw?.messages) ? raw.messages : []
     const mapped: ChatMessage[] = rawMessages.map((m: any, idx: number) => {
         const msg = m ?? {}
@@ -490,6 +505,9 @@ const startNewSession = () => {
   chatStore.clearMessages()
   chatStore.setCurrentSession('')
   sessionWorkspace.value = ''
+  sessionPolicyID.value = ''
+  sessionPolicyHash.value = ''
+  sessionPolicyResolvedAt.value = ''
   workspaceOnboardingDismissed.value = false
   applyWorkspaceDefaultsForNewSession()
 }
@@ -1010,6 +1028,13 @@ onUnmounted(() => {
           <div class="min-w-0">
             <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Session</p>
             <p class="text-sm text-surface-100 truncate">{{ currentSessionTitle }}</p>
+            <p v-if="sessionPolicyHash" class="text-[11px] text-surface-500 truncate">
+              policy={{ sessionPolicyID || 'unknown' }} · {{ shortSessionPolicyHash }}
+              <a href="/governance/tools" class="ml-2 text-primary-400 hover:text-primary-300 underline">
+                Tool Permissions
+              </a>
+              <span v-if="sessionPolicyResolvedAt" class="ml-2">· {{ sessionPolicyResolvedAt }}</span>
+            </p>
           </div>
           <div class="flex items-center gap-2 flex-wrap justify-end">
             <Cpu class="w-4 h-4 text-surface-400" />

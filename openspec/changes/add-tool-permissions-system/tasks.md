@@ -19,8 +19,8 @@
 - [x] 4.3 Add regression tests for bypass patterns (scripts/interpreters/indirect deletes)
 
 ## 5. UI / UX
-- [ ] 5.1 Add Tool Permissions workbench (view/edit policies; view effective permissions)
-- [ ] 5.2 Show active policy snapshot in session/task detail; guide user on denied tool requests
+- [x] 5.1 Add Tool Permissions workbench (view/edit policies; view effective permissions)
+- [x] 5.2 Show active policy snapshot in session/task detail; guide user on denied tool requests
 
 ## 6. Cleanup
 - [ ] 6.1 Remove `ONEAGENT_BASH_ALLOW_RM` references (code/tests/specs/docs/doctor)

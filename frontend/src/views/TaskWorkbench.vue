@@ -65,6 +65,7 @@ const canCancel = computed(() => latestStatus.value === 'queued' || latestStatus
 const canResume = computed(() => ['failed', 'timed_out', 'interrupted'].includes(latestStatus.value))
 
 const normalizeWorkspace = (ws: string) => String(ws || '').trim()
+const shortHash = (hash?: string) => (hash && hash.length >= 8 ? hash.slice(0, 8) : hash || '')
 
 const loadManualWorkspaces = () => {
   try {
@@ -480,6 +481,13 @@ onUnmounted(() => {
               <div v-if="latestAttempt.summary" class="text-sm text-surface-200 mt-2 whitespace-pre-wrap">{{ latestAttempt.summary }}</div>
               <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400 mt-2">findings: {{ latestAttempt.findings_path }}</div>
               <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400 mt-1">trace: {{ latestAttempt.trace_log_path }}</div>
+              <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400 mt-1">
+                policy:
+                <span class="font-mono text-surface-200">{{ latestAttempt.policy_snapshot.policy?.id }}</span>
+                ·
+                <span class="font-mono text-surface-200">{{ shortHash(latestAttempt.policy_snapshot.policy_hash) }}</span>
+                · principal={{ latestAttempt.policy_snapshot.principal_id }}
+              </div>
               <div v-if="latestAttempt.observer" class="text-xs text-surface-400 mt-2">
                 Observer: {{ latestAttempt.observer.pass ? 'pass' : 'fail' }} · {{ latestAttempt.observer.reason }}
               </div>

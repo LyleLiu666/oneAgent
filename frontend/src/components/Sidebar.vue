@@ -16,6 +16,7 @@ import {
   Bot,
   ListTodo,
   ListChecks,
+  Shield,
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
@@ -37,6 +38,7 @@ const navItems = [
   { name: 'Tasks', path: '/tasks', icon: ListTodo },
   { name: 'SOP Governance', path: '/governance/sop', icon: ListChecks },
   { name: 'Skill Governance', path: '/governance/skills', icon: ListChecks },
+  { name: 'Tool Permissions', path: '/governance/tools', icon: Shield },
   { name: 'Ledger', path: '/ledger', icon: ScrollText },
   { name: 'Settings', path: '/settings', icon: Settings },
 

@@ -366,6 +366,15 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			shouldUpdate = true
 		}
 
+		// Persist policy snapshot identifiers for UX/debugging.
+		if prevHash, _ := sessionMetadata["policy_hash"].(string); strings.TrimSpace(prevHash) != strings.TrimSpace(policySnap.PolicyHash) {
+			sessionMetadata["principal_id"] = policySnap.PrincipalID
+			sessionMetadata["policy_id"] = policySnap.Policy.ID
+			sessionMetadata["policy_hash"] = policySnap.PolicyHash
+			sessionMetadata["policy_resolved_at"] = policySnap.ResolvedAt
+			shouldUpdate = true
+		}
+
 		if needsEpochBump {
 			epoch++
 		}

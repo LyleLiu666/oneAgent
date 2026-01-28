@@ -37,6 +37,16 @@ const subtitle = computed(() => {
   return `${role} · ${type}`
 })
 
+const checkPermissionDenied = (err?: string) => {
+  const raw = String(err || '').trim()
+  if (!raw) return false
+  return raw.toLowerCase().includes('permission denied')
+}
+
+const isPermissionDenied = computed(() => {
+  return checkPermissionDenied(props.message.tool?.error)
+})
+
 const toggle = () => {
   isExpanded.value = !isExpanded.value
 }
@@ -162,6 +172,10 @@ const formatMaybeJson = (raw: string): string => {
                   <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(String(r.output)) }}</pre>
                 </div>
                 <div v-if="r.error" class="text-xs text-red-400">{{ r.error }}</div>
+                <div v-if="r.error && checkPermissionDenied(r.error)" class="text-xs text-surface-400 mt-2">
+                  Blocked by tool permissions.
+                  <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">Tool Permissions</a>
+                </div>
               </div>
             </div>
             <div v-else class="space-y-2">
@@ -174,6 +188,10 @@ const formatMaybeJson = (raw: string): string => {
                 <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.content) }}</pre>
               </div>
               <div v-if="message.tool?.error" class="text-xs text-red-400">{{ message.tool.error }}</div>
+              <div v-if="message.tool?.error && isPermissionDenied" class="text-xs text-surface-400">
+                Blocked by tool permissions.
+                <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">Tool Permissions</a>
+              </div>
             </div>
           </template>
           <template v-else>

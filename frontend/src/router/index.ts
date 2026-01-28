@@ -46,6 +46,12 @@ const routes = [
     component: () => import("@/views/SkillGovernance.vue"),
     meta: { requiresAuth: true },
   },
+  {
+    path: "/governance/tools",
+    name: "Tool Permissions",
+    component: () => import("@/views/ToolPermissions.vue"),
+    meta: { requiresAuth: true },
+  },
 
   {
     path: "/:pathMatch(.*)*",

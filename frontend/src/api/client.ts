@@ -332,6 +332,36 @@ export interface TaskObserverDecision {
     evidence?: string[]
 }
 
+export type ToolPolicyEffect = 'allow' | 'deny'
+
+export interface ToolPolicyConstraints {
+    file_scope?: string[]
+    read_outside_workspace?: boolean
+    command_profile?: string
+    allowlist?: string[]
+}
+
+export interface ToolPolicyRule {
+    id: string
+    effect: ToolPolicyEffect
+    tool_id: string
+    constraints?: ToolPolicyConstraints
+}
+
+export interface ToolPolicy {
+    id: string
+    default_effect?: ToolPolicyEffect
+    default_command_profile?: string
+    rules?: ToolPolicyRule[]
+}
+
+export interface ToolPolicySnapshot {
+    policy: ToolPolicy
+    policy_hash: string
+    resolved_at: string
+    principal_id: string
+}
+
 export interface TaskAttempt {
     id: string
     status: AttemptStatus
@@ -339,6 +369,8 @@ export interface TaskAttempt {
     started_at?: string
     finished_at?: string
     resumed_from_attempt_id?: string
+    principal_id?: string
+    policy_snapshot?: ToolPolicySnapshot
     run_id?: string
     summary?: string
     findings_path?: string
@@ -398,6 +430,44 @@ export async function resumeTask(taskId: string): Promise<Task> {
 
 export async function getTaskEvents(taskId: string): Promise<TaskEvent[]> {
     return api(`/api/tasks/${taskId}/events`)
+}
+
+// ============================================================================
+// Tool permissions (admin)
+// ============================================================================
+
+export interface AuthTokenResponse {
+    token: string
+    principal_id: string
+    created_at: string
+    revoked_at?: string
+}
+
+export interface ToolPolicyResponse {
+    principal_id: string
+    exists: boolean
+    policy: ToolPolicy
+    snapshot: ToolPolicySnapshot
+}
+
+export async function createAuthToken(principalId: string): Promise<AuthTokenResponse> {
+    return api('/api/admin/tokens', { method: 'POST', body: { principal_id: principalId } })
+}
+
+export async function listAuthTokens(): Promise<AuthTokenResponse[]> {
+    return api('/api/admin/tokens')
+}
+
+export async function revokeAuthToken(token: string): Promise<{ ok: boolean }> {
+    return api('/api/admin/tokens/revoke', { method: 'POST', body: { token } })
+}
+
+export async function getToolPolicy(principalId: string): Promise<ToolPolicyResponse> {
+    return api(`/api/admin/tool_policies/${encodeURIComponent(principalId)}`)
+}
+
+export async function setToolPolicy(principalId: string, policy: ToolPolicy): Promise<ToolPolicyResponse> {
+    return api(`/api/admin/tool_policies/${encodeURIComponent(principalId)}`, { method: 'PUT', body: policy })
 }
 
 // ============================================================================
