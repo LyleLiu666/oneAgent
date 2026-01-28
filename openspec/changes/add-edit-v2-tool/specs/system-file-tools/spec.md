@@ -20,3 +20,13 @@
 - **WHEN** agent 调用 `edit_v2(...)`
 - **THEN** 系统拒绝执行并返回明确错误（包含诊断信息与建议下一步，例如先 `read_file`）
 
+#### Scenario: OCC precondition mismatch fails safely
+- **GIVEN** agent 读取了某文件并得到一个 `expected_sha256`
+- **AND** 该文件在此后被其他进程修改（sha256 已变化）
+- **WHEN** agent 调用 `edit_v2(..., expected_sha256=<old>)`
+- **THEN** 系统拒绝写入并返回 `precondition_failed=true`
+
+#### Scenario: diff_preview MUST be capped
+- **GIVEN** 一次替换会产生很大的 diff
+- **WHEN** agent 调用 `edit_v2(...)`
+- **THEN** 系统返回的 `diff_preview` 仍然是可读的摘要（被 size cap 截断）
