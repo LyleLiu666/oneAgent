@@ -2,6 +2,7 @@ package handler
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ type modelResponse struct {
 	Model         string        `json:"model"`
 	IsDefault     bool          `json:"is_default"`
 	EnableKVCache bool          `json:"enable_kv_cache"`
+	SafetyTier    string        `json:"safety_tier,omitempty"`
 	CreatedAt     time.Time     `json:"created_at"`
 	UpdatedAt     time.Time     `json:"updated_at"`
 	Provider      *providerSlim `json:"provider,omitempty"`
@@ -72,11 +74,12 @@ type updateProviderRequest struct {
 }
 
 type createModelRequest struct {
-	ProviderID    string `json:"provider_id" binding:"required"`
-	Name          string `json:"name" binding:"required"`
-	Model         string `json:"model" binding:"required"`
-	IsDefault     bool   `json:"is_default"`
-	EnableKVCache *bool  `json:"enable_kv_cache"`
+	ProviderID    string  `json:"provider_id" binding:"required"`
+	Name          string  `json:"name" binding:"required"`
+	Model         string  `json:"model" binding:"required"`
+	IsDefault     bool    `json:"is_default"`
+	EnableKVCache *bool   `json:"enable_kv_cache"`
+	SafetyTier    *string `json:"safety_tier"`
 }
 
 type updateModelRequest struct {
@@ -84,6 +87,35 @@ type updateModelRequest struct {
 	Model         *string `json:"model"`
 	IsDefault     *bool   `json:"is_default"`
 	EnableKVCache *bool   `json:"enable_kv_cache"`
+	SafetyTier    *string `json:"safety_tier"`
+}
+
+const (
+	safetyTierHigh     = "high"
+	safetyTierStandard = "standard"
+)
+
+func normalizeSafetyTier(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return safetyTierHigh, nil
+	}
+	if s != safetyTierHigh && s != safetyTierStandard {
+		return "", fmt.Errorf("invalid safety_tier: %s", s)
+	}
+	return s, nil
+}
+
+func safetyTierFromOptions(options map[string]any) string {
+	if options == nil {
+		return safetyTierHigh
+	}
+	if v, ok := options["safety_tier"].(string); ok {
+		if norm, err := normalizeSafetyTier(v); err == nil {
+			return norm
+		}
+	}
+	return safetyTierHigh
 }
 
 func ListProviders(c *gin.Context) {
@@ -290,6 +322,20 @@ func CreateModel(c *gin.Context) {
 		enableKV = *req.EnableKVCache
 	}
 
+	tier, err := normalizeSafetyTier("")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.SafetyTier != nil {
+		gotTier, err := normalizeSafetyTier(*req.SafetyTier)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		tier = gotTier
+	}
+
 	llmModel, err := rt.Settings.CreateModel(c.Request.Context(), settingsdb.Model{
 		ID:            uuid.New().String(),
 		ProviderID:    req.ProviderID,
@@ -298,7 +344,7 @@ func CreateModel(c *gin.Context) {
 		Model:         strings.TrimSpace(req.Model),
 		IsDefault:     req.IsDefault,
 		EnableKVCache: enableKV,
-		Options:       map[string]any{},
+		Options:       map[string]any{"safety_tier": tier},
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create model"})
@@ -335,6 +381,28 @@ func UpdateModel(c *gin.Context) {
 	}
 	if req.EnableKVCache != nil {
 		updates["enable_kv_cache"] = *req.EnableKVCache
+	}
+	if req.SafetyTier != nil {
+		tier, err := normalizeSafetyTier(*req.SafetyTier)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		existing, err := rt.Settings.GetModel(c.Request.Context(), userID, modelID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Model not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load model"})
+			return
+		}
+		opts := existing.Options
+		if opts == nil {
+			opts = map[string]any{}
+		}
+		opts["safety_tier"] = tier
+		updates["options"] = opts
 	}
 
 	updated, err := rt.Settings.UpdateModel(c.Request.Context(), userID, modelID, updates)
@@ -400,6 +468,7 @@ func toModelResponse(m settingsdb.Model, provider *providerSlim) modelResponse {
 		Model:         m.Model,
 		IsDefault:     m.IsDefault,
 		EnableKVCache: m.EnableKVCache,
+		SafetyTier:    safetyTierFromOptions(m.Options),
 		CreatedAt:     m.CreatedAt,
 		UpdatedAt:     m.UpdatedAt,
 		Provider:      provider,

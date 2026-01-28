@@ -269,6 +269,21 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 
+	resolvedModel, err := h.resolveModel(c.Request.Context(), userID, selectedModelID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if resolvedModel.SafetyTier != safetyTierHigh && userID != "local" {
+		blocked := intersectToolIDs(selectedToolIDs, []string{tool.ToolIDBash, tool.ToolIDRunCommand})
+		if len(blocked) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("tool(s) %s require safety_tier=%s (current=%s)", strings.Join(blocked, ","), safetyTierHigh, resolvedModel.SafetyTier),
+			})
+			return
+		}
+	}
+
 	toolDefs, err := tool.MountWithSnapshot(selectedToolIDs, policySnap)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -315,12 +330,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 	if toolProtocol == "xml" && len(toolDefs) > 0 && len(messages) > 0 && messages[0].Role == "system" {
 		messages[0].Content = strings.TrimSpace(messages[0].Content) + "\n\n" + toolxml.SystemPrompt(toolDefs)
-	}
-
-	resolvedModel, err := h.resolveModel(c.Request.Context(), userID, selectedModelID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
 	}
 
 	if resolvedModel.ModelID != "" {
@@ -1185,6 +1194,7 @@ type resolvedModel struct {
 	ModelID       string
 	ModelName     string
 	EnableKVCache bool
+	SafetyTier    string
 }
 
 func (h *ChatHandler) resolveModel(ctx context.Context, userID, modelID string) (*resolvedModel, error) {
@@ -1255,6 +1265,7 @@ func (h *ChatHandler) resolveModelWithSettings(ctx context.Context, userID, mode
 		ModelID:       m.ID,
 		ModelName:     m.Model,
 		EnableKVCache: m.EnableKVCache,
+		SafetyTier:    safetyTierFromOptions(m.Options),
 	}, nil
 }
 
@@ -1826,6 +1837,31 @@ func filterKnownToolIDs(ids []string) []string {
 			continue
 		}
 		if _, ok := known[trimmed]; ok {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func intersectToolIDs(ids []string, targets []string) []string {
+	if len(ids) == 0 || len(targets) == 0 {
+		return nil
+	}
+	targetSet := make(map[string]struct{}, len(targets))
+	for _, t := range targets {
+		trimmed := strings.TrimSpace(t)
+		if trimmed == "" {
+			continue
+		}
+		targetSet[trimmed] = struct{}{}
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := targetSet[trimmed]; ok {
 			out = append(out, trimmed)
 		}
 	}

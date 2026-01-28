@@ -5,7 +5,7 @@
 - [x] 1.4 Implement pairing-based token issuance flow (short-lived code → long token)
 - [x] 1.5 Implement external content packaging (untrusted boundary markers)
 - [x] 1.6 Implement suspicious pattern detection + security alert logging
-- [ ] 1.7 Add model `safety_tier` and gate high-risk tools by tier
+- [x] 1.7 Add model `safety_tier` and gate high-risk tools by tier
 - [ ] 1.8 Add `sandbox_mode` for command tools (docker optional)
 - [ ] 1.9 Clarify network exposure defaults (loopback warning + doctor + UI)
 - [ ] 1.10 Add tests for security invariants (prompt constraints, deny enforcement, warnings)
