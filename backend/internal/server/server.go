@@ -106,6 +106,13 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Tool metadata.
 		api.GET("/tools", handler.ListTools)
 
+		// Admin (local-only).
+		api.GET("/admin/tokens", handler.ListAuthTokens)
+		api.POST("/admin/tokens", handler.CreateAuthToken)
+		api.POST("/admin/tokens/revoke", handler.RevokeAuthToken)
+		api.GET("/admin/tool_policies/:principal_id", handler.GetToolPolicy)
+		api.PUT("/admin/tool_policies/:principal_id", handler.SetToolPolicy)
+
 		// Skills governance (read-only list + archive personal skills).
 		api.GET("/skills", handler.ListSkills)
 		api.GET("/skills/duplicates", handler.ListSkillDuplicates)

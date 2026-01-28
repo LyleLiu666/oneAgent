@@ -10,7 +10,7 @@
 
 ## 3. Backend: Identity / Multi-user
 - [x] 3.1 Add multi-token support mapping `Authorization: Bearer <token>` → `principal_id`
-- [ ] 3.2 Add minimal admin APIs/CLI to manage tokens/users/roles (create/list/revoke)
+- [x] 3.2 Add minimal admin APIs/CLI to manage tokens/users/roles (create/list/revoke)
 - [x] 3.3 Propagate `principal_id` into task attempts and subagent runs
 
 ## 4. Command Tools Hardening

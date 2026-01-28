@@ -19,6 +19,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"github.com/liu_y/oneAgent/backend/internal/server"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 )
@@ -42,6 +43,9 @@ func main() {
 		return
 	case "doctor":
 		runDoctor(args[1:])
+		return
+	case "tokens":
+		runTokens(args[1:])
 		return
 	case "skills":
 		runSkills(args[1:])
@@ -194,6 +198,7 @@ func printUsage() {
 Usage:
   oneagent serve [flags]    Start the server (UI + API)
   oneagent doctor [flags]   Run diagnostics
+  oneagent tokens <cmd>     Manage local auth tokens
   oneagent skills search    Search skills (Top-K)
   oneagent --version        Print version
 
@@ -208,6 +213,134 @@ serve flags:
   --bash-root-dir <path>
   --log-retention-days <n>
   --enable-trace true|false
+`)
+}
+
+func runTokens(args []string) {
+	if len(args) == 0 {
+		printTokensUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "create":
+		runTokensCreate(args[1:])
+	case "list":
+		runTokensList(args[1:])
+	case "revoke":
+		runTokensRevoke(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown tokens command: %s\n\n", args[0])
+		printTokensUsage()
+		os.Exit(2)
+	}
+}
+
+func openSettingsDBFromFlags(home, profile string) (*settingsdb.DB, func(), error) {
+	cfg, err := config.Load(config.LoadOptions{
+		Home:    home,
+		Profile: profile,
+		// Do not require auth settings to manage tokens on disk.
+		AuthMode: "none",
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	layout, err := runtime.EnsureLayout(cfg.Home)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := settingsdb.Open(layout.SettingsDBPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() { _ = db.Close() }
+	return db, cleanup, nil
+}
+
+func runTokensCreate(args []string) {
+	fs := flag.NewFlagSet("tokens create", flag.ExitOnError)
+	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default)")
+	profile := fs.String("profile", "", "profile: local|dev")
+	principal := fs.String("principal", "", "principal id (required)")
+	_ = fs.Parse(args)
+
+	if strings.TrimSpace(*principal) == "" {
+		fmt.Fprintln(os.Stderr, "missing --principal")
+		printTokensUsage()
+		os.Exit(2)
+	}
+
+	db, cleanup, err := openSettingsDBFromFlags(*home, *profile)
+	if err != nil {
+		log.Fatalf("open settings db: %v", err)
+	}
+	defer cleanup()
+
+	tok, err := db.CreateAuthToken(context.Background(), *principal)
+	if err != nil {
+		log.Fatalf("create token: %v", err)
+	}
+
+	out, _ := json.MarshalIndent(map[string]any{
+		"token":        tok.Token,
+		"principal_id": tok.PrincipalID,
+		"created_at":   tok.CreatedAt.UTC().Format(time.RFC3339),
+	}, "", "  ")
+	fmt.Println(string(out))
+}
+
+func runTokensList(args []string) {
+	fs := flag.NewFlagSet("tokens list", flag.ExitOnError)
+	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default)")
+	profile := fs.String("profile", "", "profile: local|dev")
+	_ = fs.Parse(args)
+
+	db, cleanup, err := openSettingsDBFromFlags(*home, *profile)
+	if err != nil {
+		log.Fatalf("open settings db: %v", err)
+	}
+	defer cleanup()
+
+	list, err := db.ListAuthTokens(context.Background())
+	if err != nil {
+		log.Fatalf("list tokens: %v", err)
+	}
+	out, _ := json.MarshalIndent(list, "", "  ")
+	fmt.Println(string(out))
+}
+
+func runTokensRevoke(args []string) {
+	fs := flag.NewFlagSet("tokens revoke", flag.ExitOnError)
+	home := fs.String("home", "", "ONEAGENT_HOME (default: ~/.oneagent_default)")
+	profile := fs.String("profile", "", "profile: local|dev")
+	token := fs.String("token", "", "token to revoke (required)")
+	_ = fs.Parse(args)
+
+	if strings.TrimSpace(*token) == "" {
+		fmt.Fprintln(os.Stderr, "missing --token")
+		printTokensUsage()
+		os.Exit(2)
+	}
+
+	db, cleanup, err := openSettingsDBFromFlags(*home, *profile)
+	if err != nil {
+		log.Fatalf("open settings db: %v", err)
+	}
+	defer cleanup()
+
+	if err := db.RevokeAuthToken(context.Background(), *token); err != nil {
+		log.Fatalf("revoke token: %v", err)
+	}
+	fmt.Println(`{"ok":true}`)
+}
+
+func printTokensUsage() {
+	fmt.Print(`oneagent tokens
+
+Usage:
+  oneagent tokens create --principal <id> [--home <dir>] [--profile local|dev]
+  oneagent tokens list [--home <dir>] [--profile local|dev]
+  oneagent tokens revoke --token <token> [--home <dir>] [--profile local|dev]
 `)
 }
 
