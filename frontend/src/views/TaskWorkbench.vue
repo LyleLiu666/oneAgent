@@ -54,6 +54,8 @@ const prompt = ref('')
 const budgetTokens = ref('')
 const budgetCost = ref('')
 const submitting = ref(false)
+const composerAdvancedOpen = ref(false)
+const detailsAdvancedOpen = ref(false)
 
 const latestAttempt = computed<TaskAttempt | null>(() => {
   const t = selectedTask.value
@@ -407,11 +409,6 @@ onUnmounted(() => {
 
           <div class="p-4 border-b border-surface-700/50">
             <div class="grid grid-cols-1 gap-2">
-              <input
-                v-model="title"
-                class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                placeholder="可选标题"
-              />
               <textarea
                 data-testid="workbench-prompt"
                 v-model="prompt"
@@ -419,20 +416,6 @@ onUnmounted(() => {
                 class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
                 placeholder="描述你希望完成的内容..."
               />
-              <div class="grid grid-cols-2 gap-2">
-                <input
-                  v-model="budgetTokens"
-                  inputmode="numeric"
-                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                  placeholder="Token 预算（可选）"
-                />
-                <input
-                  v-model="budgetCost"
-                  inputmode="decimal"
-                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                  placeholder="成本预算 USD（可选）"
-                />
-              </div>
               <button
                 data-testid="workbench-queue"
                 class="px-4 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 disabled:opacity-50"
@@ -441,6 +424,35 @@ onUnmounted(() => {
               >
                 入队任务
               </button>
+              <button
+                type="button"
+                data-testid="workbench-composer-advanced-toggle"
+                class="text-xs text-surface-400 hover:text-surface-200 text-left"
+                @click="composerAdvancedOpen = !composerAdvancedOpen"
+              >
+                {{ composerAdvancedOpen ? '收起高级设置' : '展开高级设置（标题/预算）' }}
+              </button>
+              <div v-if="composerAdvancedOpen" data-testid="workbench-composer-advanced" class="grid grid-cols-1 gap-2">
+                <input
+                  v-model="title"
+                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                  placeholder="可选标题"
+                />
+                <div class="grid grid-cols-2 gap-2">
+                  <input
+                    v-model="budgetTokens"
+                    inputmode="numeric"
+                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                    placeholder="Token 预算（可选）"
+                  />
+                  <input
+                    v-model="budgetCost"
+                    inputmode="decimal"
+                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                    placeholder="成本预算 USD（可选）"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -492,6 +504,14 @@ onUnmounted(() => {
                 <RotateCcw class="w-4 h-4" />
                 继续
               </button>
+              <button
+                type="button"
+                data-testid="workbench-details-advanced-toggle"
+                class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+                @click="detailsAdvancedOpen = !detailsAdvancedOpen"
+              >
+                {{ detailsAdvancedOpen ? '收起' : '高级' }}
+              </button>
             </div>
           </div>
 
@@ -514,22 +534,24 @@ onUnmounted(() => {
               </div>
               <div v-if="latestAttempt.summary" class="text-sm text-surface-200 mt-2 whitespace-pre-wrap">{{ latestAttempt.summary }}</div>
               <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 mt-2">用量：{{ formatUsage(latestAttempt) }}</div>
-              <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400 mt-2">findings：{{ latestAttempt.findings_path }}</div>
-              <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400 mt-1">trace：{{ latestAttempt.trace_log_path }}</div>
-              <div v-if="latestAttempt.test_report_path" class="text-xs text-surface-400 mt-1">测试报告：{{ latestAttempt.test_report_path }}</div>
-              <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400 mt-1">
-                policy:
-                <span class="font-mono text-surface-200">{{ latestAttempt.policy_snapshot.policy?.id }}</span>
-                ·
-                <span class="font-mono text-surface-200">{{ shortHash(latestAttempt.policy_snapshot.policy_hash) }}</span>
-                · principal={{ latestAttempt.policy_snapshot.principal_id }}
-              </div>
               <div v-if="latestAttempt.observer" class="text-xs text-surface-400 mt-2">
                 观察者：{{ latestAttempt.observer.pass ? '通过' : '失败' }} · {{ latestAttempt.observer.reason }}
               </div>
+              <div v-if="detailsAdvancedOpen" data-testid="workbench-details-advanced" class="mt-2 space-y-1">
+                <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400">findings：{{ latestAttempt.findings_path }}</div>
+                <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400">trace：{{ latestAttempt.trace_log_path }}</div>
+                <div v-if="latestAttempt.test_report_path" class="text-xs text-surface-400">测试报告：{{ latestAttempt.test_report_path }}</div>
+                <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400">
+                  policy:
+                  <span class="font-mono text-surface-200">{{ latestAttempt.policy_snapshot.policy?.id }}</span>
+                  ·
+                  <span class="font-mono text-surface-200">{{ shortHash(latestAttempt.policy_snapshot.policy_hash) }}</span>
+                  · principal={{ latestAttempt.policy_snapshot.principal_id }}
+                </div>
+              </div>
             </div>
 
-            <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+            <div v-if="detailsAdvancedOpen" class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
               <div class="text-sm text-surface-100 font-semibold">事件</div>
               <div v-if="selectedLoading" class="text-xs text-surface-500 mt-2">加载中…</div>
               <div v-else-if="selectedEvents.length === 0" class="text-xs text-surface-500 mt-2">暂无事件。</div>

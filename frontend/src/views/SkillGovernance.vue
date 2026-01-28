@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Archive, RefreshCw, Wrench, Save, Copy, Pin, Layers } from 'lucide-vue-next'
+import { Archive, RefreshCw, Wrench, Save, Copy, Pin, Layers, ChevronDown, ChevronRight } from 'lucide-vue-next'
 
 import {
   archiveShadowedPersonalDuplicates,
@@ -25,6 +25,7 @@ const duplicates = ref<SkillDuplicateGroup[]>([])
 const duplicatesActionLoading = ref(false)
 const duplicatesActionError = ref('')
 const archiveShadowedBySkillID = ref<Record<string, boolean>>({})
+const advancedOpen = ref(false)
 
 const selectedID = ref('')
 const selectedLoading = ref(false)
@@ -205,8 +206,7 @@ onMounted(async () => {
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div class="lg:col-span-2 space-y-4">
-          <div class="glass rounded-2xl overflow-hidden">
+        <div class="glass rounded-2xl overflow-hidden lg:col-span-2">
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <Wrench class="w-5 h-5 text-primary-400" />
               <div>
@@ -230,9 +230,6 @@ onMounted(async () => {
                   <div class="min-w-0">
                     <p class="text-sm text-surface-100 font-semibold truncate">{{ s.name }}</p>
                     <p class="text-xs text-surface-500 truncate">{{ s.description }}</p>
-                    <p class="text-[11px] text-surface-500 mt-2 truncate">
-                      id={{ s.skill_id }} · source={{ s.source }} · {{ s.path }}
-                    </p>
                   </div>
                   <div class="shrink-0">
                     <button
@@ -251,18 +248,62 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-        </div>
-
+        <div class="space-y-4 lg:col-span-1">
           <div class="glass rounded-2xl overflow-hidden">
-            <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
-              <Copy class="w-5 h-5 text-primary-400" />
-              <div>
-                <p class="text-sm font-semibold text-surface-100">重复项</p>
-                <p class="text-xs text-surface-500">{{ duplicates.length }} 组</p>
-              </div>
+            <div class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold text-surface-100">编辑器</p>
+              <button
+                data-testid="skill-save"
+                class="px-3 py-2 rounded-xl text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2 disabled:opacity-50"
+                :disabled="!canEditSelected || selectedLoading"
+                @click="saveSelected"
+              >
+                <Save class="w-4 h-4" />
+                保存
+              </button>
             </div>
 
-            <div class="p-5">
+            <div v-if="selectedError" class="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+              {{ selectedError }}
+            </div>
+
+            <div v-if="!selected" class="p-6 text-sm text-surface-500">选择技能查看/编辑。</div>
+            <div v-else class="p-4 space-y-3">
+              <div class="text-xs text-surface-500">
+                <div>id: <span class="text-surface-200 font-mono">{{ selected.skill_id }}</span></div>
+                <div>source: <span class="text-surface-200 font-mono">{{ selected.source }}</span></div>
+                <div v-if="selected.sha256">sha: <span class="text-surface-200 font-mono">{{ selected.sha256.slice(0, 12) }}</span></div>
+                <div v-if="!selected.archivable" class="mt-2 text-surface-400">不可编辑（仅个人技能可编辑）。</div>
+              </div>
+              <textarea
+                v-model="editMD"
+                rows="18"
+                class="w-full rounded-xl bg-surface-950/60 border border-surface-800 text-surface-100 text-xs font-mono px-3 py-2"
+                :disabled="!canEditSelected || selectedLoading"
+                placeholder="SKILL.md"
+              />
+            </div>
+          </div>
+
+          <div class="glass rounded-2xl overflow-hidden">
+            <button
+              type="button"
+              data-testid="skill-governance-advanced-toggle"
+              class="w-full px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-3 text-left hover:bg-surface-900/30"
+              @click="advancedOpen = !advancedOpen"
+            >
+              <div class="flex items-center gap-3">
+                <Copy class="w-5 h-5 text-primary-400" />
+                <div>
+                  <p class="text-sm font-semibold text-surface-100">高级：重复项治理</p>
+                  <p class="text-xs text-surface-500">{{ duplicates.length }} 组</p>
+                </div>
+              </div>
+              <ChevronDown v-if="advancedOpen" class="w-4 h-4 text-surface-400" />
+              <ChevronRight v-else class="w-4 h-4 text-surface-400" />
+            </button>
+
+            <div v-if="advancedOpen" data-testid="skill-governance-advanced" class="p-5">
               <div
                 v-if="duplicatesActionError"
                 class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
@@ -346,41 +387,6 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
-          </div>
-
-        <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
-          <div class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2">
-            <p class="text-sm font-semibold text-surface-100">编辑器</p>
-            <button
-              data-testid="skill-save"
-              class="px-3 py-2 rounded-xl text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2 disabled:opacity-50"
-              :disabled="!canEditSelected || selectedLoading"
-              @click="saveSelected"
-            >
-              <Save class="w-4 h-4" />
-              保存
-            </button>
-          </div>
-
-          <div v-if="selectedError" class="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-            {{ selectedError }}
-          </div>
-
-          <div v-if="!selected" class="p-6 text-sm text-surface-500">选择技能查看/编辑。</div>
-          <div v-else class="p-4 space-y-3">
-            <div class="text-xs text-surface-500">
-              <div>id: <span class="text-surface-200 font-mono">{{ selected.skill_id }}</span></div>
-              <div>source: <span class="text-surface-200 font-mono">{{ selected.source }}</span></div>
-              <div v-if="selected.sha256">sha: <span class="text-surface-200 font-mono">{{ selected.sha256.slice(0, 12) }}</span></div>
-              <div v-if="!selected.archivable" class="mt-2 text-surface-400">不可编辑（仅个人技能可编辑）。</div>
-            </div>
-            <textarea
-              v-model="editMD"
-              rows="18"
-              class="w-full rounded-xl bg-surface-950/60 border border-surface-800 text-surface-100 text-xs font-mono px-3 py-2"
-              :disabled="!canEditSelected || selectedLoading"
-              placeholder="SKILL.md"
-            />
           </div>
         </div>
       </div>

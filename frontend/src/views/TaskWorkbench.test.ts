@@ -160,3 +160,29 @@ it('shows updates when a task finishes after baseline', async () => {
 
   wrapper.unmount()
 })
+
+it('keeps advanced composer fields collapsed by default', async () => {
+  const store = new Map<string, string>([['oneagent-workspace', '/tmp/wsA']])
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  })
+
+  const { default: TaskWorkbench } = await import('@/views/TaskWorkbench.vue')
+
+  ;(apiClient.listTasks as any).mockResolvedValueOnce([])
+
+  const wrapper = shallowMount(TaskWorkbench)
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="workbench-composer-advanced"]').exists()).toBe(false)
+
+  await wrapper.get('[data-testid="workbench-composer-advanced-toggle"]').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="workbench-composer-advanced"]').exists()).toBe(true)
+
+  wrapper.unmount()
+})

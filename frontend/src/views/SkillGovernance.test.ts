@@ -125,6 +125,13 @@ it('pins a candidate from duplicates list', async () => {
   const wrapper = shallowMount(SkillGovernance)
   await flushPromises()
 
+  expect(wrapper.find('[data-testid="skill-governance-advanced"]').exists()).toBe(false)
+
+  await wrapper.get('[data-testid="skill-governance-advanced-toggle"]').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="skill-governance-advanced"]').exists()).toBe(true)
+
   await wrapper.get('[data-testid="duplicate-pin"]').trigger('click')
   await flushPromises()
 
