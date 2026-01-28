@@ -1,4 +1,4 @@
-# oneAgent Roadmap（工作清单与优先级）— 2026-01-28
+# oneAgent Roadmap（工作清单与优先级）— 2026-01-28（更新）
 
 目的：把“还没做的工作”固化成可执行的 backlog，避免上下文压缩后遗忘；并确保按“地基 → 上层”的依赖关系推进。
 
@@ -12,13 +12,15 @@
 - **待实现（Active changes）**：剩余特性已全部落为 OpenSpec changes（proposal/tasks/specs）
 
 当前待实现的 changes（未完成）：
-- `add-cost-governance-limits`（成本/Token 预算治理）
-- `add-task-evidence-policy`（证据链制度化：test report artifacts）
-- `add-skill-governance-merge`（pin/merge canonical）
 - `add-edit-v2-tool`（可解释/可证明编辑）
 - `add-code-intelligence-tools`（LSP/AST 语义工具）
 - `add-prompt-assetization`（提示词资产化 + 测试）
 - `add-office-export`（Markdown → Office 导出）
+
+已完成并归档（2026-01-28）：
+- `add-cost-governance-limits`
+- `add-task-evidence-policy`
+- `add-skill-governance-merge`
 
 ### 0.2 交付风险：工作区未提交变更
 在进入下一阶段前，必须先把本地改动整理为可回滚的提交（否则“可复现/可推广”不成立）。
@@ -63,7 +65,7 @@
 ### P1.3 默认 limits / 成本治理
 **状态**：steps/runtime 默认 limits 已落地（见 archived change `add-default-task-limits`）
 
-成本/Token 治理（max_cost/token cap）在 `add-cost-governance-limits`（待实现）。
+成本/Token 治理（max_cost/token cap）已落地（见 archived change `2026-01-28-add-cost-governance-limits`）。
 
 ---
 
@@ -72,13 +74,13 @@
 ### P2.1 “已物化 skill”的治理工作台
 **状态**
 - 列表/编辑/归档/duplicates：已落地（`add-skill-governance-workbench` / `add-skill-governance-edit` / `add-skill-governance-duplicates`）
-- merge/pin canonical：在 `add-skill-governance-merge`（待实现）
+- merge/pin canonical：已落地（见 archived change `2026-01-28-add-skill-governance-merge`）
 
 **坑**
 - “稀缺性/深度”随时间变化：需要定期重评与人工治理入口。
 
 ### P2.2 强制证据进一步制度化
-**状态**：规划在 `add-task-evidence-policy`（待实现）
+**状态**：已落地（见 archived change `2026-01-28-add-task-evidence-policy`）
 
 ---
 
@@ -100,8 +102,7 @@
 
 ## 5) 执行顺序（下一步从这里开始）
 以 `openspec list` 中 active changes 为准，建议顺序：
-1) `add-cost-governance-limits`（治理）
-2) `add-task-evidence-policy`（信任/可交付）
-3) `add-skill-governance-merge`（复利治理）
-4) `add-edit-v2-tool` / `add-code-intelligence-tools`（稳定性上限）
-5) `add-prompt-assetization` / `add-office-export`（产品上限）
+1) `add-code-intelligence-tools`（语义工具地基）
+2) `add-edit-v2-tool`（建立“可证明编辑”的可靠路径）
+3) `add-prompt-assetization`（可复用资产 + 测试）
+4) `add-office-export`（最后一公里导出）
