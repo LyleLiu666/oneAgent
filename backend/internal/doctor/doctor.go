@@ -120,6 +120,8 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 	report.Checks = append(report.Checks,
 		bashCheck,
 		gitCheck,
+		checkBinary(lookPath, "gopls", false),
+		checkBinary(lookPath, "typescript-language-server", false),
 		checkBinary(lookPath, "jq", false),
 		checkBinary(lookPath, "rg", false),
 		checkBinary(lookPath, "pandoc", false),
@@ -162,6 +164,12 @@ func checkBinary(lookPath LookPathFunc, name string, required bool) BinaryCheck 
 }
 
 func installHint(binary string) string {
+	switch strings.TrimSpace(binary) {
+	case "gopls":
+		return "go install golang.org/x/tools/gopls@latest"
+	case "typescript-language-server":
+		return "npm i -g typescript typescript-language-server"
+	}
 	osName := stdruntime.GOOS
 	switch osName {
 	case "darwin":
