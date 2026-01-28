@@ -1,5 +1,5 @@
 ## 1. Implementation
-- [ ] 1.1 Add spec deltas for skill governance workbench + archive
+- [x] 1.1 Add spec deltas for skill governance workbench + archive
 - [x] 1.2 Add backend APIs: list skills, archive personal skill
 - [x] 1.3 Add backend tests for list/archive flow
 - [x] 1.4 Add frontend governance view + navigation

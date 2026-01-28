@@ -1,29 +1,30 @@
 package handler
 
 import (
-	"errors"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/fsutil"
+	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 )
 
 type skillInfo struct {
-	SkillID     string      `json:"skill_id"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
+	SkillID     string       `json:"skill_id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
 	Source      skill.Source `json:"source"`
-	Path        string      `json:"path"`
-	Archivable  bool        `json:"archivable"`
+	Path        string       `json:"path"`
+	Archivable  bool         `json:"archivable"`
 }
 
 func ListSkills(c *gin.Context) {
@@ -49,6 +50,72 @@ func ListSkills(c *gin.Context) {
 			Source:      s.Source,
 			Path:        s.Path,
 			Archivable:  canArchiveSkill(home, s),
+		})
+	}
+
+	c.JSON(http.StatusOK, out)
+}
+
+type skillCandidateInfo struct {
+	SkillID        string       `json:"skill_id"`
+	Name           string       `json:"name"`
+	Description    string       `json:"description"`
+	Source         skill.Source `json:"source"`
+	Path           string       `json:"path"`
+	Archivable     bool         `json:"archivable"`
+	Effective      bool         `json:"effective"`
+	PrecedenceRank int          `json:"precedence_rank"`
+}
+
+type skillDuplicateGroup struct {
+	SkillID    string               `json:"skill_id"`
+	Candidates []skillCandidateInfo `json:"candidates"`
+}
+
+func ListSkillDuplicates(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	candidates, err := skill.DiscoverCandidates(c.Request.Context(), skill.DiscoverOptions{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	home := strings.TrimSpace(rt.Config.Home)
+	byID := make(map[string][]skillCandidateInfo, 32)
+
+	for _, cand := range candidates {
+		s := cand.Skill
+		byID[s.ID] = append(byID[s.ID], skillCandidateInfo{
+			SkillID:        s.ID,
+			Name:           s.Name,
+			Description:    s.Description,
+			Source:         s.Source,
+			Path:           s.Path,
+			Archivable:     canArchiveSkill(home, s),
+			Effective:      cand.Effective,
+			PrecedenceRank: cand.PrecedenceRank,
+		})
+	}
+
+	keys := make([]string, 0, len(byID))
+	for id, list := range byID {
+		if len(list) < 2 {
+			continue
+		}
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+
+	out := make([]skillDuplicateGroup, 0, len(keys))
+	for _, id := range keys {
+		out = append(out, skillDuplicateGroup{
+			SkillID:    id,
+			Candidates: byID[id],
 		})
 	}
 
@@ -139,7 +206,7 @@ func GetSkill(c *gin.Context) {
 }
 
 type updateSkillRequest struct {
-	SkillMD       string `json:"skill_md"`
+	SkillMD        string `json:"skill_md"`
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 }
 
@@ -299,7 +366,7 @@ func archiveOneAgentSkill(home string, s skill.Skill) (string, error) {
 	}
 	if strings.TrimSpace(s.Path) == "" {
 		return "", errors.New("skill path is required")
-}
+	}
 
 	srcDir := filepath.Dir(s.Path)
 	if _, err := os.Stat(srcDir); err != nil {

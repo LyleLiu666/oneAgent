@@ -7,6 +7,7 @@ import * as apiClient from '@/api/client'
 
 vi.mock('@/api/client', () => ({
   listSkills: vi.fn(async () => []),
+  listSkillDuplicates: vi.fn(async () => []),
   archiveSkill: vi.fn(async () => ({})),
   getSkill: vi.fn(async () => ({})),
   updateSkill: vi.fn(async () => ({})),
@@ -32,6 +33,7 @@ it('loads skills and renders list', async () => {
   await flushPromises()
 
   expect(apiClient.listSkills).toHaveBeenCalled()
+  expect((apiClient as any).listSkillDuplicates).toHaveBeenCalled()
   expect(wrapper.text()).toContain('A')
   expect(wrapper.find('[data-testid="skill-archive"]').exists()).toBe(true)
 
@@ -69,6 +71,8 @@ it('loads skill details when selected and saves with OCC', async () => {
 
   const wrapper = shallowMount(SkillGovernance)
   await flushPromises()
+
+  expect((apiClient as any).listSkillDuplicates).toHaveBeenCalled()
 
   await wrapper.get('[data-testid="skill-item"]').trigger('click')
   await flushPromises()

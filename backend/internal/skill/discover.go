@@ -18,6 +18,61 @@ type DiscoverOptions struct {
 	WorkspaceRoot string
 }
 
+// DiscoverCandidates loads all skills from configured sources without deduplication.
+// It marks which candidate is "effective" by applying the same precedence scan order
+// as Discover (the first seen skill_id wins).
+func DiscoverCandidates(ctx context.Context, opts DiscoverOptions) ([]Candidate, error) {
+	sources := buildSources(opts.WorkspaceRoot)
+
+	out := make([]Candidate, 0, 128)
+	seen := make(map[string]struct{}, 128)
+
+	for rank, src := range sources {
+		files, err := scanSkillFiles(ctx, src.Root)
+		if err != nil {
+			return nil, err
+		}
+		for _, skillPath := range files {
+			s, err := parseSkill(skillPath, src.Source)
+			if err != nil || s.ID == "" {
+				continue
+			}
+			_, already := seen[s.ID]
+			if !already {
+				seen[s.ID] = struct{}{}
+			}
+			out = append(out, Candidate{
+				Skill:          s,
+				PrecedenceRank: rank,
+				Effective:      !already,
+			})
+		}
+	}
+
+	builtinRank := len(sources)
+	builtinFiles, err := scanSkillFilesFS(ctx, builtinskills.FS, "skills")
+	if err != nil {
+		return nil, err
+	}
+	for _, relPath := range builtinFiles {
+		s, err := parseBuiltinSkill(relPath)
+		if err != nil || s.ID == "" {
+			continue
+		}
+		_, already := seen[s.ID]
+		if !already {
+			seen[s.ID] = struct{}{}
+		}
+		out = append(out, Candidate{
+			Skill:          s,
+			PrecedenceRank: builtinRank,
+			Effective:      !already,
+		})
+	}
+
+	return out, nil
+}
+
 // Discover loads skills from configured sources and applies the precedence rule:
 // <workspace>/.oneagent > <workspace>/skills > <workspace>/.claude > ONEAGENT_HOME/.oneagent > ~/.claude > ~/.codex > .builtin
 // (dedup by normalized name).

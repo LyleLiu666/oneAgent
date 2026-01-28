@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Archive, RefreshCw, Wrench, Save } from 'lucide-vue-next'
+import { Archive, RefreshCw, Wrench, Save, Copy } from 'lucide-vue-next'
 
-import { archiveSkill, getSkill, listSkills, updateSkill, type SkillInfo } from '@/api/client'
+import {
+  archiveSkill,
+  getSkill,
+  listSkillDuplicates,
+  listSkills,
+  updateSkill,
+  type SkillDuplicateGroup,
+  type SkillInfo,
+} from '@/api/client'
 
 const loading = ref(false)
 const error = ref('')
 const skills = ref<SkillInfo[]>([])
+
+const duplicatesLoading = ref(false)
+const duplicatesError = ref('')
+const duplicates = ref<SkillDuplicateGroup[]>([])
 
 const selectedID = ref('')
 const selectedLoading = ref(false)
@@ -17,6 +29,7 @@ const editSHA = ref('')
 
 const refresh = async () => {
   error.value = ''
+  duplicatesError.value = ''
   loading.value = true
   try {
     const list = await listSkills()
@@ -26,6 +39,17 @@ const refresh = async () => {
     error.value = String(e?.data?.error || e?.message || 'Failed to load skills')
   } finally {
     loading.value = false
+  }
+
+  duplicatesLoading.value = true
+  try {
+    const dup = await listSkillDuplicates()
+    duplicates.value = Array.isArray(dup) ? dup : []
+  } catch (e: any) {
+    duplicates.value = []
+    duplicatesError.value = String(e?.data?.error || e?.message || 'Failed to load duplicates')
+  } finally {
+    duplicatesLoading.value = false
   }
 }
 
@@ -130,49 +154,112 @@ onMounted(async () => {
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div class="glass rounded-2xl overflow-hidden lg:col-span-2">
-        <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
-          <Wrench class="w-5 h-5 text-primary-400" />
-          <div>
-            <p class="text-sm font-semibold text-surface-100">Skills</p>
-            <p class="text-xs text-surface-500">{{ sorted.length }} discovered</p>
+        <div class="lg:col-span-2 space-y-4">
+          <div class="glass rounded-2xl overflow-hidden">
+            <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
+              <Wrench class="w-5 h-5 text-primary-400" />
+              <div>
+                <p class="text-sm font-semibold text-surface-100">Skills</p>
+                <p class="text-xs text-surface-500">{{ sorted.length }} discovered</p>
+              </div>
+            </div>
+
+            <div class="p-5">
+              <div v-if="loading" class="text-sm text-surface-500">Loading…</div>
+              <div v-else-if="sorted.length === 0" class="text-sm text-surface-500">No skills found.</div>
+              <div v-else class="space-y-3">
+                <button
+                  v-for="s in sorted"
+                  :key="s.skill_id"
+                  data-testid="skill-item"
+                  class="glass-card p-4 flex items-start justify-between gap-4 text-left w-full hover:bg-surface-900/40"
+                  :class="selectedID === s.skill_id ? 'ring-1 ring-primary-500/30' : ''"
+                  @click="selectedID = s.skill_id; loadSelected()"
+                >
+                  <div class="min-w-0">
+                    <p class="text-sm text-surface-100 font-semibold truncate">{{ s.name }}</p>
+                    <p class="text-xs text-surface-500 truncate">{{ s.description }}</p>
+                    <p class="text-[11px] text-surface-500 mt-2 truncate">
+                      id={{ s.skill_id }} · source={{ s.source }} · {{ s.path }}
+                    </p>
+                  </div>
+                  <div class="shrink-0">
+                    <button
+                      v-if="s.archivable"
+                      data-testid="skill-archive"
+                      class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+                      :disabled="loading"
+                      @click.stop="doArchive(s)"
+                    >
+                      <Archive class="w-4 h-4" />
+                      Archive
+                    </button>
+                    <span v-else class="text-xs text-surface-600">—</span>
+                  </div>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="p-5">
-          <div v-if="loading" class="text-sm text-surface-500">Loading…</div>
-          <div v-else-if="sorted.length === 0" class="text-sm text-surface-500">No skills found.</div>
-          <div v-else class="space-y-3">
-            <button
-              v-for="s in sorted"
-              :key="s.skill_id"
-              data-testid="skill-item"
-              class="glass-card p-4 flex items-start justify-between gap-4 text-left w-full hover:bg-surface-900/40"
-              :class="selectedID === s.skill_id ? 'ring-1 ring-primary-500/30' : ''"
-              @click="selectedID = s.skill_id; loadSelected()"
-            >
-              <div class="min-w-0">
-                <p class="text-sm text-surface-100 font-semibold truncate">{{ s.name }}</p>
-                <p class="text-xs text-surface-500 truncate">{{ s.description }}</p>
-                <p class="text-[11px] text-surface-500 mt-2 truncate">id={{ s.skill_id }} · source={{ s.source }} · {{ s.path }}</p>
+          <div class="glass rounded-2xl overflow-hidden">
+            <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
+              <Copy class="w-5 h-5 text-primary-400" />
+              <div>
+                <p class="text-sm font-semibold text-surface-100">Duplicates</p>
+                <p class="text-xs text-surface-500">{{ duplicates.length }} groups</p>
               </div>
-              <div class="shrink-0">
-                <button
-                  v-if="s.archivable"
-                  data-testid="skill-archive"
-                  class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
-                  :disabled="loading"
-                  @click="doArchive(s)"
-                >
-                  <Archive class="w-4 h-4" />
-                  Archive
-                </button>
-                <span v-else class="text-xs text-surface-600">—</span>
+            </div>
+
+            <div class="p-5">
+              <div v-if="duplicatesError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
+                {{ duplicatesError }}
               </div>
-            </button>
+              <div v-else-if="duplicatesLoading" class="text-sm text-surface-500">Loading…</div>
+              <div v-else-if="duplicates.length === 0" class="text-sm text-surface-500">No duplicates found.</div>
+              <div v-else class="space-y-3">
+                <div v-for="g in duplicates" :key="g.skill_id" class="glass-card p-4 space-y-3">
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="min-w-0">
+                      <p class="text-sm text-surface-100 font-semibold truncate">id={{ g.skill_id }}</p>
+                      <p class="text-xs text-surface-500">{{ g.candidates.length }} candidates · first effective=true</p>
+                    </div>
+                  </div>
+
+                  <div class="space-y-2">
+                    <div
+                      v-for="c in g.candidates"
+                      :key="`${c.skill_id}:${c.source}:${c.path}`"
+                      class="rounded-xl border border-surface-800/70 bg-surface-950/30 p-3 flex items-start justify-between gap-4"
+                    >
+                      <div class="min-w-0">
+                        <p class="text-xs text-surface-200 truncate">
+                          <span class="font-semibold">{{ c.name }}</span>
+                          <span v-if="c.effective" class="ml-2 text-[11px] text-primary-300">effective</span>
+                        </p>
+                        <p class="text-[11px] text-surface-500 truncate">
+                          source={{ c.source }} · rank={{ c.precedence_rank }} · {{ c.path }}
+                        </p>
+                      </div>
+                      <div class="shrink-0">
+                        <button
+                          v-if="c.archivable"
+                          data-testid="duplicate-archive"
+                          class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+                          :disabled="loading"
+                          @click="doArchive(c)"
+                        >
+                          <Archive class="w-4 h-4" />
+                          Archive
+                        </button>
+                        <span v-else class="text-xs text-surface-600">—</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
 
         <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
           <div class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2">

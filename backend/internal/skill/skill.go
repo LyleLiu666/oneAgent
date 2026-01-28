@@ -16,15 +16,23 @@ const (
 )
 
 type Skill struct {
-	ID          string   `json:"skill_id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags,omitempty"`
-	Keywords    []string `json:"keywords,omitempty"`
+	ID          string        `json:"skill_id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Tags        []string      `json:"tags,omitempty"`
+	Keywords    []string      `json:"keywords,omitempty"`
 	Requires    *Requirements `json:"requires,omitempty"`
 	Install     []InstallSpec `json:"install,omitempty"`
-	Source      Source   `json:"source"`
-	Path        string   `json:"path"`
+	Source      Source        `json:"source"`
+	Path        string        `json:"path"`
+}
+
+// Candidate represents one discovered instance of a skill (including shadowed duplicates).
+// It is intended for governance/inspection use-cases, not recall.
+type Candidate struct {
+	Skill
+	PrecedenceRank int  `json:"precedence_rank"`
+	Effective      bool `json:"effective"`
 }
 
 type Catalog struct {

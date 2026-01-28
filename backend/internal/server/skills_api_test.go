@@ -197,3 +197,88 @@ func TestServer_SkillsAPI_GetAndUpdateWithOCC(t *testing.T) {
 		t.Fatalf("expected skill to exist: %v", err)
 	}
 }
+
+func TestServer_SkillsAPI_Duplicates(t *testing.T) {
+	userHome := t.TempDir()
+	oneagentHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             oneagentHome,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	// Higher precedence: oneAgent personal.
+	p1 := filepath.Join(oneagentHome, ".oneagent", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(p1), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p1, []byte("---\nname: demo-skill\ndescription: personal\n---\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Lower precedence: ~/.claude.
+	p2 := filepath.Join(userHome, ".claude", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(p2), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(p2, []byte("---\nname: demo-skill\ndescription: claude\n---\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	res, err := http.Get(srv.URL + "/api/skills/duplicates")
+	if err != nil {
+		t.Fatalf("GET /api/skills/duplicates: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/skills/duplicates status=%d", res.StatusCode)
+	}
+
+	var groups []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&groups); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	var demo map[string]any
+	for _, g := range groups {
+		if g["skill_id"] == "demo-skill" {
+			demo = g
+			break
+		}
+	}
+	if demo == nil {
+		t.Fatalf("expected demo-skill duplicates group")
+	}
+
+	cands, ok := demo["candidates"].([]any)
+	if !ok || len(cands) != 2 {
+		t.Fatalf("expected 2 candidates, got %#v", demo["candidates"])
+	}
+
+	// First candidate should be effective (personal, higher precedence).
+	c0 := cands[0].(map[string]any)
+	if c0["effective"] != true {
+		t.Fatalf("expected first candidate effective=true, got %+v", c0)
+	}
+	if c0["archivable"] != true {
+		t.Fatalf("expected personal candidate archivable=true, got %+v", c0)
+	}
+}

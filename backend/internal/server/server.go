@@ -108,6 +108,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 
 		// Skills governance (read-only list + archive personal skills).
 		api.GET("/skills", handler.ListSkills)
+		api.GET("/skills/duplicates", handler.ListSkillDuplicates)
 		api.GET("/skills/:id", handler.GetSkill)
 		api.PUT("/skills/:id", handler.UpdateSkill)
 		api.POST("/skills/:id/archive", handler.ArchiveSkill)
@@ -163,15 +164,15 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 			return
 		}
 
-			// Fallback to index.html (SPA).
-			indexFile, err := web.Static.ReadFile("static/index.html")
-			if err != nil {
-				// If frontend assets were not bundled (e.g. backend-only CI), don't 500.
-				c.String(http.StatusNotFound, "Not found")
-				return
-			}
-			c.Data(http.StatusOK, "text/html; charset=utf-8", indexFile)
-		})
+		// Fallback to index.html (SPA).
+		indexFile, err := web.Static.ReadFile("static/index.html")
+		if err != nil {
+			// If frontend assets were not bundled (e.g. backend-only CI), don't 500.
+			c.String(http.StatusNotFound, "Not found")
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", indexFile)
+	})
 
 	return router, nil
 }

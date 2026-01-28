@@ -413,8 +413,22 @@ export interface SkillInfo {
     archivable: boolean
 }
 
+export interface SkillCandidateInfo extends SkillInfo {
+    effective: boolean
+    precedence_rank: number
+}
+
+export interface SkillDuplicateGroup {
+    skill_id: string
+    candidates: SkillCandidateInfo[]
+}
+
 export async function listSkills(): Promise<SkillInfo[]> {
     return api('/api/skills')
+}
+
+export async function listSkillDuplicates(): Promise<SkillDuplicateGroup[]> {
+    return api('/api/skills/duplicates')
 }
 
 export async function archiveSkill(skillId: string): Promise<{ ok: boolean; skill_id: string; archived_path: string }> {
