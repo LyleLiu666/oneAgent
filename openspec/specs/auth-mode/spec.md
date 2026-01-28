@@ -63,3 +63,13 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **WHEN** 用户在本地工具模式下请求 `/api/auth/config` 或 `/api/auth/callback`
 - **THEN** 系统返回明确的废弃响应（例如 HTTP 410 或 404，并包含可理解的错误信息）
 
+### Requirement: Token auth MUST support multiple principals
+系统必须 (MUST) 支持多个访问 token，并将每个 token 映射到一个 `principal_id`（用于权限策略与审计）。
+
+#### Scenario: Different tokens map to different principals
+- **GIVEN** 系统存在 token A → principal `alice`，token B → principal `bob`
+- **WHEN** 客户端使用 token A 访问受保护 API
+- **THEN** 请求上下文中的 `principal_id=alice`
+- **WHEN** 客户端使用 token B 访问受保护 API
+- **THEN** 请求上下文中的 `principal_id=bob`
+

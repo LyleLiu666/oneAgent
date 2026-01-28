@@ -12,7 +12,6 @@
 - **待实现（Active changes）**：剩余特性已全部落为 OpenSpec changes（proposal/tasks/specs）
 
 当前待实现的 changes（未完成）：
-- `add-tool-permissions-system`（工具权限策略引擎/治理工作台，偏地基）
 - `add-cost-governance-limits`（成本/Token 预算治理）
 - `add-task-evidence-policy`（证据链制度化：test report artifacts）
 - `add-skill-governance-merge`（pin/merge canonical）
@@ -40,7 +39,7 @@
 **状态**：release workflow/checksums/PortableGit resolution 已落地（见 archived change `add-release-artifacts-workflow` / `update-release-portablegit-resolution`）
 
 ### P0.3 工具权限治理（Policy engine）
-**状态**：已完成最小权限控制（env disable + bash rm guard）；更完整的治理/多用户策略在 `add-tool-permissions-system`（待实现）
+**状态**：已归档完成（见 archived change `2026-01-28-add-tool-permissions-system` / `openspec/specs/system-tool-permissions/spec.md`）
 
 ### P0.4 OpenSpec 归档
 **目标**：完成一个 change 并上线后再归档（保持 active 清爽）。
@@ -101,9 +100,8 @@
 
 ## 5) 执行顺序（下一步从这里开始）
 以 `openspec list` 中 active changes 为准，建议顺序：
-1) `add-tool-permissions-system`（地基）
-2) `add-cost-governance-limits`（治理）
-3) `add-task-evidence-policy`（信任/可交付）
-4) `add-skill-governance-merge`（复利治理）
-5) `add-edit-v2-tool` / `add-code-intelligence-tools`（稳定性上限）
-6) `add-prompt-assetization` / `add-office-export`（产品上限）
+1) `add-cost-governance-limits`（治理）
+2) `add-task-evidence-policy`（信任/可交付）
+3) `add-skill-governance-merge`（复利治理）
+4) `add-edit-v2-tool` / `add-code-intelligence-tools`（稳定性上限）
+5) `add-prompt-assetization` / `add-office-export`（产品上限）

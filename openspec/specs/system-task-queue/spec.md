@@ -142,3 +142,12 @@ resume 的新 attempt 必须 (MUST) 继承原任务的关键上下文（至少�
 - **THEN** 原 task 尝试写入 `foo.go` 时必须被拒绝
 - **AND** 错误信息必须包含“文件已变化”的可操作提示（例如要求重新读取/重试/rebase）
 
+### Requirement: Task attempts MUST snapshot effective tool policy
+系统必须 (MUST) 在 task attempt 启动时固化一份“effective policy snapshot”，运行期间不得漂移。
+
+#### Scenario: Policy change does not affect running attempt
+- **GIVEN** 某 task attempt 已启动并固化 policy snapshot
+- **WHEN** 管理员在运行中修改 principal 的 policy
+- **THEN** 该 attempt 仍使用启动时的 snapshot
+- **AND** 新 policy 仅在新 attempt（resume）中生效
+

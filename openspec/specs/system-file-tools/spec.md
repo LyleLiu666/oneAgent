@@ -60,3 +60,16 @@ TBD - created by archiving change add-read-file-tool. Update Purpose after archi
 - **WHEN** 写回过程中发生异常中断
 - **THEN** 原文件要么保持不变，要么被完整的新版本替换（不得出现半写状态）
 
+### Requirement: File tools MUST enforce policy constraints
+系统必须 (MUST) 在文件写/改/删类工具中执行权限策略约束（例如 `file_scope`、`read_outside_workspace` 等）。
+
+#### Scenario: file_scope blocks writes outside allowed glob
+- **GIVEN** 当前 policy 的 `file_scope=["backend/**"]`
+- **WHEN** 工具尝试写入 `frontend/App.vue`
+- **THEN** 系统拒绝并返回“file_scope violation”
+
+#### Scenario: read_outside_workspace denied by policy
+- **GIVEN** policy 设置 `read_outside_workspace=deny`
+- **WHEN** 工具尝试读取 workspace 外绝对路径文件
+- **THEN** 系统拒绝并返回明确错误
+
