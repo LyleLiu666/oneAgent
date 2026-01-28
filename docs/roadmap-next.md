@@ -22,6 +22,7 @@
 - `add-edit-v2-tool`
 - `add-prompt-assetization`
 - `add-office-export`
+- `add-defense-in-depth-security`
 
 ### 0.2 交付风险：工作区未提交变更
 在进入下一阶段前，必须先把本地改动整理为可回滚的提交（否则“可复现/可推广”不成立）。
