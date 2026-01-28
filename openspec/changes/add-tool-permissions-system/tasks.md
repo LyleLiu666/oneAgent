@@ -23,5 +23,5 @@
 - [x] 5.2 Show active policy snapshot in session/task detail; guide user on denied tool requests
 
 ## 6. Cleanup
-- [ ] 6.1 Remove `ONEAGENT_BASH_ALLOW_RM` references (code/tests/specs/docs/doctor)
-- [ ] 6.2 Ensure e2e smoke tests remain green
+- [x] 6.1 Remove `ONEAGENT_BASH_ALLOW_RM` references (code/tests/specs/docs/doctor)
+- [x] 6.2 Ensure e2e smoke tests remain green

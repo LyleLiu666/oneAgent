@@ -116,10 +116,10 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **THEN** 系统不得向 LLM 暴露该工具
 - **AND** 若用户/系统显式请求该工具，应返回明确错误（包含 tool id 与禁用原因）
 
-#### Scenario: bash 默认拒绝 rm
-- **GIVEN** 未设置 `ONEAGENT_BASH_ALLOW_RM=1`
-- **WHEN** 用户/LLM 通过 bash 尝试执行包含 `rm` 的命令
-- **THEN** 系统应拒绝执行并返回明确错误
+#### Scenario: bash 默认 profile 拒绝破坏性命令
+- **GIVEN** bash 使用默认 command profile（例如 `dev`）
+- **WHEN** 用户/LLM 通过 bash 尝试执行 `rm -rf ...`
+- **THEN** 系统应拒绝执行并返回明确错误（说明 profile/allowlist 限制）
 
 ### Requirement: Task queue 默认 limits（steps/runtime）
 系统必须 (MUST) 为 task queue 提供默认 limits（最大步骤数、最大运行时长），用于避免“无限运行/无限循环”导致资源失控。
@@ -147,4 +147,3 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 #### Scenario: 首次加载不为历史任务产生通知
 - **WHEN** 用户首次打开页面并加载任务列表
 - **THEN** UI 仅建立“已知状态基线”，不为此前已完成的历史任务生成通知
-

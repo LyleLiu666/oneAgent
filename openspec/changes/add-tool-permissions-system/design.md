@@ -3,7 +3,7 @@
 ## Context
 oneAgent 目前的 tool 权限控制主要是两类：
 1) **进程级开关**：`ONEAGENT_DISABLE_TOOL_<TOOL_ID>=1`（对所有用户生效）
-2) **bash 特例**：`ONEAGENT_BASH_ALLOW_RM`（意图限制破坏性命令）
+2) **bash 特例**：历史遗留破坏性命令开关（意图限制破坏性命令）
 
 问题在于：当 agent 拥有“对环境施加副作用”的能力时，风险并不止 `rm`，并且“字符串检测 + 特例开关”天然容易被绕过（例如通过解释器/脚本/间接路径构造）。同时，未来存在多用户、后台任务与子 Agent 时，权限必须是 **可传播、可收敛、可审计、可解释** 的。
 
@@ -62,7 +62,7 @@ oneAgent 目前的 tool 权限控制主要是两类：
 - **UI**：后续提供 workbench，至少能“看见当前 principal 的 effective policy”。
 
 ## Migration
-- 移除 `ONEAGENT_BASH_ALLOW_RM`，并在拒绝信息中提示“请通过 tool permissions policy/profile 配置”。
+- 移除历史遗留破坏性命令开关，并在拒绝信息中提示“请通过 tool permissions policy/profile 配置”。
 - 保留 `ONEAGENT_DISABLE_TOOL_*` 作为全局 kill switch（便于紧急止血）。
 - 对现有单用户 local 模式：默认 principal=`local`，默认 policy 兼容现有可用工具集。
 
@@ -75,4 +75,3 @@ oneAgent 目前的 tool 权限控制主要是两类：
 - multi-user 的边界：是否需要“真正的用户体系”（用户名/密码/管理面）还是“多 token 即多 principal”即可？
 - 默认 policy 的取舍：local 模式是否默认允许 `bash/run_command`？如果允许，允许到什么程度（readonly vs dev）？
 - 权限变更是否允许“运行中的 task 立即生效”？本设计默认“attempt 固化，变更通过 resume 生效”，是否接受？
-
