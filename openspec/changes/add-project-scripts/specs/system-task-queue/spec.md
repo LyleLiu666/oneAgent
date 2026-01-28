@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
-### Requirement: Task attempt SHOULD run project scripts with evidence
-系统应该 (SHOULD) 在 workspace 存在 `.oneagent/project.json` 时，在 task attempt 生命周期中 best-effort 执行项目脚本，并将输出作为 evidence 纳入产物。
+### Requirement: Task attempt MUST run project scripts (best-effort) with evidence
+系统必须 (MUST) 在 workspace 存在 `.oneagent/project.json` 时，在 task attempt 生命周期中 best-effort 执行项目脚本，并将输出作为 evidence 纳入产物。
 
 支持的脚本字段（均为可选）：
 - `setup_script`：attempt 启动前执行
@@ -23,4 +23,3 @@
 - **THEN** attempt 进入失败终态（例如 `failed`）
 - **AND** attempt summary/receipt 中包含可解释原因（best-effort）
 - **AND** 失败时仍保存 stdout/stderr 作为证据
-
