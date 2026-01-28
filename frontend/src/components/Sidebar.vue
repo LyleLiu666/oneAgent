@@ -34,15 +34,15 @@ const isMobileOpen = ref(false)
 
 // Navigation items
 const navItems = [
-  { name: 'Home', path: '/', icon: Home },
-  { name: 'Chat', path: '/chat', icon: MessageSquare },
-  { name: 'Tasks', path: '/tasks', icon: ListTodo },
-  { name: 'SOP Governance', path: '/governance/sop', icon: ListChecks },
-  { name: 'Skill Governance', path: '/governance/skills', icon: ListChecks },
-  { name: 'Tool Permissions', path: '/governance/tools', icon: Shield },
-  { name: 'Document Export', path: '/documents/export', icon: Download },
-  { name: 'Ledger', path: '/ledger', icon: ScrollText },
-  { name: 'Settings', path: '/settings', icon: Settings },
+  { name: '首页', path: '/', icon: Home },
+  { name: '聊天', path: '/chat', icon: MessageSquare },
+  { name: '任务', path: '/tasks', icon: ListTodo },
+  { name: 'SOP 治理', path: '/governance/sop', icon: ListChecks },
+  { name: '技能治理', path: '/governance/skills', icon: ListChecks },
+  { name: '工具权限', path: '/governance/tools', icon: Shield },
+  { name: '文档导出', path: '/documents/export', icon: Download },
+  { name: '流水账', path: '/ledger', icon: ScrollText },
+  { name: '设置', path: '/settings', icon: Settings },
 
 ]
 
@@ -147,7 +147,7 @@ onUnmounted(() => {
           <button
               @click="toggleTheme"
               class="p-1.5 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-primary-500 transition-all duration-200"
-              title="Toggle Theme"
+              title="切换主题"
           >
             <Sun v-if="!isDark" class="w-5 h-5" />
             <Moon v-else class="w-5 h-5" />

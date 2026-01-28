@@ -48,12 +48,12 @@ it('sets workspace path after clicking Browse', async () => {
 
     await flushPromises()
 
-    const browseButton = wrapper.get('button[title="Choose workspace folder (server)"]')
+    const browseButton = wrapper.get('[data-testid="chat-workspace-choose"]')
     await browseButton.trigger('click')
     await flushPromises()
 
     expect(apiClient.chooseWorkspaceDir).toHaveBeenCalledTimes(1)
 
-    const input = wrapper.get('input[placeholder="Workspace path (server)"]')
+    const input = wrapper.get('[data-testid="chat-workspace-path"]')
     expect((input.element as HTMLInputElement).value).toBe('/tmp/workspace')
 })

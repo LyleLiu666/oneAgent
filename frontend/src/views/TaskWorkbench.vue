@@ -297,8 +297,8 @@ onUnmounted(() => {
     <div class="max-w-6xl mx-auto">
       <div class="flex items-start justify-between gap-4 mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-surface-100">Task Workbench</h1>
-          <p class="text-sm text-surface-500">Multi-workspace queue, progress, and controls</p>
+          <h1 class="text-2xl font-bold text-surface-100">任务工作台</h1>
+          <p class="text-sm text-surface-500">多工作区队列、进度与控制</p>
         </div>
         <button
           data-testid="task-workbench-refresh"
@@ -307,7 +307,7 @@ onUnmounted(() => {
           @click="refreshTasks()"
         >
           <RefreshCw class="w-4 h-4" />
-          Refresh
+          刷新
         </button>
       </div>
 
@@ -317,8 +317,8 @@ onUnmounted(() => {
         class="mb-4 rounded-2xl border border-surface-700/40 bg-surface-950/40 p-4"
       >
         <div class="flex items-center justify-between gap-3">
-          <div class="text-sm font-semibold text-surface-100">Updates</div>
-          <button class="text-xs text-surface-400 hover:text-surface-200" @click="clearTaskUpdates">Clear</button>
+          <div class="text-sm font-semibold text-surface-100">更新</div>
+          <button class="text-xs text-surface-400 hover:text-surface-200" @click="clearTaskUpdates">清空</button>
         </div>
         <div class="mt-2 space-y-2">
           <div v-for="u in taskUpdates" :key="`${u.taskId}:${u.attemptId}:${u.status}`" class="text-sm text-surface-200">
@@ -339,8 +339,8 @@ onUnmounted(() => {
         <!-- Workspaces -->
         <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
           <div class="px-5 py-4 border-b border-surface-700/50">
-            <p class="text-sm font-semibold text-surface-100">Workspaces</p>
-            <p class="text-xs text-surface-500 mt-1">Each workspace runs tasks FIFO (L0)</p>
+            <p class="text-sm font-semibold text-surface-100">工作区</p>
+            <p class="text-xs text-surface-500 mt-1">每个工作区按 FIFO（L0）串行执行任务</p>
           </div>
 
           <div class="p-4 border-b border-surface-700/50">
@@ -382,23 +382,23 @@ onUnmounted(() => {
                         (() => {
                           const s = workspaceSummaries.find((x) => x.workspace === ws)
                           if (!s) return ''
-                          return `total ${s.total} · queued ${s.queued} · running ${s.running} · failed ${s.failed}`
+                          return `总计 ${s.total} · 排队 ${s.queued} · 运行中 ${s.running} · 失败 ${s.failed}`
                         })()
                       }}
                     </span>
-                    <span v-else>no tasks yet</span>
+                    <span v-else>暂无任务</span>
                   </div>
                 </div>
               </div>
             </button>
-            <div v-if="allWorkspaces.length === 0" class="p-6 text-sm text-surface-500">No workspaces yet.</div>
+            <div v-if="allWorkspaces.length === 0" class="p-6 text-sm text-surface-500">暂无工作区。</div>
           </div>
         </div>
 
         <!-- Tasks list + composer -->
         <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
           <div class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between">
-            <p class="text-sm font-semibold text-surface-100">Tasks</p>
+            <p class="text-sm font-semibold text-surface-100">任务</p>
             <div class="inline-flex items-center gap-2 text-xs text-surface-500">
               <ListTodo class="w-4 h-4" />
               {{ filteredTasks.length }}
@@ -410,27 +410,27 @@ onUnmounted(() => {
               <input
                 v-model="title"
                 class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                placeholder="Optional title"
+                placeholder="可选标题"
               />
               <textarea
                 data-testid="workbench-prompt"
                 v-model="prompt"
                 rows="4"
                 class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                placeholder="Describe what you want done..."
+                placeholder="描述你希望完成的内容..."
               />
               <div class="grid grid-cols-2 gap-2">
                 <input
                   v-model="budgetTokens"
                   inputmode="numeric"
                   class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                  placeholder="Token budget (optional)"
+                  placeholder="Token 预算（可选）"
                 />
                 <input
                   v-model="budgetCost"
                   inputmode="decimal"
                   class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                  placeholder="Cost budget USD (optional)"
+                  placeholder="成本预算 USD（可选）"
                 />
               </div>
               <button
@@ -439,7 +439,7 @@ onUnmounted(() => {
                 :disabled="submitting || !workspaceSelected || !prompt.trim()"
                 @click="queueTask"
               >
-                Queue task
+                入队任务
               </button>
             </div>
           </div>
@@ -465,14 +465,14 @@ onUnmounted(() => {
                 </div>
               </div>
             </button>
-            <div v-if="filteredTasks.length === 0" class="p-6 text-sm text-surface-500">No tasks for this workspace.</div>
+            <div v-if="filteredTasks.length === 0" class="p-6 text-sm text-surface-500">该工作区暂无任务。</div>
           </div>
         </div>
 
         <!-- Task details -->
         <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
           <div class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2">
-            <p class="text-sm font-semibold text-surface-100">Details</p>
+            <p class="text-sm font-semibold text-surface-100">详情</p>
             <div class="inline-flex gap-2">
               <button
                 data-testid="workbench-cancel"
@@ -481,7 +481,7 @@ onUnmounted(() => {
                 @click="doCancel"
               >
                 <X class="w-4 h-4" />
-                Cancel
+                取消
               </button>
               <button
                 data-testid="workbench-resume"
@@ -490,7 +490,7 @@ onUnmounted(() => {
                 @click="doResume"
               >
                 <RotateCcw class="w-4 h-4" />
-                Resume
+                继续
               </button>
             </div>
           </div>
@@ -499,7 +499,7 @@ onUnmounted(() => {
             {{ selectedError }}
           </div>
 
-          <div v-if="!selectedTask" class="p-6 text-sm text-surface-500">Select a task to view details.</div>
+          <div v-if="!selectedTask" class="p-6 text-sm text-surface-500">选择任务查看详情。</div>
 
           <div v-else class="p-4 space-y-4">
             <div>
@@ -509,14 +509,14 @@ onUnmounted(() => {
 
             <div v-if="latestAttempt" class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
               <div class="flex items-center justify-between gap-2">
-                <div class="text-sm text-surface-100 font-semibold">Latest attempt</div>
+                <div class="text-sm text-surface-100 font-semibold">最近一次尝试</div>
                 <div class="text-xs text-surface-400">{{ latestAttempt.status }}</div>
               </div>
               <div v-if="latestAttempt.summary" class="text-sm text-surface-200 mt-2 whitespace-pre-wrap">{{ latestAttempt.summary }}</div>
-              <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 mt-2">usage: {{ formatUsage(latestAttempt) }}</div>
-              <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400 mt-2">findings: {{ latestAttempt.findings_path }}</div>
-              <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400 mt-1">trace: {{ latestAttempt.trace_log_path }}</div>
-              <div v-if="latestAttempt.test_report_path" class="text-xs text-surface-400 mt-1">test report: {{ latestAttempt.test_report_path }}</div>
+              <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 mt-2">用量：{{ formatUsage(latestAttempt) }}</div>
+              <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400 mt-2">findings：{{ latestAttempt.findings_path }}</div>
+              <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400 mt-1">trace：{{ latestAttempt.trace_log_path }}</div>
+              <div v-if="latestAttempt.test_report_path" class="text-xs text-surface-400 mt-1">测试报告：{{ latestAttempt.test_report_path }}</div>
               <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400 mt-1">
                 policy:
                 <span class="font-mono text-surface-200">{{ latestAttempt.policy_snapshot.policy?.id }}</span>
@@ -525,14 +525,14 @@ onUnmounted(() => {
                 · principal={{ latestAttempt.policy_snapshot.principal_id }}
               </div>
               <div v-if="latestAttempt.observer" class="text-xs text-surface-400 mt-2">
-                Observer: {{ latestAttempt.observer.pass ? 'pass' : 'fail' }} · {{ latestAttempt.observer.reason }}
+                观察者：{{ latestAttempt.observer.pass ? '通过' : '失败' }} · {{ latestAttempt.observer.reason }}
               </div>
             </div>
 
             <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-              <div class="text-sm text-surface-100 font-semibold">Events</div>
-              <div v-if="selectedLoading" class="text-xs text-surface-500 mt-2">Loading…</div>
-              <div v-else-if="selectedEvents.length === 0" class="text-xs text-surface-500 mt-2">No events.</div>
+              <div class="text-sm text-surface-100 font-semibold">事件</div>
+              <div v-if="selectedLoading" class="text-xs text-surface-500 mt-2">加载中…</div>
+              <div v-else-if="selectedEvents.length === 0" class="text-xs text-surface-500 mt-2">暂无事件。</div>
               <div v-else class="mt-2 space-y-2 max-h-[40vh] overflow-y-auto">
                 <div v-for="(e, idx) in selectedEvents" :key="idx" class="text-xs text-surface-300">
                   <span class="text-surface-500">{{ e.ts }}</span>

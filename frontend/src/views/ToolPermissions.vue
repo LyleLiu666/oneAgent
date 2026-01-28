@@ -144,8 +144,8 @@ onMounted(async () => {
     <div class="max-w-6xl mx-auto space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-surface-100">Tool Permissions</h1>
-          <p class="text-sm text-surface-500">View effective policy snapshots and manage tokens/policies (local-only).</p>
+          <h1 class="text-2xl font-bold text-surface-100">工具权限</h1>
+          <p class="text-sm text-surface-500">查看生效策略快照，并管理 token/策略（仅本机）。</p>
         </div>
         <button
           data-testid="tool-permissions-refresh"
@@ -154,7 +154,7 @@ onMounted(async () => {
           @click="refresh(); loadPolicy()"
         >
           <RefreshCw class="w-4 h-4" />
-          Refresh
+          刷新
         </button>
       </div>
 
@@ -168,11 +168,11 @@ onMounted(async () => {
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <Shield class="w-5 h-5 text-primary-400" />
               <div class="min-w-0">
-                <p class="text-sm font-semibold text-surface-100">Effective policy snapshot</p>
+                <p class="text-sm font-semibold text-surface-100">生效策略快照</p>
                 <p v-if="snapshot" class="text-xs text-surface-500 truncate">
                   principal={{ snapshot.principal_id }} · policy={{ snapshot.policy?.id }} · hash={{ shortHash(snapshot.policy_hash) }}
                 </p>
-                <p v-else class="text-xs text-surface-500">Loading…</p>
+                <p v-else class="text-xs text-surface-500">加载中…</p>
               </div>
             </div>
 
@@ -191,7 +191,7 @@ onMounted(async () => {
                   @click="loadPolicy"
                 >
                   <RefreshCw class="w-4 h-4" />
-                  Load
+                  加载
                 </button>
               </div>
 
@@ -220,14 +220,14 @@ onMounted(async () => {
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <Shield class="w-5 h-5 text-primary-400" />
               <div>
-                <p class="text-sm font-semibold text-surface-100">Allowed tools</p>
-                <p class="text-xs text-surface-500">{{ tools.length }} tools</p>
+                <p class="text-sm font-semibold text-surface-100">允许的工具</p>
+                <p class="text-xs text-surface-500">{{ tools.length }} 个工具</p>
               </div>
             </div>
 
             <div class="p-5">
-              <div v-if="loading && tools.length === 0" class="text-sm text-surface-500">Loading…</div>
-              <div v-else-if="tools.length === 0" class="text-sm text-surface-500">No tools available.</div>
+              <div v-if="loading && tools.length === 0" class="text-sm text-surface-500">加载中…</div>
+              <div v-else-if="tools.length === 0" class="text-sm text-surface-500">暂无可用工具。</div>
               <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div
                   v-for="t in tools"
@@ -248,9 +248,9 @@ onMounted(async () => {
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <Save class="w-5 h-5 text-primary-400" />
               <div class="min-w-0">
-                <p class="text-sm font-semibold text-surface-100">Policy editor</p>
+                <p class="text-sm font-semibold text-surface-100">策略编辑器</p>
                 <p class="text-xs text-surface-500 truncate">
-                  {{ policyResponse?.exists ? 'stored policy' : 'effective(default) policy shown' }}
+                  {{ policyResponse?.exists ? '已存储的策略' : '当前展示的是生效（默认）策略' }}
                 </p>
               </div>
             </div>
@@ -270,7 +270,7 @@ onMounted(async () => {
                   @click="loadPolicy"
                 >
                   <RefreshCw class="w-4 h-4" />
-                  Reset
+                  重置
                 </button>
                 <button
                   data-testid="tool-permissions-save"
@@ -279,7 +279,7 @@ onMounted(async () => {
                   @click="savePolicy"
                 >
                   <Save class="w-4 h-4" />
-                  Save
+                  保存
                 </button>
               </div>
             </div>
@@ -289,8 +289,8 @@ onMounted(async () => {
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <KeyRound class="w-5 h-5 text-primary-400" />
               <div>
-                <p class="text-sm font-semibold text-surface-100">Auth tokens</p>
-                <p class="text-xs text-surface-500">{{ tokens.length }} tokens</p>
+                <p class="text-sm font-semibold text-surface-100">访问令牌</p>
+                <p class="text-xs text-surface-500">{{ tokens.length }} 个令牌</p>
               </div>
             </div>
 
@@ -299,7 +299,7 @@ onMounted(async () => {
                 <input
                   v-model="newTokenPrincipal"
                   class="bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-full"
-                  placeholder="principal_id (default: current)"
+                  placeholder="principal_id（默认：当前）"
                   :disabled="loading"
                 />
                 <button
@@ -309,7 +309,7 @@ onMounted(async () => {
                   @click="createToken"
                 >
                   <KeyRound class="w-4 h-4" />
-                  Create
+                  创建
                 </button>
               </div>
 
@@ -317,11 +317,11 @@ onMounted(async () => {
                 v-if="createdToken"
                 class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-100"
               >
-                Created token for <span class="font-mono">{{ createdToken.principal_id }}</span>:
+                已创建 token（principal_id=<span class="font-mono">{{ createdToken.principal_id }}</span>）：
                 <div class="mt-2 font-mono break-all">{{ createdToken.token }}</div>
               </div>
 
-              <div v-if="tokens.length === 0" class="text-sm text-surface-500">No tokens.</div>
+              <div v-if="tokens.length === 0" class="text-sm text-surface-500">暂无令牌。</div>
               <div v-else class="space-y-2">
                 <div
                   v-for="t in tokens"
@@ -333,7 +333,7 @@ onMounted(async () => {
                       <div class="text-xs text-surface-200 font-mono break-all">{{ t.token }}</div>
                       <div class="text-[11px] text-surface-500 mt-1">
                         principal={{ t.principal_id }} · created={{ t.created_at }}
-                        <span v-if="t.revoked_at"> · revoked={{ t.revoked_at }}</span>
+                        <span v-if="t.revoked_at"> · 撤销于 {{ t.revoked_at }}</span>
                       </div>
                     </div>
                     <button
@@ -343,9 +343,9 @@ onMounted(async () => {
                       @click="revokeToken(t.token)"
                     >
                       <Trash2 class="w-4 h-4" />
-                      Revoke
+                      撤销
                     </button>
-                    <span v-else class="text-xs text-surface-600">revoked</span>
+                    <span v-else class="text-xs text-surface-600">已撤销</span>
                   </div>
                 </div>
               </div>
@@ -365,4 +365,3 @@ onMounted(async () => {
   border: 1px solid rgba(var(--color-surface-700), 0.4);
 }
 </style>
-

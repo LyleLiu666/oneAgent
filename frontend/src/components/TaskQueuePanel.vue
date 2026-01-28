@@ -218,18 +218,19 @@ onUnmounted(() => {
             <div class="flex items-center justify-between gap-3">
                 <div class="flex items-center gap-2 min-w-0">
                     <ListTodo class="w-4 h-4 text-surface-400" />
-                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Tasks</p>
+                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">任务</p>
                     <p v-if="effectiveWorkspace" class="text-xs text-surface-300 truncate">
-                        {{ tasks.length }} in workspace
+                        工作区内 {{ tasks.length }} 个任务
                     </p>
-                    <p v-else class="text-xs text-surface-500">Select a workspace to use task queue</p>
+                    <p v-else class="text-xs text-surface-500">选择工作区以使用任务队列</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button
                         type="button"
+                        data-testid="tasks-refresh"
                         class="text-xs text-surface-300 hover:text-surface-100"
                         :disabled="tasksLoading"
-                        title="Refresh"
+                        title="刷新"
                         @click="refreshTasks"
                     >
                         <Loader2 v-if="tasksLoading" class="w-4 h-4 animate-spin" />
@@ -242,7 +243,7 @@ onUnmounted(() => {
                         data-testid="tasks-toggle"
                         @click="open = !open"
                     >
-                        {{ open ? 'Hide' : 'Show' }}
+                        {{ open ? '收起' : '展开' }}
                     </button>
                 </div>
             </div>
@@ -256,9 +257,9 @@ onUnmounted(() => {
                     class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3"
                 >
                     <div class="flex items-center justify-between gap-3">
-                        <div class="text-xs font-semibold text-surface-200">Updates</div>
+                        <div class="text-xs font-semibold text-surface-200">更新</div>
                         <button class="text-[11px] text-surface-400 hover:text-surface-200" @click="clearTaskUpdates">
-                            Clear
+                            清空
                         </button>
                     </div>
                     <div class="mt-2 space-y-1">
@@ -277,20 +278,20 @@ onUnmounted(() => {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div class="space-y-2">
                         <div class="flex items-center justify-between gap-2">
-                            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">New Task</p>
+                            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">新任务</p>
                         </div>
 
                         <input
                             v-model="title"
                             class="w-full bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-                            placeholder="Optional title"
+                            placeholder="可选标题"
                             :disabled="!effectiveWorkspace || submitting"
                         />
                         <textarea
                             v-model="prompt"
                             rows="3"
                             class="w-full bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 resize-none"
-                            placeholder="Describe the deliverable to produce (runs in background)"
+                            placeholder="描述要交付的结果（后台运行）"
                             :disabled="!effectiveWorkspace || submitting"
                         />
                         <div class="flex items-center justify-end gap-2">
@@ -302,12 +303,12 @@ onUnmounted(() => {
                                 @click="queueTask"
                             >
                                 <Loader2 v-if="submitting" class="w-4 h-4 animate-spin" />
-                                <span v-else>Queue</span>
+                                <span v-else>入队</span>
                             </button>
                         </div>
 
                         <div class="mt-3">
-                            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Queue</p>
+                            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">队列</p>
                             <div class="mt-2 space-y-1 max-h-52 overflow-y-auto pr-1">
                                 <button
                                     v-for="t in tasks"
@@ -330,7 +331,7 @@ onUnmounted(() => {
                                     <p class="text-[11px] text-surface-400 truncate">{{ t.prompt }}</p>
                                 </button>
                                 <div v-if="!tasksLoading && tasks.length === 0" class="text-xs text-surface-500">
-                                    No tasks yet.
+                                    暂无任务。
                                 </div>
                             </div>
                         </div>
@@ -338,14 +339,14 @@ onUnmounted(() => {
 
                     <div class="space-y-2">
                         <div class="flex items-center justify-between gap-2">
-                            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Details</p>
+                            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">详情</p>
                             <div class="flex items-center gap-2">
                                 <button
                                     v-if="selectedTaskId"
                                     type="button"
                                     class="text-xs text-surface-300 hover:text-surface-100"
                                     :disabled="selectedLoading"
-                                    title="Refresh"
+                                    title="刷新"
                                     @click="refreshSelected"
                                 >
                                     <Loader2 v-if="selectedLoading" class="w-4 h-4 animate-spin" />
@@ -355,7 +356,7 @@ onUnmounted(() => {
                                     v-if="selectedTaskId"
                                     type="button"
                                     class="text-xs text-surface-300 hover:text-surface-100"
-                                    title="Clear selection"
+                                    title="清除选择"
                                     @click="selectedTaskId = ''; selectedTask = null; selectedEvents = []"
                                 >
                                     <X class="w-4 h-4" />
@@ -366,7 +367,7 @@ onUnmounted(() => {
                         <div v-if="selectedError" class="text-xs text-red-400">{{ selectedError }}</div>
 
                         <div v-if="!selectedTaskId" class="text-xs text-surface-500">
-                            Select a task to view details.
+                            选择任务查看详情。
                         </div>
 
                         <div v-else-if="selectedTask" class="rounded-xl border border-surface-800 bg-surface-950/40 p-3">
@@ -390,7 +391,7 @@ onUnmounted(() => {
                                         class="text-surface-200"
                                         :class="latestAttempt.observer.pass ? 'text-green-400' : 'text-red-400'"
                                     >
-                                        Observer: {{ latestAttempt.observer.pass ? 'PASS' : 'FAIL' }}
+                                        观察者：{{ latestAttempt.observer.pass ? '通过' : '失败' }}
                                     </p>
                                     <p v-if="latestAttempt.observer.reason" class="text-surface-300">
                                         {{ latestAttempt.observer.reason }}
@@ -417,7 +418,7 @@ onUnmounted(() => {
                                         :disabled="!canCancel"
                                         @click="doCancel"
                                     >
-                                        Cancel
+                                        取消
                                     </button>
                                     <button
                                         type="button"
@@ -426,12 +427,12 @@ onUnmounted(() => {
                                         @click="doResume"
                                     >
                                         <RotateCcw class="w-3 h-3 inline-block mr-1" />
-                                        Resume
+                                        继续
                                     </button>
                                 </div>
 
                                 <div class="pt-2">
-                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Events</p>
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">事件</p>
                                     <div class="mt-2 max-h-40 overflow-y-auto pr-1 space-y-1">
                                         <div
                                             v-for="(ev, idx) in selectedEvents"
@@ -444,14 +445,14 @@ onUnmounted(() => {
                                             <span v-if="ev.message" class="text-surface-400"> — {{ ev.message }}</span>
                                         </div>
                                         <div v-if="selectedEvents.length === 0" class="text-xs text-surface-500">
-                                            No events.
+                                            暂无事件。
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div v-else class="text-xs text-surface-500">Loading…</div>
+                        <div v-else class="text-xs text-surface-500">加载中…</div>
                     </div>
                 </div>
             </div>

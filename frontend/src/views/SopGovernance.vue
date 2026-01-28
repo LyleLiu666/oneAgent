@@ -127,8 +127,8 @@ onMounted(async () => {
     <div class="max-w-6xl mx-auto space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-surface-100">SOP Governance</h1>
-          <p class="text-sm text-surface-500">Inbox (cap=10) · rank by scarcity/know-how/evidence</p>
+          <h1 class="text-2xl font-bold text-surface-100">SOP 治理</h1>
+          <p class="text-sm text-surface-500">收件箱（上限 10）· 按稀缺性/know-how/证据排序</p>
         </div>
         <button
           data-testid="sop-governance-refresh"
@@ -137,7 +137,7 @@ onMounted(async () => {
           @click="loadList"
         >
           <RefreshCw class="w-4 h-4" />
-          Refresh
+          刷新
         </button>
       </div>
 
@@ -146,8 +146,8 @@ onMounted(async () => {
           <div class="flex items-center gap-3">
             <ListChecks class="w-5 h-5 text-primary-400" />
             <div>
-              <p class="text-sm font-semibold text-surface-100">Suggestions</p>
-              <p class="text-xs text-surface-500">Manual review required before materializing SKILL.md</p>
+              <p class="text-sm font-semibold text-surface-100">建议</p>
+              <p class="text-xs text-surface-500">需要人工审核后才能落地为 SKILL.md</p>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -156,15 +156,15 @@ onMounted(async () => {
               class="rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs"
               @change="loadList"
             >
-              <option value="proposed">proposed</option>
-              <option value="parked">parked</option>
-              <option value="approved">approved</option>
-              <option value="rejected">rejected</option>
-              <option value="archived">archived</option>
+              <option value="proposed">待处理</option>
+              <option value="parked">搁置</option>
+              <option value="approved">已通过</option>
+              <option value="rejected">已拒绝</option>
+              <option value="archived">已归档</option>
             </select>
             <label class="flex items-center gap-2 text-xs text-surface-400">
               <input v-model="includeParked" type="checkbox" class="accent-primary-500" @change="loadList" />
-              Include parked
+              包含搁置
             </label>
             <button
               class="px-3 py-2 rounded-lg text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2"
@@ -172,7 +172,7 @@ onMounted(async () => {
               @click="loadMore"
             >
               <Wand2 class="w-4 h-4" />
-              Load more
+              加载更多
             </button>
           </div>
         </div>
@@ -181,8 +181,8 @@ onMounted(async () => {
           <div v-if="error" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
             {{ error }}
           </div>
-          <div v-if="loading" class="text-sm text-surface-500">Loading…</div>
-          <div v-else-if="sortedItems.length === 0" class="text-sm text-surface-500">No suggestions.</div>
+          <div v-if="loading" class="text-sm text-surface-500">加载中…</div>
+          <div v-else-if="sortedItems.length === 0" class="text-sm text-surface-500">暂无建议。</div>
 
           <div v-else class="space-y-3">
             <div v-for="s in sortedItems" :key="s.suggestion_id" class="glass-card p-4 space-y-3">
@@ -190,20 +190,20 @@ onMounted(async () => {
                 <div class="min-w-0">
                   <p class="text-sm text-surface-100 font-semibold truncate">{{ s.title }}</p>
                   <p class="text-xs text-surface-500 truncate">
-                    id={{ s.suggestion_id.slice(0, 8) }} · {{ s.status }} · evidence={{ s.evidence_count || 0 }}
+                    id={{ s.suggestion_id.slice(0, 8) }} · {{ s.status }} · 证据={{ s.evidence_count || 0 }}
                   </p>
                 </div>
                 <div class="text-xs text-surface-300 text-right">
-                  <div>total={{ (s.scores?.total_score ?? 0).toFixed(2) }}</div>
+                  <div>总分={{ (s.scores?.total_score ?? 0).toFixed(2) }}</div>
                   <div class="text-surface-500">
-                    scarcity={{ (s.scores?.scarcity_score ?? 0).toFixed(2) }} · depth={{ (s.scores?.depth_score ?? 0).toFixed(2) }}
+                    稀缺性={{ (s.scores?.scarcity_score ?? 0).toFixed(2) }} · 深度={{ (s.scores?.depth_score ?? 0).toFixed(2) }}
                   </div>
                 </div>
               </div>
 
               <div v-if="s.meta?.compression_verdict" class="rounded-xl bg-surface-900/60 border border-surface-700/50 p-3">
                 <p class="text-xs text-surface-400">
-                  compressibility: <span class="text-surface-200">{{ s.meta.compression_verdict }}</span>
+                  可压缩性：<span class="text-surface-200">{{ s.meta.compression_verdict }}</span>
                 </p>
                 <p v-if="s.meta.compression_prompt" class="text-xs text-surface-200 mt-2 whitespace-pre-wrap">{{ s.meta.compression_prompt }}</p>
                 <p v-if="s.meta.compression_reason" class="text-[11px] text-surface-500 mt-2">{{ s.meta.compression_reason }}</p>
@@ -216,7 +216,7 @@ onMounted(async () => {
                   :disabled="loading"
                   @click="setStatus(s.suggestion_id, 'approved')"
                 >
-                  Approve
+                  通过
                 </button>
                 <button
                   v-if="s.status !== 'rejected' && s.status !== 'merged'"
@@ -224,7 +224,7 @@ onMounted(async () => {
                   :disabled="loading"
                   @click="setStatus(s.suggestion_id, 'rejected')"
                 >
-                  Reject
+                  拒绝
                 </button>
                 <button
                   v-if="s.status !== 'parked' && s.status !== 'merged'"
@@ -232,7 +232,7 @@ onMounted(async () => {
                   :disabled="loading"
                   @click="setStatus(s.suggestion_id, 'parked')"
                 >
-                  Park
+                  搁置
                 </button>
                 <button
                   v-if="s.status !== 'archived' && s.status !== 'merged'"
@@ -240,7 +240,7 @@ onMounted(async () => {
                   :disabled="loading"
                   @click="setStatus(s.suggestion_id, 'archived')"
                 >
-                  Archive
+                  归档
                 </button>
                 <button
                   v-if="s.status === 'proposed' || s.status === 'parked'"
@@ -248,14 +248,14 @@ onMounted(async () => {
                   :disabled="loading"
                   @click="toggleEdit(s)"
                 >
-                  {{ editOpen[s.suggestion_id] ? 'Close' : 'Edit' }}
+                  {{ editOpen[s.suggestion_id] ? '关闭' : '编辑' }}
                 </button>
                 <button
                   class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-surface-800 text-surface-300 hover:bg-surface-700"
                   :disabled="loading || similarLoading[s.suggestion_id]"
                   @click="loadSimilar(s)"
                 >
-                  {{ similarLoading[s.suggestion_id] ? '…' : 'Similar' }}
+                  {{ similarLoading[s.suggestion_id] ? '…' : '相似' }}
                 </button>
               </div>
 
@@ -264,13 +264,13 @@ onMounted(async () => {
                   v-model="editDraft[s.suggestion_id].title"
                   type="text"
                   class="w-full rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-sm"
-                  placeholder="Title"
+                  placeholder="标题"
                 />
                 <textarea
                   v-model="editDraft[s.suggestion_id].draft_skill"
                   rows="8"
                   class="w-full rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs font-mono"
-                  placeholder="Draft skill (SKILL.md body)"
+                  placeholder="草稿技能（SKILL.md 内容）"
                 />
                 <div class="flex justify-end gap-2">
                   <button
@@ -278,7 +278,7 @@ onMounted(async () => {
                     :disabled="loading"
                     @click="saveEdit(s)"
                   >
-                    Save
+                    保存
                   </button>
                 </div>
               </div>
@@ -287,13 +287,13 @@ onMounted(async () => {
                 v-if="Array.isArray(similarByID[s.suggestion_id]) && similarByID[s.suggestion_id].length > 0"
                 class="rounded-xl bg-surface-900/60 border border-surface-700/50 p-3"
               >
-                <p class="text-xs text-surface-400 mb-2">Similar suggestions</p>
+                <p class="text-xs text-surface-400 mb-2">相似建议</p>
                 <div class="space-y-2">
                   <div v-for="sim in similarByID[s.suggestion_id]" :key="sim.suggestion_id" class="flex items-center justify-between gap-2">
                     <div class="min-w-0">
                       <p class="text-xs text-surface-200 truncate">{{ sim.title }}</p>
                       <p class="text-[11px] text-surface-500">
-                        sim={{ sim.similarity.toFixed(2) }} · {{ sim.status }} · id={{ sim.suggestion_id.slice(0, 8) }}
+                        相似度={{ sim.similarity.toFixed(2) }} · {{ sim.status }} · id={{ sim.suggestion_id.slice(0, 8) }}
                       </p>
                     </div>
                     <button
@@ -302,19 +302,19 @@ onMounted(async () => {
                       :disabled="loading"
                       @click="setStatus(s.suggestion_id, 'merged', sim.suggestion_id)"
                     >
-                      Merge into
+                      合并到
                     </button>
                   </div>
                 </div>
               </div>
 
               <details class="rounded-lg bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">Draft</summary>
+                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">草稿</summary>
                 <pre class="whitespace-pre-wrap text-xs text-surface-100 px-3 pb-3">{{ s.draft_skill }}</pre>
               </details>
 
               <details v-if="s.status === 'approved' && s.meta?.materialized_skill_path" class="rounded-lg bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">Materialized skill</summary>
+                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">已落地技能</summary>
                 <div class="px-3 pb-3 text-xs text-surface-100">
                   <p>skill_id: {{ s.meta.materialized_skill_id }}</p>
                   <p>path: {{ s.meta.materialized_skill_path }}</p>
@@ -327,4 +327,3 @@ onMounted(async () => {
     </div>
   </div>
 </template>
-

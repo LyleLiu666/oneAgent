@@ -141,7 +141,7 @@ const canSend = computed(
     !workspaceOnboardingBlocking.value
 )
 
-const currentSessionTitle = computed(() => chatStore.currentSession?.title || 'New chat')
+const currentSessionTitle = computed(() => chatStore.currentSession?.title || '新对话')
 const selectedModelId = computed({
   get: () => chatStore.currentModelId,
   set: (value: string) => chatStore.setCurrentModel(value),
@@ -158,10 +158,10 @@ const selectedToolProtocol = computed({
 const workspaceSourceLabel = computed(() => {
   const current = String(workspacePath.value || '').trim()
   if (!current) return ''
-  if (String(sessionWorkspace.value || '').trim() === current) return 'session'
-  if (String(lastWorkspace.value || '').trim() === current) return 'last used'
-  if (String(serverDefaultWorkspace.value || '').trim() === current) return 'server default'
-  return 'custom'
+  if (String(sessionWorkspace.value || '').trim() === current) return '会话'
+  if (String(lastWorkspace.value || '').trim() === current) return '上次使用'
+  if (String(serverDefaultWorkspace.value || '').trim() === current) return '服务端默认'
+  return '自定义'
 })
 
 const workspacePromptError = computed(() => {
@@ -172,10 +172,10 @@ const workspacePromptError = computed(() => {
 const toolSummary = computed(() => {
   const total = tools.value.length
   const selected = selectedToolIds.value.length
-  if (total === 0) return 'Tools'
-  if (selected === 0) return `Tools (0/${total})`
-  if (selected === total) return `Tools (all)`
-  return `Tools (${selected}/${total})`
+  if (total === 0) return '工具'
+  if (selected === 0) return `工具 (0/${total})`
+  if (selected === total) return `工具（全部）`
+  return `工具 (${selected}/${total})`
 })
 
 // Methods
@@ -1032,12 +1032,12 @@ onUnmounted(() => {
       <div class="shrink-0 bg-surface-950/80 backdrop-blur session-header">
         <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Session</p>
+            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">会话</p>
             <p class="text-sm text-surface-100 truncate">{{ currentSessionTitle }}</p>
             <p v-if="sessionPolicyHash" class="text-[11px] text-surface-500 truncate">
-              policy={{ sessionPolicyID || 'unknown' }} · {{ shortSessionPolicyHash }}
+              policy={{ sessionPolicyID || '未知' }} · {{ shortSessionPolicyHash }}
               <a href="/governance/tools" class="ml-2 text-primary-400 hover:text-primary-300 underline">
-                Tool Permissions
+                工具权限
               </a>
               <span v-if="sessionPolicyResolvedAt" class="ml-2">· {{ sessionPolicyResolvedAt }}</span>
             </p>
@@ -1049,7 +1049,7 @@ onUnmounted(() => {
               class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 max-w-[220px] truncate"
               :disabled="modelsLoading"
             >
-              <option value="">{{ modelsLoading ? 'Loading...' : 'Default model' }}</option>
+              <option value="">{{ modelsLoading ? '加载中...' : '默认模型' }}</option>
               <option v-for="model in models" :key="model.id" :value="model.id">
                 {{ model.name || model.model }}{{ model.provider?.name ? ` · ${model.provider.name}` : '' }}
               </option>
@@ -1058,17 +1058,19 @@ onUnmounted(() => {
               <Folder class="w-4 h-4 text-surface-400" />
               <input
                 v-model="workspacePath"
+                data-testid="chat-workspace-path"
                 class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-[220px] max-w-full"
-                placeholder="Workspace path (server)"
+                placeholder="工作区路径（服务端）"
                 :disabled="Boolean(sessionWorkspace)"
                 :title="
                   sessionWorkspace
-                    ? 'Workspace is locked for this session. Start a new session to change it.'
-                    : 'Workspace path on the server machine. File tools will be scoped to this directory.'
+                    ? '本会话的工作区已锁定；如需修改，请新建会话。'
+                    : '工作区位于服务端机器上；文件工具将限定在该目录内。'
                 "
               />
               <button
                 type="button"
+                data-testid="chat-workspace-choose"
                 :class="[
                   'bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed',
                   workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
@@ -1076,13 +1078,13 @@ onUnmounted(() => {
                 :disabled="workspaceChoosing || Boolean(sessionWorkspace)"
                 :title="
                   sessionWorkspace
-                    ? 'Workspace is locked for this session. Start a new session to change it.'
-                    : workspaceChooseError || 'Choose workspace folder (server)'
+                    ? '本会话的工作区已锁定；如需修改，请新建会话。'
+                    : workspaceChooseError || '选择工作区文件夹（服务端）'
                 "
                 @click="chooseWorkspace"
               >
                 <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
-                <span v-else>Browse</span>
+                <span v-else>选择文件夹</span>
               </button>
             </div>
             <div v-if="tools.length > 0" ref="toolPickerEl" class="relative flex items-center gap-2">
@@ -1102,14 +1104,14 @@ onUnmounted(() => {
                 @click.stop
               >
                 <div class="flex items-center justify-between gap-3">
-                  <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">Protocol</p>
+                  <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">协议</p>
                   <select
                     v-model="selectedToolProtocol"
                     class="bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-                    title="Tool protocol"
+                    title="工具协议"
                   >
-                    <option value="json">json tools</option>
-                    <option value="xml">xml tools</option>
+                    <option value="json">JSON 工具</option>
+                    <option value="xml">XML 工具</option>
                   </select>
                 </div>
 
@@ -1136,14 +1138,14 @@ onUnmounted(() => {
                     class="text-xs text-surface-300 hover:text-surface-100"
                     @click="selectAllTools"
                   >
-                    Select all
+                    全选
                   </button>
                   <button
                     type="button"
                     class="text-xs text-surface-300 hover:text-surface-100"
                     @click="clearAllTools"
                   >
-                    Clear
+                    清空
                   </button>
                 </div>
               </div>
@@ -1162,7 +1164,7 @@ onUnmounted(() => {
       >
         <div v-if="loadingHistory" class="flex items-center justify-center py-6 text-surface-400">
           <Loader2 class="w-5 h-5 animate-spin" />
-          <span class="ml-2 text-sm">Loading history...</span>
+          <span class="ml-2 text-sm">加载历史...</span>
         </div>
 
         <!-- Empty state -->
@@ -1204,7 +1206,7 @@ onUnmounted(() => {
           <div v-else-if="message.role === 'system'" class="max-w-3xl w-full">
             <details class="rounded-xl bg-surface-900/30 backdrop-blur border border-surface-700/30">
               <summary class="cursor-pointer px-4 py-2 text-[11px] text-surface-500 select-none">
-                system prompt
+                系统提示词
               </summary>
               <div class="px-4 pb-3">
                 <div
@@ -1241,7 +1243,7 @@ onUnmounted(() => {
                   </div>
                   <div class="flex items-center gap-1 text-sm font-medium text-surface-300">
                     <span>
-                      Thinking
+                      思考中
                       <span
                         v-if="message.responseTokens"
                         class="text-surface-400 font-normal text-xs"
@@ -1288,7 +1290,7 @@ onUnmounted(() => {
                 <button
                   @click="copyMessage(message)"
                   class="p-1.5 rounded-lg text-surface-500 hover:text-surface-300 hover:bg-surface-800 transition-colors"
-                  title="Copy"
+                  title="复制"
                 >
                   <Check v-if="copiedId === message.id" class="w-4 h-4 text-green-400" />
                   <Copy v-else class="w-4 h-4" />
@@ -1297,7 +1299,7 @@ onUnmounted(() => {
                   v-if="!message.isStreaming"
                   @click="retryMessage(index)"
                   class="p-1.5 rounded-lg text-surface-500 hover:text-surface-300 hover:bg-surface-800 transition-colors"
-                  title="Retry"
+                  title="重试"
                 >
                   <RotateCcw class="w-4 h-4" />
                 </button>
@@ -1352,8 +1354,8 @@ onUnmounted(() => {
                 @keydown="handleKeydown"
                 :placeholder="
                   workspaceOnboardingBlocking
-                    ? 'Choose a workspace (or skip) to start...'
-                    : 'Type your message...'
+                    ? '请选择工作区（或跳过）后开始...'
+                    : '输入消息...'
                 "
                 rows="1"
                 class="w-full px-4 py-3 pr-12 text-base leading-6 overflow-y-auto bg-surface-800 rounded-xl text-surface-50 placeholder-surface-500 resize-y focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all border border-surface-700"
@@ -1378,7 +1380,7 @@ onUnmounted(() => {
             </button>
           </div>
           <p class="text-xs text-surface-500 mt-2 text-center">
-            Press Enter to send, Shift+Enter for new line
+            回车发送，Shift+Enter 换行
           </p>
         </div>
       </div>

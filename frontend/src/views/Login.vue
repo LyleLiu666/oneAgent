@@ -63,8 +63,8 @@ onMounted(() => {
         >
           <Shield class="w-8 h-8 text-white" />
         </div>
-        <h1 class="text-3xl font-bold text-surface-100 mb-2">Welcome Back</h1>
-        <p class="text-surface-400">Sign in to continue to OneAgent</p>
+        <h1 class="text-3xl font-bold text-surface-100 mb-2">欢迎回来</h1>
+        <p class="text-surface-400">登录以继续使用 OneAgent</p>
       </div>
 
       <!-- Login card -->
@@ -88,7 +88,7 @@ onMounted(() => {
               v-model="tokenInput"
               type="password"
               autocomplete="current-password"
-              placeholder="Paste token here..."
+              placeholder="粘贴 token 到这里..."
               class="w-full rounded-lg bg-surface-900/70 border border-surface-700 px-3 py-2 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/40"
             />
             <p v-if="errorMessage" class="text-sm text-red-300">{{ errorMessage }}</p>
@@ -100,7 +100,7 @@ onMounted(() => {
             class="w-full flex items-center justify-center gap-3 px-6 py-3 bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-xl transition-all duration-200 shadow-lg shadow-primary-500/20 hover:shadow-primary-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <LogIn class="w-5 h-5" />
-            {{ authMode === 'none' ? 'Continue' : 'Sign in with Token' }}
+            {{ authMode === 'none' ? '继续' : '使用 Token 登录' }}
           </button>
         </div>
 

@@ -22,11 +22,11 @@ const formatTime = (date: Date) => {
   const days = Math.floor(diff / (1000 * 60 * 60 * 24))
 
   if (days === 0) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   } else if (days < 7) {
-    return date.toLocaleDateString([], { weekday: 'short' })
+    return date.toLocaleDateString('zh-CN', { weekday: 'short' })
   } else {
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
   }
 }
 </script>
@@ -40,7 +40,7 @@ const formatTime = (date: Date) => {
         class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-500 text-white transition-all shadow-lg shadow-primary-900/20 font-medium text-sm group"
       >
         <Plus class="w-4 h-4 transition-transform group-hover:rotate-90" />
-        New Chat
+        新对话
       </button>
     </div>
 
@@ -48,7 +48,7 @@ const formatTime = (date: Date) => {
     <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
       <div v-if="loading" class="flex items-center justify-center py-8 text-surface-500">
         <Loader2 class="w-5 h-5 animate-spin mr-2" />
-        <span class="text-sm">Loading...</span>
+        <span class="text-sm">加载中...</span>
       </div>
 
       <div
@@ -58,7 +58,7 @@ const formatTime = (date: Date) => {
         <div class="w-12 h-12 rounded-full bg-surface-800/50 flex items-center justify-center mx-auto mb-3">
           <MessageSquare class="w-6 h-6 opacity-40" />
         </div>
-        <p>No history yet</p>
+        <p>暂无历史记录</p>
       </div>
 
       <button
@@ -74,7 +74,7 @@ const formatTime = (date: Date) => {
       >
         <div class="flex flex-col gap-0.5 relative z-10">
           <span class="text-sm font-medium truncate pr-2">
-            {{ session.title || 'New Chat' }}
+            {{ session.title || '新对话' }}
           </span>
           <span class="text-[10px] opacity-60 font-medium tracking-wide uppercase">
             {{ formatTime(new Date(session.updatedAt || session.createdAt)) }}

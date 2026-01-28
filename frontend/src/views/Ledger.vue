@@ -225,7 +225,7 @@ const loadSimilar = async (s: Suggestion) => {
 const formatTime = (iso: string) => {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
+  return d.toLocaleString('zh-CN')
 }
 
 onMounted(async () => {
@@ -240,16 +240,16 @@ onMounted(async () => {
       <div class="flex items-start justify-between gap-4 mb-6">
         <div>
           <div class="flex items-center gap-3">
-            <h1 class="text-2xl font-bold text-surface-100">Work Ledger</h1>
+            <h1 class="text-2xl font-bold text-surface-100">流水账</h1>
             <span
               v-if="hasLearningBadge"
               data-testid="ledger-badge-learning"
               class="px-2 py-1 rounded-full text-xs font-medium bg-amber-500/15 text-amber-300"
             >
-              Learning: {{ learningStatus }}
+              学习：{{ learningStatus }}
             </span>
           </div>
-          <p class="text-sm text-surface-500">Receipts, daily digest, and SOP suggestions</p>
+          <p class="text-sm text-surface-500">回执、日报与 SOP 建议</p>
         </div>
       </div>
 
@@ -262,7 +262,7 @@ onMounted(async () => {
         >
           <div class="inline-flex items-center gap-2">
             <ScrollText class="w-4 h-4" />
-            Receipts
+            回执
           </div>
         </button>
         <button
@@ -273,7 +273,7 @@ onMounted(async () => {
         >
           <div class="inline-flex items-center gap-2">
             <FileText class="w-4 h-4" />
-            Digest
+            日报
             <span
               v-if="hasDigestBadge"
               data-testid="ledger-badge-digest"
@@ -306,7 +306,7 @@ onMounted(async () => {
         <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
           <div class="px-5 py-4 border-b border-surface-700/50">
             <div class="flex items-center justify-between gap-2">
-              <p class="text-sm font-semibold text-surface-100">Receipts</p>
+              <p class="text-sm font-semibold text-surface-100">回执</p>
               <button
                 data-testid="receipts-refresh"
                 class="p-2 rounded-lg bg-surface-900/60 border border-surface-700/50 text-surface-200 hover:bg-surface-800/60"
@@ -323,7 +323,7 @@ onMounted(async () => {
                   v-model="receiptsQuery"
                   data-testid="receipts-q"
                   type="text"
-                  placeholder="Search receipts..."
+                  placeholder="搜索回执..."
                   class="w-full pl-9 pr-3 py-2 rounded-lg bg-surface-900/60 border border-surface-700/50 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                   @keyup.enter="loadReceipts"
                 />
@@ -335,18 +335,18 @@ onMounted(async () => {
                   class="rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-sm"
                   @change="loadReceipts"
                 >
-                  <option value="">all statuses</option>
-                  <option value="succeeded">succeeded</option>
-                  <option value="failed">failed</option>
-                  <option value="timed_out">timed_out</option>
-                  <option value="interrupted">interrupted</option>
-                  <option value="canceled">canceled</option>
+                  <option value="">全部状态</option>
+                  <option value="succeeded">成功</option>
+                  <option value="failed">失败</option>
+                  <option value="timed_out">超时</option>
+                  <option value="interrupted">中断</option>
+                  <option value="canceled">已取消</option>
                 </select>
                 <input
                   v-model="receiptsWorkspace"
                   data-testid="receipts-workspace"
                   type="text"
-                  placeholder="workspace filter"
+                  placeholder="工作区过滤"
                   class="rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                   @keyup.enter="loadReceipts"
                 />
@@ -355,9 +355,9 @@ onMounted(async () => {
           </div>
 
           <div class="p-4">
-            <div v-if="receiptsLoading" class="text-sm text-surface-500">Loading…</div>
+            <div v-if="receiptsLoading" class="text-sm text-surface-500">加载中…</div>
             <div v-else-if="receiptsError" class="text-sm text-red-400">{{ receiptsError }}</div>
-            <div v-else-if="receipts.length === 0" class="text-sm text-surface-500">No receipts.</div>
+            <div v-else-if="receipts.length === 0" class="text-sm text-surface-500">暂无回执。</div>
             <div v-else class="space-y-2">
               <button
                 v-for="r in receipts"
@@ -392,10 +392,10 @@ onMounted(async () => {
 
         <div class="glass rounded-2xl overflow-hidden lg:col-span-2">
           <div class="px-5 py-4 border-b border-surface-700/50">
-            <p class="text-sm font-semibold text-surface-100">Receipt detail</p>
+            <p class="text-sm font-semibold text-surface-100">回执详情</p>
           </div>
           <div class="p-5">
-            <div v-if="!selectedReceipt" class="text-sm text-surface-500">Select a receipt to view details.</div>
+            <div v-if="!selectedReceipt" class="text-sm text-surface-500">选择回执查看详情。</div>
             <div v-else class="space-y-4">
               <div class="glass-card p-4 rounded-xl">
                 <p class="text-sm font-semibold text-surface-100">{{ selectedReceipt.summary }}</p>
@@ -409,20 +409,20 @@ onMounted(async () => {
               </div>
 
               <details class="rounded-xl bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">Artifacts</summary>
+                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">产物</summary>
                 <div class="px-4 pb-4 text-sm text-surface-200 space-y-1">
-                  <p v-if="selectedReceipt.artifacts?.findings_path"><span class="text-surface-500">findings:</span> {{ selectedReceipt.artifacts.findings_path }}</p>
-                  <p v-if="selectedReceipt.artifacts?.trace_log_path"><span class="text-surface-500">trace:</span> {{ selectedReceipt.artifacts.trace_log_path }}</p>
-                  <p v-if="selectedReceipt.artifacts?.test_report_path"><span class="text-surface-500">test report:</span> {{ selectedReceipt.artifacts.test_report_path }}</p>
-                  <p v-if="selectedReceipt.artifacts?.diff_ref"><span class="text-surface-500">diff:</span> {{ selectedReceipt.artifacts.diff_ref }}</p>
+                  <p v-if="selectedReceipt.artifacts?.findings_path"><span class="text-surface-500">findings：</span> {{ selectedReceipt.artifacts.findings_path }}</p>
+                  <p v-if="selectedReceipt.artifacts?.trace_log_path"><span class="text-surface-500">trace：</span> {{ selectedReceipt.artifacts.trace_log_path }}</p>
+                  <p v-if="selectedReceipt.artifacts?.test_report_path"><span class="text-surface-500">测试报告：</span> {{ selectedReceipt.artifacts.test_report_path }}</p>
+                  <p v-if="selectedReceipt.artifacts?.diff_ref"><span class="text-surface-500">diff：</span> {{ selectedReceipt.artifacts.diff_ref }}</p>
                   <p v-if="!selectedReceipt.artifacts || Object.keys(selectedReceipt.artifacts || {}).length === 0" class="text-surface-500">
-                    (none)
+                    （无）
                   </p>
                 </div>
               </details>
 
               <details class="rounded-xl bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">Signals</summary>
+                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">指标</summary>
                 <div class="px-4 pb-4 text-sm text-surface-200 space-y-1">
                   <p v-if="selectedReceipt.signals?.duration_ms"><span class="text-surface-500">duration_ms:</span> {{ selectedReceipt.signals.duration_ms }}</p>
                   <p v-if="selectedReceipt.signals?.calls"><span class="text-surface-500">calls:</span> {{ selectedReceipt.signals.calls }}</p>
@@ -430,12 +430,12 @@ onMounted(async () => {
                   <p v-if="selectedReceipt.signals?.prompt_tokens"><span class="text-surface-500">prompt_tokens:</span> {{ selectedReceipt.signals.prompt_tokens }}</p>
                   <p v-if="selectedReceipt.signals?.completion_tokens"><span class="text-surface-500">completion_tokens:</span> {{ selectedReceipt.signals.completion_tokens }}</p>
                   <p v-if="selectedReceipt.signals?.cost_usd"><span class="text-surface-500">cost_usd:</span> {{ selectedReceipt.signals.cost_usd }}</p>
-                  <p v-if="!selectedReceipt.signals || Object.keys(selectedReceipt.signals || {}).length === 0" class="text-surface-500">(none)</p>
+                  <p v-if="!selectedReceipt.signals || Object.keys(selectedReceipt.signals || {}).length === 0" class="text-surface-500">（无）</p>
                 </div>
               </details>
 
               <details class="rounded-xl bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">Raw JSON</summary>
+                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">原始 JSON</summary>
                 <pre class="whitespace-pre-wrap text-xs text-surface-100 px-4 pb-4">{{ JSON.stringify(selectedReceipt, null, 2) }}</pre>
               </details>
             </div>
@@ -450,8 +450,8 @@ onMounted(async () => {
             <div class="flex items-center gap-3">
               <FileText class="w-5 h-5 text-primary-400" />
               <div>
-                <h2 class="font-semibold text-surface-100">Daily Digest</h2>
-                <p class="text-sm text-surface-500">A quick summary of today's receipts</p>
+                <h2 class="font-semibold text-surface-100">今日日报</h2>
+                <p class="text-sm text-surface-500">今日回执的快速摘要</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -462,17 +462,17 @@ onMounted(async () => {
                 :disabled="digestLoading"
                 @click="loadDigest(true)"
               >
-                {{ digestLoading ? 'Loading…' : 'Refresh' }}
+                {{ digestLoading ? '加载中…' : '刷新' }}
               </button>
             </div>
           </div>
         </div>
 
         <div class="p-6 space-y-3">
-          <div v-if="digestLoading" class="text-sm text-surface-500">Loading…</div>
+          <div v-if="digestLoading" class="text-sm text-surface-500">加载中…</div>
           <div v-else-if="digestError" class="text-sm text-red-400">{{ digestError }}</div>
           <div v-else class="prose prose-invert max-w-none">
-            <pre class="whitespace-pre-wrap text-sm bg-surface-900/60 border border-surface-700/50 rounded-xl p-4">{{ digestMarkdown || '(empty)' }}</pre>
+            <pre class="whitespace-pre-wrap text-sm bg-surface-900/60 border border-surface-700/50 rounded-xl p-4">{{ digestMarkdown || '（空）' }}</pre>
           </div>
         </div>
       </div>
@@ -484,8 +484,8 @@ onMounted(async () => {
             <div class="flex items-center gap-3">
               <ListChecks class="w-5 h-5 text-primary-400" />
               <div>
-                <h2 class="font-semibold text-surface-100">SOP Suggestions</h2>
-                <p class="text-sm text-surface-500">Manual review → approve to materialize as personal skills</p>
+                <h2 class="font-semibold text-surface-100">SOP 建议</h2>
+                <p class="text-sm text-surface-500">人工审核 → 通过后可落地为个人技能</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -497,7 +497,7 @@ onMounted(async () => {
               >
                 <span class="inline-flex items-center gap-2">
                   <Wand2 class="w-4 h-4" />
-                  {{ sopLoading ? 'Working…' : 'Generate' }}
+                  {{ sopLoading ? '处理中…' : '生成' }}
                 </span>
               </button>
               <button
@@ -505,7 +505,7 @@ onMounted(async () => {
                 :disabled="sopLoading"
                 @click="loadMoreParkedSuggestions"
               >
-                Load more
+                加载更多
               </button>
             </div>
           </div>
@@ -517,15 +517,15 @@ onMounted(async () => {
                 class="rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs"
                 @change="loadSopSuggestionsList"
               >
-                <option value="proposed">proposed</option>
-                <option value="parked">parked</option>
-                <option value="approved">approved</option>
-                <option value="rejected">rejected</option>
-                <option value="archived">archived</option>
+                <option value="proposed">待处理</option>
+                <option value="parked">搁置</option>
+                <option value="approved">已通过</option>
+                <option value="rejected">已拒绝</option>
+                <option value="archived">已归档</option>
               </select>
               <label class="flex items-center gap-2 text-xs text-surface-400">
                 <input v-model="sopIncludeParked" type="checkbox" class="accent-primary-500" @change="loadSopSuggestionsList" />
-                Include parked
+                包含搁置
               </label>
             </div>
             <button
@@ -533,16 +533,16 @@ onMounted(async () => {
               :disabled="sopLoading"
               @click="loadSopSuggestionsList"
             >
-              Refresh
+              刷新
             </button>
           </div>
         </div>
 
         <div class="p-6 space-y-4">
-          <div v-if="sopLoading" class="text-sm text-surface-500">Loading…</div>
+          <div v-if="sopLoading" class="text-sm text-surface-500">加载中…</div>
           <div v-else-if="sopError" class="text-sm text-red-400">{{ sopError }}</div>
           <div v-else-if="sopItems.length === 0" class="text-sm text-surface-500">
-            No suggestions. Click Generate to propose one from recent receipts.
+            暂无建议。点击“生成”从近期回执中提取一条。
           </div>
           <div v-else class="space-y-4">
             <div v-for="s in sopItems" :key="s.suggestion_id" class="glass-card p-4 space-y-3">
@@ -551,9 +551,9 @@ onMounted(async () => {
                   <p class="text-sm font-semibold text-surface-100 truncate">{{ s.title }}</p>
                   <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-surface-500">
                     <span class="px-2 py-0.5 rounded-full bg-surface-800/70">{{ s.status }}</span>
-                    <span class="px-2 py-0.5 rounded-full bg-surface-800/70">evidence: {{ s.evidence_count }}</span>
-                    <span v-if="s.scores" class="px-2 py-0.5 rounded-full bg-surface-800/70">score: {{ s.scores.total_score.toFixed(2) }}</span>
-                    <span v-if="s.meta?.compression_verdict" class="px-2 py-0.5 rounded-full bg-surface-800/70">depth: {{ s.meta.compression_verdict }}</span>
+                    <span class="px-2 py-0.5 rounded-full bg-surface-800/70">证据：{{ s.evidence_count }}</span>
+                    <span v-if="s.scores" class="px-2 py-0.5 rounded-full bg-surface-800/70">得分：{{ s.scores.total_score.toFixed(2) }}</span>
+                    <span v-if="s.meta?.compression_verdict" class="px-2 py-0.5 rounded-full bg-surface-800/70">深度：{{ s.meta.compression_verdict }}</span>
                   </div>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2">
@@ -563,7 +563,7 @@ onMounted(async () => {
                     :disabled="sopLoading"
                     @click="setSuggestionStatus(s.suggestion_id, 'approved')"
                   >
-                    Approve
+                    通过
                   </button>
                   <button
                     v-if="s.status !== 'rejected' && s.status !== 'merged'"
@@ -571,7 +571,7 @@ onMounted(async () => {
                     :disabled="sopLoading"
                     @click="setSuggestionStatus(s.suggestion_id, 'rejected')"
                   >
-                    Reject
+                    拒绝
                   </button>
                   <button
                     v-if="s.status === 'proposed'"
@@ -579,7 +579,7 @@ onMounted(async () => {
                     :disabled="sopLoading"
                     @click="setSuggestionStatus(s.suggestion_id, 'parked')"
                   >
-                    Park
+                    搁置
                   </button>
                   <button
                     v-if="s.status !== 'archived' && s.status !== 'merged'"
@@ -587,7 +587,7 @@ onMounted(async () => {
                     :disabled="sopLoading"
                     @click="setSuggestionStatus(s.suggestion_id, 'archived')"
                   >
-                    Archive
+                    归档
                   </button>
                   <button
                     v-if="s.status === 'proposed' || s.status === 'parked'"
@@ -596,14 +596,14 @@ onMounted(async () => {
                     :disabled="sopLoading"
                     @click="toggleEdit(s)"
                   >
-                    {{ editOpen[s.suggestion_id] ? 'Close' : 'Edit' }}
+                    {{ editOpen[s.suggestion_id] ? '关闭' : '编辑' }}
                   </button>
                   <button
                     class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-surface-800 text-surface-300 hover:bg-surface-700"
                     :disabled="sopLoading || similarLoading[s.suggestion_id]"
                     @click="loadSimilar(s)"
                   >
-                    {{ similarLoading[s.suggestion_id] ? '…' : 'Similar' }}
+                    {{ similarLoading[s.suggestion_id] ? '…' : '相似' }}
                   </button>
                 </div>
               </div>
@@ -614,14 +614,14 @@ onMounted(async () => {
                   data-testid="sop-edit-title"
                   type="text"
                   class="w-full rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-sm"
-                  placeholder="Title"
+                  placeholder="标题"
                 />
                 <textarea
                   v-model="editDraft[s.suggestion_id].draft_skill"
                   data-testid="sop-edit-draft"
                   rows="8"
                   class="w-full rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs font-mono"
-                  placeholder="Draft skill (SKILL.md body)"
+                  placeholder="草稿技能（SKILL.md 内容）"
                 />
                 <div class="flex justify-end gap-2">
                   <button
@@ -630,13 +630,13 @@ onMounted(async () => {
                     :disabled="sopLoading"
                     @click="saveEdit(s)"
                   >
-                    Save
+                    保存
                   </button>
                 </div>
               </div>
 
               <div v-if="Array.isArray(similarByID[s.suggestion_id]) && similarByID[s.suggestion_id].length > 0" class="rounded-xl bg-surface-900/60 border border-surface-700/50 p-3">
-                <p class="text-xs text-surface-400 mb-2">Similar suggestions</p>
+                <p class="text-xs text-surface-400 mb-2">相似建议</p>
                 <div class="space-y-2">
                   <div v-for="sim in similarByID[s.suggestion_id]" :key="sim.suggestion_id" class="flex items-center justify-between gap-2">
                     <div class="min-w-0">
@@ -649,18 +649,18 @@ onMounted(async () => {
                       :disabled="sopLoading"
                       @click="setSuggestionStatus(s.suggestion_id, 'merged', sim.suggestion_id)"
                     >
-                      Merge into
+                      合并到
                     </button>
                   </div>
                 </div>
               </div>
 
               <details class="rounded-lg bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">Draft</summary>
+                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">草稿</summary>
                 <pre class="whitespace-pre-wrap text-xs text-surface-100 px-3 pb-3">{{ s.draft_skill }}</pre>
               </details>
               <details v-if="s.status === 'approved' && s.meta?.materialized_skill_path" class="rounded-lg bg-surface-900/60 border border-surface-700/50">
-                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">Materialized skill</summary>
+                <summary class="cursor-pointer select-none px-3 py-2 text-xs text-surface-300">已落地技能</summary>
                 <div class="px-3 pb-3 text-xs text-surface-100">
                   <p>skill_id: {{ s.meta.materialized_skill_id }}</p>
                   <p>path: {{ s.meta.materialized_skill_path }}</p>

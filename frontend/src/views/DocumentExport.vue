@@ -65,8 +65,8 @@ const run = async () => {
     <div class="max-w-4xl mx-auto space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-surface-100">Document Export</h1>
-          <p class="text-sm text-surface-500">Export workspace Markdown to Office formats via pandoc.</p>
+          <h1 class="text-2xl font-bold text-surface-100">文档导出</h1>
+          <p class="text-sm text-surface-500">使用 pandoc 将工作区内的 Markdown 导出为 Office 格式。</p>
         </div>
       </div>
 
@@ -78,14 +78,14 @@ const run = async () => {
         <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
           <Download class="w-5 h-5 text-primary-400" />
           <div class="min-w-0">
-            <p class="text-sm font-semibold text-surface-100">Export settings</p>
-            <p class="text-xs text-surface-500">Output path must stay within workspace.</p>
+            <p class="text-sm font-semibold text-surface-100">导出设置</p>
+            <p class="text-xs text-surface-500">输出路径必须位于工作区内。</p>
           </div>
         </div>
 
         <div class="p-5 space-y-4">
           <div class="space-y-2">
-            <label class="text-xs text-surface-500">Workspace</label>
+            <label class="text-xs text-surface-500">工作区</label>
             <div class="flex gap-2">
               <input
                 data-testid="doc-export-workspace"
@@ -99,14 +99,14 @@ const run = async () => {
                 @click="chooseWorkspace"
               >
                 <FolderOpen class="w-4 h-4" />
-                Choose
+                选择
               </button>
             </div>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="space-y-2">
-              <label class="text-xs text-surface-500">Markdown file (relative)</label>
+              <label class="text-xs text-surface-500">Markdown 文件（相对路径）</label>
               <input
                 data-testid="doc-export-input"
                 v-model="inputPath"
@@ -116,7 +116,7 @@ const run = async () => {
             </div>
 
             <div class="space-y-2">
-              <label class="text-xs text-surface-500">Format</label>
+              <label class="text-xs text-surface-500">格式</label>
               <select
                 data-testid="doc-export-format"
                 v-model="format"
@@ -128,7 +128,7 @@ const run = async () => {
             </div>
 
             <div class="space-y-2">
-              <label class="text-xs text-surface-500">Output path (optional, relative)</label>
+              <label class="text-xs text-surface-500">输出路径（可选，相对路径）</label>
               <input
                 data-testid="doc-export-output"
                 v-model="outputPath"
@@ -138,7 +138,7 @@ const run = async () => {
             </div>
 
             <div class="space-y-2">
-              <label class="text-xs text-surface-500">Template path (optional, relative)</label>
+              <label class="text-xs text-surface-500">模板路径（可选，相对路径）</label>
               <input
                 data-testid="doc-export-template"
                 v-model="templatePath"
@@ -155,7 +155,7 @@ const run = async () => {
               :disabled="!canRun || running"
               @click="run"
             >
-              {{ running ? 'Exporting…' : 'Export' }}
+              {{ running ? '正在导出…' : '导出' }}
             </button>
           </div>
         </div>
@@ -163,11 +163,10 @@ const run = async () => {
 
       <div v-if="result" class="glass rounded-2xl overflow-hidden">
         <div class="px-5 py-4 border-b border-surface-700/50">
-          <p class="text-sm font-semibold text-surface-100">Result</p>
+          <p class="text-sm font-semibold text-surface-100">结果</p>
         </div>
         <pre class="p-5 text-xs text-surface-200 overflow-x-auto">{{ JSON.stringify(result, null, 2) }}</pre>
       </div>
     </div>
   </div>
 </template>
-

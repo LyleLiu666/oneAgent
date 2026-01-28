@@ -186,8 +186,8 @@ onMounted(async () => {
     <div class="max-w-6xl mx-auto space-y-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h1 class="text-2xl font-bold text-surface-100">Skill Governance</h1>
-          <p class="text-sm text-surface-500">List skills and archive personal ones (remove from recall)</p>
+          <h1 class="text-2xl font-bold text-surface-100">技能治理</h1>
+          <p class="text-sm text-surface-500">查看技能并归档个人技能（从召回中移除）</p>
         </div>
         <button
           data-testid="skill-governance-refresh"
@@ -196,7 +196,7 @@ onMounted(async () => {
           @click="refresh"
         >
           <RefreshCw class="w-4 h-4" />
-          Refresh
+          刷新
         </button>
       </div>
 
@@ -210,14 +210,14 @@ onMounted(async () => {
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <Wrench class="w-5 h-5 text-primary-400" />
               <div>
-                <p class="text-sm font-semibold text-surface-100">Skills</p>
-                <p class="text-xs text-surface-500">{{ sorted.length }} discovered</p>
+                <p class="text-sm font-semibold text-surface-100">技能</p>
+                <p class="text-xs text-surface-500">已发现 {{ sorted.length }} 个</p>
               </div>
             </div>
 
             <div class="p-5">
-              <div v-if="loading" class="text-sm text-surface-500">Loading…</div>
-              <div v-else-if="sorted.length === 0" class="text-sm text-surface-500">No skills found.</div>
+              <div v-if="loading" class="text-sm text-surface-500">加载中…</div>
+              <div v-else-if="sorted.length === 0" class="text-sm text-surface-500">未找到技能。</div>
               <div v-else class="space-y-3">
                 <button
                   v-for="s in sorted"
@@ -243,7 +243,7 @@ onMounted(async () => {
                       @click.stop="doArchive(s)"
                     >
                       <Archive class="w-4 h-4" />
-                      Archive
+                      归档
                     </button>
                     <span v-else class="text-xs text-surface-600">—</span>
                   </div>
@@ -257,8 +257,8 @@ onMounted(async () => {
             <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">
               <Copy class="w-5 h-5 text-primary-400" />
               <div>
-                <p class="text-sm font-semibold text-surface-100">Duplicates</p>
-                <p class="text-xs text-surface-500">{{ duplicates.length }} groups</p>
+                <p class="text-sm font-semibold text-surface-100">重复项</p>
+                <p class="text-xs text-surface-500">{{ duplicates.length }} 组</p>
               </div>
             </div>
 
@@ -272,14 +272,14 @@ onMounted(async () => {
               <div v-if="duplicatesError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
                 {{ duplicatesError }}
               </div>
-              <div v-else-if="duplicatesLoading" class="text-sm text-surface-500">Loading…</div>
-              <div v-else-if="duplicates.length === 0" class="text-sm text-surface-500">No duplicates found.</div>
+              <div v-else-if="duplicatesLoading" class="text-sm text-surface-500">加载中…</div>
+              <div v-else-if="duplicates.length === 0" class="text-sm text-surface-500">未发现重复项。</div>
               <div v-else class="space-y-3">
                 <div v-for="g in duplicates" :key="g.skill_id" class="glass-card p-4 space-y-3">
                   <div class="flex items-center justify-between gap-4">
                     <div class="min-w-0">
                       <p class="text-sm text-surface-100 font-semibold truncate">id={{ g.skill_id }}</p>
-                      <p class="text-xs text-surface-500">{{ g.candidates.length }} candidates · first effective=true</p>
+                      <p class="text-xs text-surface-500">{{ g.candidates.length }} 个候选 · 第一项 effective=true</p>
                     </div>
                     <div class="shrink-0 flex items-center gap-2">
                       <label class="text-[11px] text-surface-500 inline-flex items-center gap-2">
@@ -289,7 +289,7 @@ onMounted(async () => {
                           v-model="archiveShadowedBySkillID[g.skill_id]"
                           :disabled="duplicatesActionLoading"
                         />
-                        archive shadowed personal
+                        归档被遮蔽的个人技能
                       </label>
                       <button
                         data-testid="duplicate-archive-shadowed"
@@ -298,7 +298,7 @@ onMounted(async () => {
                         @click="doArchiveShadowed(g.skill_id)"
                       >
                         <Layers class="w-4 h-4" />
-                        Archive shadowed
+                        归档遮蔽项
                       </button>
                     </div>
                   </div>
@@ -312,7 +312,7 @@ onMounted(async () => {
                       <div class="min-w-0">
                         <p class="text-xs text-surface-200 truncate">
                           <span class="font-semibold">{{ c.name }}</span>
-                          <span v-if="c.effective" class="ml-2 text-[11px] text-primary-300">effective</span>
+                          <span v-if="c.effective" class="ml-2 text-[11px] text-primary-300">生效</span>
                         </p>
                         <p class="text-[11px] text-surface-500 truncate">
                           source={{ c.source }} · rank={{ c.precedence_rank }} · {{ c.path }}
@@ -327,7 +327,7 @@ onMounted(async () => {
                           @click="doPin(g.skill_id, c)"
                         >
                           <Pin class="w-4 h-4" />
-                          Pin
+                          固定
                         </button>
                         <button
                           v-if="c.archivable"
@@ -337,7 +337,7 @@ onMounted(async () => {
                           @click="doArchive(c)"
                         >
                           <Archive class="w-4 h-4" />
-                          Archive
+                          归档
                         </button>
                         <span v-else class="text-xs text-surface-600">—</span>
                       </div>
@@ -350,7 +350,7 @@ onMounted(async () => {
 
         <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
           <div class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2">
-            <p class="text-sm font-semibold text-surface-100">Editor</p>
+            <p class="text-sm font-semibold text-surface-100">编辑器</p>
             <button
               data-testid="skill-save"
               class="px-3 py-2 rounded-xl text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2 disabled:opacity-50"
@@ -358,7 +358,7 @@ onMounted(async () => {
               @click="saveSelected"
             >
               <Save class="w-4 h-4" />
-              Save
+              保存
             </button>
           </div>
 
@@ -366,13 +366,13 @@ onMounted(async () => {
             {{ selectedError }}
           </div>
 
-          <div v-if="!selected" class="p-6 text-sm text-surface-500">Select a skill to view/edit.</div>
+          <div v-if="!selected" class="p-6 text-sm text-surface-500">选择技能查看/编辑。</div>
           <div v-else class="p-4 space-y-3">
             <div class="text-xs text-surface-500">
               <div>id: <span class="text-surface-200 font-mono">{{ selected.skill_id }}</span></div>
               <div>source: <span class="text-surface-200 font-mono">{{ selected.source }}</span></div>
               <div v-if="selected.sha256">sha: <span class="text-surface-200 font-mono">{{ selected.sha256.slice(0, 12) }}</span></div>
-              <div v-if="!selected.archivable" class="mt-2 text-surface-400">Not editable (only personal skills are editable).</div>
+              <div v-if="!selected.archivable" class="mt-2 text-surface-400">不可编辑（仅个人技能可编辑）。</div>
             </div>
             <textarea
               v-model="editMD"

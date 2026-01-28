@@ -37,13 +37,13 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
         
         <div class="space-y-3">
           <h1 class="text-4xl md:text-5xl font-bold tracking-tight text-[var(--color-text-main)]">
-            <span class="text-[var(--color-text-muted)]">Hello, </span>
+            <span class="text-[var(--color-text-muted)]">你好，</span>
             <span class="text-primary-600 dark:text-primary-400">
-              {{ user?.name || user?.username || 'User' }}
+              {{ user?.name || user?.username || '用户' }}
             </span>
           </h1>
           <p class="text-lg text-surface-400 max-w-lg mx-auto leading-relaxed">
-            I'm your advanced AI assistant. Ready to help you with coding, writing, analysis, and more.
+            我是你的 AI 助手，随时帮你完成编程、写作、分析等工作。
           </p>
         </div>
       </div>
@@ -55,7 +55,7 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
               <div class="flex items-center gap-2 text-surface-200">
                 <Folder class="w-4 h-4 text-surface-400" />
                 <p class="text-sm font-semibold">
-                  {{ hasWorkspace ? 'Workspace ready' : 'Choose a workspace' }}
+                  {{ hasWorkspace ? '工作区就绪' : '选择工作区' }}
                 </p>
               </div>
               <p v-if="hasWorkspace" class="mt-2 text-xs text-surface-400 break-words">
@@ -63,7 +63,7 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
                 <span v-if="workspaceSource" class="text-surface-500"> · {{ workspaceSource }}</span>
               </p>
               <p v-else class="mt-2 text-xs text-surface-400">
-                Pick a folder to enable file/search/command tools. Or skip for chat-only mode.
+                选择一个文件夹以启用文件/搜索/命令等工具；也可以跳过进入纯聊天模式。
               </p>
               <p v-if="workspaceChooseError" class="mt-2 text-xs text-red-400">
                 {{ workspaceChooseError }}
@@ -80,20 +80,20 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
                 type="button"
                 class="inline-flex items-center gap-2 rounded-lg bg-surface-900 text-surface-200 text-xs sm:text-sm px-3 py-2 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
                 :disabled="workspaceChoosing"
-                title="Choose workspace folder"
+                title="选择工作区文件夹"
                 @click="emit('choose-workspace')"
               >
                 <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
-                <span v-else>Browse</span>
+                <span v-else>选择文件夹</span>
               </button>
               <button
                 v-if="!hasWorkspace"
                 type="button"
                 class="inline-flex items-center gap-2 rounded-lg bg-surface-900 text-surface-300 text-xs sm:text-sm px-3 py-2 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-                title="Skip workspace (chat only)"
+                title="跳过工作区（仅聊天）"
                 @click="emit('skip-workspace')"
               >
-                Skip
+                跳过
               </button>
             </div>
           </div>

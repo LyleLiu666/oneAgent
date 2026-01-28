@@ -155,7 +155,7 @@ it('shows updates when a task finishes after baseline', async () => {
   await flushPromises()
 
   expect(wrapper.find('[data-testid=\"task-updates\"]').exists()).toBe(true)
-  expect(wrapper.text()).toContain('Updates')
+  expect(wrapper.text()).toContain('更新')
   expect(wrapper.text()).toContain('succeeded')
 
   wrapper.unmount()

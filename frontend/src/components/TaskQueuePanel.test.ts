@@ -74,7 +74,7 @@ it('loads tasks for workspace and shows details after selection', async () => {
 
     expect(apiClient.getTask).toHaveBeenCalledWith('task-1')
     expect(apiClient.getTaskEvents).toHaveBeenCalledWith('task-1')
-    expect(wrapper.text()).toContain('Observer')
+    expect(wrapper.text()).toContain('观察者')
     expect(wrapper.text()).toContain('succeeded')
 
     wrapper.unmount()
@@ -192,11 +192,11 @@ it('shows updates when a task finishes after baseline', async () => {
         },
     ])
 
-    await wrapper.get('button[title="Refresh"]').trigger('click')
+    await wrapper.get('[data-testid="tasks-refresh"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.find('[data-testid="task-updates"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Updates')
+    expect(wrapper.text()).toContain('更新')
     expect(wrapper.text()).toContain('succeeded')
 
     wrapper.unmount()

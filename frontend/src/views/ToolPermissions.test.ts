@@ -34,7 +34,7 @@ it('loads tools, tokens, and policy on mount', async () => {
   expect(apiClient.getTools).toHaveBeenCalled()
   expect(apiClient.listAuthTokens).toHaveBeenCalled()
   expect(apiClient.getToolPolicy).toHaveBeenCalled()
-  expect(wrapper.text()).toContain('Tool Permissions')
+  expect(wrapper.text()).toContain('工具权限')
 
   wrapper.unmount()
 })
@@ -71,4 +71,3 @@ it('saves policy JSON via setToolPolicy', async () => {
 
   wrapper.unmount()
 })
-

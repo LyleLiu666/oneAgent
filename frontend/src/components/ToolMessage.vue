@@ -173,8 +173,8 @@ const formatMaybeJson = (raw: string): string => {
                 </div>
                 <div v-if="r.error" class="text-xs text-red-400">{{ r.error }}</div>
                 <div v-if="r.error && checkPermissionDenied(r.error)" class="text-xs text-surface-400 mt-2">
-                  Blocked by tool permissions.
-                  <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">Tool Permissions</a>
+                  被工具权限拦截。
+                  <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">工具权限</a>
                 </div>
               </div>
             </div>
@@ -189,13 +189,13 @@ const formatMaybeJson = (raw: string): string => {
               </div>
               <div v-if="message.tool?.error" class="text-xs text-red-400">{{ message.tool.error }}</div>
               <div v-if="message.tool?.error && isPermissionDenied" class="text-xs text-surface-400">
-                Blocked by tool permissions.
-                <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">Tool Permissions</a>
+                被工具权限拦截。
+                <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">工具权限</a>
               </div>
             </div>
           </template>
           <template v-else>
-            <div class="text-xs text-surface-500">Unsupported message type</div>
+            <div class="text-xs text-surface-500">不支持的消息类型</div>
           </template>
         </div>
       </div>
