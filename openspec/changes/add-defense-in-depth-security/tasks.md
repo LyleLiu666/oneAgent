@@ -7,6 +7,6 @@
 - [x] 1.6 Implement suspicious pattern detection + security alert logging
 - [x] 1.7 Add model `safety_tier` and gate high-risk tools by tier
 - [x] 1.8 Add `sandbox_mode` for command tools (docker optional)
-- [ ] 1.9 Clarify network exposure defaults (loopback warning + doctor + UI)
+- [x] 1.9 Clarify network exposure defaults (loopback warning + doctor + UI)
 - [ ] 1.10 Add tests for security invariants (prompt constraints, deny enforcement, warnings)
 - [ ] 1.11 Run `openspec validate add-defense-in-depth-security --strict --no-interactive` and keep tests green

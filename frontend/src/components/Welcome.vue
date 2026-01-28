@@ -11,6 +11,7 @@ const props = defineProps<{
   showWorkspacePrompt?: boolean
   workspaceChoosing?: boolean
   workspaceChooseError?: string
+  runtimeWarnings?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -67,6 +68,11 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
               <p v-if="workspaceChooseError" class="mt-2 text-xs text-red-400">
                 {{ workspaceChooseError }}
               </p>
+              <div v-if="Array.isArray(runtimeWarnings) && runtimeWarnings.length > 0" class="mt-2 space-y-1">
+                <p v-for="(w, idx) in runtimeWarnings" :key="idx" class="text-xs text-amber-400">
+                  {{ w }}
+                </p>
+              </div>
             </div>
 
             <div class="flex items-center gap-2 shrink-0">

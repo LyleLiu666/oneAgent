@@ -13,6 +13,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/handler"
 	"github.com/liu_y/oneAgent/backend/internal/learning"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
+	"github.com/liu_y/oneAgent/backend/internal/netutil"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/web"
 )
@@ -199,6 +200,9 @@ func Serve(rt *runtime.Runtime) error {
 	}
 
 	addr := fmt.Sprintf("%s:%s", rt.Config.Bind, rt.Config.Port)
+	if !netutil.IsLoopbackBind(rt.Config.Bind) {
+		log.Printf("WARNING: Server bind=%s is non-loopback and may expose your local agent to the network. Prefer bind=127.0.0.1.", rt.Config.Bind)
+	}
 	log.Printf("Server starting on %s", addr)
 	return router.Run(addr)
 }

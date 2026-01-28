@@ -39,6 +39,7 @@ const sessionPolicyResolvedAt = ref('')
 
 const runtimeConfigLoading = ref(false)
 const runtimeConfigError = ref('')
+const runtimeWarnings = ref<string[]>([])
 const serverDefaultWorkspace = ref('')
 const serverBaseURL = ref('')
 
@@ -316,14 +317,19 @@ const applyWorkspaceDefaultsForNewSession = () => {
 const loadRuntimeConfig = async () => {
   runtimeConfigLoading.value = true
   runtimeConfigError.value = ''
+  runtimeWarnings.value = []
   try {
     const raw: any = await getConfig()
     serverDefaultWorkspace.value =
       typeof raw?.default_workspace === 'string' ? String(raw.default_workspace) : ''
     serverBaseURL.value = typeof raw?.base_url === 'string' ? String(raw.base_url) : ''
+    runtimeWarnings.value = Array.isArray(raw?.warnings)
+      ? raw.warnings.map((w: any) => String(w)).filter((w: string) => Boolean(w.trim()))
+      : []
   } catch (error) {
     const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to load runtime config.'
     runtimeConfigError.value = String(msg)
+    runtimeWarnings.value = []
     console.error('Failed to load runtime config:', error)
   } finally {
     runtimeConfigLoading.value = false
@@ -1167,6 +1173,7 @@ onUnmounted(() => {
           :show-workspace-prompt="workspaceOnboardingBlocking"
           :workspace-choosing="workspaceChoosing"
           :workspace-choose-error="workspacePromptError"
+          :runtime-warnings="runtimeWarnings"
           @choose-workspace="chooseWorkspace"
           @skip-workspace="skipWorkspaceOnboarding"
           @select="handleWelcomeSelect"

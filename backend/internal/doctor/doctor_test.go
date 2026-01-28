@@ -53,3 +53,35 @@ func TestDoctor_ReportIncludesRgFallbackNote(t *testing.T) {
 		t.Fatalf("doctor output leaked auth token")
 	}
 }
+
+func TestDoctor_ReportIncludesNetworkExposureWarning(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "0.0.0.0",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "token",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	lookPath := func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	}
+
+	report, err := Check(context.Background(), rt, lookPath)
+	if err != nil {
+		t.Fatalf("doctor check: %v", err)
+	}
+
+	formatted := Format(report)
+	if !strings.Contains(formatted, "WARNING: bind=0.0.0.0") {
+		t.Fatalf("expected network warning, got:\n%s", formatted)
+	}
+}

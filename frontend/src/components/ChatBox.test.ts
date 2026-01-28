@@ -8,7 +8,7 @@ import * as apiClient from '@/api/client'
 
 vi.mock('@/api/client', () => ({
     streamChat: vi.fn(),
-    getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '' })),
+    getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
     getSessions: vi.fn(async () => []),
     getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
     truncateSession: vi.fn(),

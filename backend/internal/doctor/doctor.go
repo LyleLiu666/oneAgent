@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/buildinfo"
+	"github.com/liu_y/oneAgent/backend/internal/netutil"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
@@ -81,6 +82,9 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 		report.Notes = append(report.Notes, "runtime health check failed: "+err.Error())
 	} else if health.Status != "" && health.Status != "healthy" {
 		report.Status = health.Status
+	}
+	if !netutil.IsLoopbackBind(rt.Config.Bind) {
+		report.Notes = append(report.Notes, fmt.Sprintf("WARNING: bind=%s is non-loopback and may expose your local agent to the network (prefer bind=127.0.0.1).", rt.Config.Bind))
 	}
 
 	bashCheck := checkBinary(lookPath, "bash", true)

@@ -272,6 +272,7 @@ export async function getTools() {
 export interface RuntimeConfig {
     default_workspace?: string
     base_url?: string
+    warnings?: string[]
 }
 
 export async function getConfig(): Promise<RuntimeConfig> {
