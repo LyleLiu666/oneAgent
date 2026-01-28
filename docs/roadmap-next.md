@@ -13,7 +13,6 @@
 
 当前待实现的 changes（未完成）：
 - `add-edit-v2-tool`（可解释/可证明编辑）
-- `add-code-intelligence-tools`（LSP/AST 语义工具）
 - `add-prompt-assetization`（提示词资产化 + 测试）
 - `add-office-export`（Markdown → Office 导出）
 
@@ -21,6 +20,7 @@
 - `add-cost-governance-limits`
 - `add-task-evidence-policy`
 - `add-skill-governance-merge`
+- `add-code-intelligence-tools`
 
 ### 0.2 交付风险：工作区未提交变更
 在进入下一阶段前，必须先把本地改动整理为可回滚的提交（否则“可复现/可推广”不成立）。
@@ -102,7 +102,6 @@
 
 ## 5) 执行顺序（下一步从这里开始）
 以 `openspec list` 中 active changes 为准，建议顺序：
-1) `add-code-intelligence-tools`（语义工具地基）
-2) `add-edit-v2-tool`（建立“可证明编辑”的可靠路径）
-3) `add-prompt-assetization`（可复用资产 + 测试）
-4) `add-office-export`（最后一公里导出）
+1) `add-edit-v2-tool`（建立“可证明编辑”的可靠路径）
+2) `add-prompt-assetization`（可复用资产 + 测试）
+3) `add-office-export`（最后一公里导出）
