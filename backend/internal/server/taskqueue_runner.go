@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/liu_y/oneAgent/backend/internal/handler"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
@@ -89,6 +89,17 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		if err != nil {
 			return taskqueue.AttemptResult{}, err
 		}
+
+		toolNames := make([]string, 0, len(defs))
+		for _, def := range defs {
+			toolNames = append(toolNames, def.Spec.Function.Name)
+		}
+		assembled, err := prompt.AssembleStablePrefix(prompt.AssembleInput{ToolNames: toolNames})
+		if err != nil {
+			return taskqueue.AttemptResult{}, err
+		}
+		systemPrompt := assembled.StablePrefix
+
 		tools := tool.ToolsForLLM(defs)
 		handlers := make(map[string]subagent.ToolHandler, len(defs))
 		for _, def := range defs {
@@ -122,7 +133,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		req := subagent.RunRequest{
 			ParentSessionID:   task.ID,
 			UserID:            userID,
-			SystemPrompt:      handler.DefaultSystemPrompt,
+			SystemPrompt:      systemPrompt,
 			Client:            client,
 			Tools:             tools,
 			Handlers:          handlers,

@@ -41,6 +41,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/llmlog"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
@@ -198,11 +199,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		sessionID = uuid.New().String()
 	}
 
-	// Add system prompt
-	systemPrompt := DefaultSystemPrompt
-	if req.SystemPrompt != "" {
-		systemPrompt = req.SystemPrompt
-	}
+	baseOverride := strings.TrimSpace(req.SystemPrompt)
+	systemPrompt := ""
 
 	// Ensure session exists and get history
 	title := truncateString(req.Message, 100)
@@ -277,6 +275,20 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
+
+	toolNames := make([]string, 0, len(toolDefs))
+	for _, def := range toolDefs {
+		toolNames = append(toolNames, def.Spec.Function.Name)
+	}
+	assembled, err := prompt.AssembleStablePrefix(prompt.AssembleInput{
+		BaseOverride: baseOverride,
+		ToolNames:    toolNames,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	systemPrompt = assembled.StablePrefix
 
 	// Build conversation history (include persisted tool calls/results for KV cache and correctness).
 	messages := make([]llm.ChatMessage, 0, 1+len(persistedMessages)+1)

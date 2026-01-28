@@ -1,0 +1,5 @@
+## write_file 工具使用说明（简版）
+- 用于写入/新建文件（创建/覆盖或追加）。
+- 大文件用 `append=true` 分段追加写入（每段建议 ≤3000 字）。
+- 需要 OCC 时使用 `preconditions.expected_sha256`（不匹配则拒绝写入）。
+
