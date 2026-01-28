@@ -76,6 +76,7 @@ func newDefinition(id string, spec llm.Tool, handler Handler) Definition {
 var registry = map[string]Definition{
 	ToolIDBash:       bashDefinition(),
 	ToolIDEdit:       smartEditDefinition(),
+	ToolIDEditV2:     editV2Definition(),
 	ToolIDGlob:       globDefinition(),
 	ToolIDLSPDefinition:    lspDefinitionDefinition(),
 	ToolIDLSPReferences:    lspReferencesDefinition(),
