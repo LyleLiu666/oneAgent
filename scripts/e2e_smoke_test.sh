@@ -31,6 +31,7 @@ trap cleanup EXIT
 echo "[e2e] start server: port=${PORT}"
 ONEAGENT_HOME="${HOME_DIR}" \
   ONEAGENT_DISABLE_DAILY_LEARNING=1 \
+  ONEAGENT_PANDOC_CMD=pandoc-does-not-exist \
   "${ROOT_DIR}/dist/oneagent" serve --auth-mode none --bind 127.0.0.1 --port "${PORT}" --workspace "${WS_DIR}" >/tmp/oneagent_e2e.log 2>&1 &
 SERVER_PID=$!
 
@@ -48,6 +49,7 @@ PORT="${PORT}" WS_DIR="${WS_DIR}" python3 - <<'PY'
 import json
 import os
 import urllib.request
+import urllib.error
 
 port = os.environ["PORT"]
 ws_dir = os.environ["WS_DIR"]
@@ -60,6 +62,32 @@ got_ws = os.path.realpath(str(data.get("default_workspace", "")))
 assert got_ws == expected_ws, data
 assert data.get("base_url") == f"http://localhost:{port}", data
 print("[e2e] /api/config OK")
+
+# Document export should fail with actionable message when pandoc is missing.
+report_md = os.path.join(ws_dir, "report.md")
+with open(report_md, "w", encoding="utf-8") as f:
+    f.write("# hello\n")
+
+req = urllib.request.Request(
+    f"http://127.0.0.1:{port}/api/documents/export",
+    method="POST",
+    headers={"Content-Type": "application/json"},
+    data=json.dumps(
+        {
+            "workspace": ws_dir,
+            "input_path": "report.md",
+            "format": "docx",
+        }
+    ).encode("utf-8"),
+)
+try:
+    with urllib.request.urlopen(req) as r:
+        raise AssertionError(f"expected error, got status={r.status}")
+except urllib.error.HTTPError as e:
+    payload = json.loads(e.read().decode("utf-8"))
+    msg = str(payload.get("error", "")).lower()
+    assert "pandoc" in msg and "doctor" in msg, payload
+    print("[e2e] POST /api/documents/export missing pandoc OK")
 
 # Work ledger digest should always be readable.
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ledger/digests/today") as r:

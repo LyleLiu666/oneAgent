@@ -52,6 +52,12 @@ const routes = [
     component: () => import("@/views/ToolPermissions.vue"),
     meta: { requiresAuth: true },
   },
+  {
+    path: "/documents/export",
+    name: "Document Export",
+    component: () => import("@/views/DocumentExport.vue"),
+    meta: { requiresAuth: true },
+  },
 
   {
     path: "/:pathMatch(.*)*",

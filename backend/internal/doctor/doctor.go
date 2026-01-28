@@ -169,6 +169,17 @@ func installHint(binary string) string {
 		return "go install golang.org/x/tools/gopls@latest"
 	case "typescript-language-server":
 		return "npm i -g typescript typescript-language-server"
+	case "pandoc":
+		switch stdruntime.GOOS {
+		case "windows":
+			return "choco install pandoc (or winget install Pandoc)"
+		case "darwin":
+			return "brew install pandoc"
+		case "linux":
+			return "install pandoc via your package manager (apt/yum/pacman)"
+		default:
+			return "install pandoc"
+		}
 	}
 	osName := stdruntime.GOOS
 	switch osName {

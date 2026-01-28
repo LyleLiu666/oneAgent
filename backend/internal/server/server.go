@@ -106,6 +106,9 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Tool metadata.
 		api.GET("/tools", handler.ListTools)
 
+		// Document export (pandoc).
+		api.POST("/documents/export", handler.ExportDocument)
+
 		// Admin (local-only).
 		api.GET("/admin/tokens", handler.ListAuthTokens)
 		api.POST("/admin/tokens", handler.CreateAuthToken)

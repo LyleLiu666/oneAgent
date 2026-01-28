@@ -12,7 +12,7 @@
 - **待实现（Active changes）**：剩余特性已全部落为 OpenSpec changes（proposal/tasks/specs）
 
 当前待实现的 changes（未完成）：
-- `add-office-export`（Markdown → Office 导出）
+- （暂无）
 
 已完成并归档（2026-01-28）：
 - `add-cost-governance-limits`
@@ -21,6 +21,7 @@
 - `add-code-intelligence-tools`
 - `add-edit-v2-tool`
 - `add-prompt-assetization`
+- `add-office-export`
 
 ### 0.2 交付风险：工作区未提交变更
 在进入下一阶段前，必须先把本地改动整理为可回滚的提交（否则“可复现/可推广”不成立）。

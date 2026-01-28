@@ -282,6 +282,24 @@ export async function chooseWorkspaceDir() {
     return api('/api/workspace/choose', { method: 'POST' })
 }
 
+// ============================================================================
+// Document Export
+// ============================================================================
+
+export type DocumentExportFormat = 'docx' | 'pptx'
+
+export interface DocumentExportRequest {
+    workspace: string
+    input_path: string
+    format: DocumentExportFormat
+    output_path?: string
+    template_path?: string
+}
+
+export async function exportDocument(payload: DocumentExportRequest) {
+    return api('/api/documents/export', { method: 'POST', body: payload })
+}
+
 export async function createModel(payload: {
     provider_id: string
     name: string
