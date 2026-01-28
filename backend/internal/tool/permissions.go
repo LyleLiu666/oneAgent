@@ -81,6 +81,13 @@ func CommandProfile(dec permissions.Decision, fallback string) string {
 	return strings.TrimSpace(fallback)
 }
 
+func SandboxMode(dec permissions.Decision, fallback string) string {
+	if strings.TrimSpace(dec.Constraints.SandboxMode) != "" {
+		return strings.TrimSpace(dec.Constraints.SandboxMode)
+	}
+	return strings.TrimSpace(fallback)
+}
+
 func newPolicyDenyError(toolID string, snap permissions.Snapshot, dec permissions.Decision) *PolicyDenyError {
 	toolID = strings.TrimSpace(toolID)
 	policyID := strings.TrimSpace(snap.Policy.ID)

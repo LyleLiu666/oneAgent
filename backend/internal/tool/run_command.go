@@ -37,6 +37,7 @@ const (
 type RunCommandResult struct {
 	JobID            string           `json:"job_id"`
 	Status           RunCommandStatus `json:"status"`
+	SandboxMode      string           `json:"sandbox_mode,omitempty"`
 	StdoutDelta      string           `json:"stdout_delta,omitempty"`
 	StderrDelta      string           `json:"stderr_delta,omitempty"`
 	StdoutBaseOffset int              `json:"stdout_base_offset"`
@@ -150,12 +151,19 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if err := permissions.ValidateCommand(profile, command, dec.Constraints.Allowlist); err != nil {
 			return nil, err
 		}
+		mode := strings.ToLower(strings.TrimSpace(SandboxMode(dec, "none")))
+		if mode == "" {
+			mode = "none"
+		}
+		if mode != "none" && mode != "docker" {
+			return nil, errors.New("unsupported sandbox_mode (expected none|docker)")
+		}
 		root, err := resolveWorkspaceRoot(ctx)
 		if err != nil {
 			return nil, err
 		}
 		maxRuntime := time.Duration(req.MaxRuntimeSeconds) * time.Second
-		jobID, err := shell.StartBashAsync(command, maxRuntime, root)
+		jobID, err := shell.StartBashAsyncWithSandbox(command, maxRuntime, root, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -194,6 +202,7 @@ func toRunCommandResult(poll shell.AsyncBashPollResult) RunCommandResult {
 	return RunCommandResult{
 		JobID:            poll.JobID,
 		Status:           RunCommandStatus(poll.Status),
+		SandboxMode:      poll.SandboxMode,
 		StdoutDelta:      poll.StdoutDelta,
 		StderrDelta:      poll.StderrDelta,
 		StdoutBaseOffset: poll.StdoutBaseOffset,

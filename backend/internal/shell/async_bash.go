@@ -41,6 +41,7 @@ type AsyncBashPollResult struct {
 	Status           AsyncBashStatus `json:"status"`
 	Command          string          `json:"command"`
 	Shell            string          `json:"shell"`
+	SandboxMode      string          `json:"sandbox_mode,omitempty"`
 	StdoutDelta      string          `json:"stdout_delta,omitempty"`
 	StderrDelta      string          `json:"stderr_delta,omitempty"`
 	StdoutBaseOffset int             `json:"stdout_base_offset"`
@@ -236,6 +237,7 @@ type asyncBashJob struct {
 	id         string
 	command    string
 	shell      string
+	sandbox    string
 	startedAt  time.Time
 	maxRuntime time.Duration
 	cmd        *exec.Cmd
@@ -268,7 +270,11 @@ func newAsyncBashManager() *asyncBashManager {
 var defaultAsyncBashManager = newAsyncBashManager()
 
 func StartBashAsync(command string, maxRuntime time.Duration, rootDir string) (string, error) {
-	return defaultAsyncBashManager.start(command, maxRuntime, rootDir)
+	return StartBashAsyncWithSandbox(command, maxRuntime, rootDir, "none")
+}
+
+func StartBashAsyncWithSandbox(command string, maxRuntime time.Duration, rootDir string, sandboxMode string) (string, error) {
+	return defaultAsyncBashManager.start(command, maxRuntime, rootDir, sandboxMode)
 }
 
 func PollBashAsync(ctx context.Context, jobID string, wait time.Duration, stdoutOffset, stderrOffset, maxDeltaBytes int) (AsyncBashPollResult, error) {
@@ -306,7 +312,7 @@ func (m *asyncBashManager) delete(jobID string) {
 	}
 }
 
-func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootDir string) (string, error) {
+func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootDir string, sandboxMode string) (string, error) {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return "", errors.New("command is required")
@@ -317,13 +323,38 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		return "", err
 	}
 
+	mode := strings.ToLower(strings.TrimSpace(sandboxMode))
+	if mode == "" {
+		mode = "none"
+	}
+	if mode != "none" && mode != "docker" {
+		return "", fmt.Errorf("unsupported sandbox_mode: %s", mode)
+	}
+	if mode == "docker" {
+		if err := rejectAbsolutePathsForDocker(trimmed); err != nil {
+			return "", err
+		}
+	}
+
 	if err := GuardCommand(trimmed, root); err != nil {
 		return "", err
 	}
 
-	shellPath, err := ResolveBashPath()
-	if err != nil {
-		return "", err
+	shellPath := ""
+	var dockerPath string
+	if mode == "docker" {
+		got, err := ensureDockerAvailable()
+		if err != nil {
+			return "", err
+		}
+		dockerPath = got
+		shellPath = "docker"
+	} else {
+		got, err := ResolveBashPath()
+		if err != nil {
+			return "", err
+		}
+		shellPath = got
 	}
 
 	if maxRuntime <= 0 {
@@ -344,17 +375,37 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		return "", fmt.Errorf("failed to prepare run_command dir: %w", err)
 	}
 
-	cmd := exec.Command(shellPath, "--noprofile", "--norc", "-lc", trimmed)
-	cmd.Dir = root
-	cmd.Env = mergeEnv(os.Environ(), map[string]string{
-		"HOME":          root,
-		"PWD":           root,
-		"BASH_ROOT_DIR": root,
-		"TMPDIR":        tmpDir,
-		"TMP":           tmpDir,
-		"TEMP":          tmpDir,
-		"BASH_ENV":      "",
-	})
+	var cmd *exec.Cmd
+	if mode == "docker" {
+		args := []string{
+			"run",
+			"--rm",
+			"--network", "none",
+			"-v", fmt.Sprintf("%s:/workspace", root),
+			"-w", "/workspace",
+			"-e", "HOME=/workspace",
+			"-e", "PWD=/workspace",
+			"-e", "BASH_ROOT_DIR=/workspace",
+			"-e", "BASH_ENV=",
+			dockerSandboxImage(),
+			"bash", "--noprofile", "--norc", "-lc", trimmed,
+		}
+		cmd = exec.Command(dockerPath, args...)
+		cmd.Dir = root
+		cmd.Env = os.Environ()
+	} else {
+		cmd = exec.Command(shellPath, "--noprofile", "--norc", "-lc", trimmed)
+		cmd.Dir = root
+		cmd.Env = mergeEnv(os.Environ(), map[string]string{
+			"HOME":          root,
+			"PWD":           root,
+			"BASH_ROOT_DIR": root,
+			"TMPDIR":        tmpDir,
+			"TMP":           tmpDir,
+			"TEMP":          tmpDir,
+			"BASH_ENV":      "",
+		})
+	}
 	setupCmdForProcessGroup(cmd)
 
 	notifyCh := make(chan struct{}, 1)
@@ -384,6 +435,7 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		id:         jobID,
 		command:    trimmed,
 		shell:      shellPath,
+		sandbox:    mode,
 		startedAt:  time.Now(),
 		maxRuntime: maxRuntime,
 		cmd:        cmd,
@@ -511,6 +563,7 @@ func (m *asyncBashManager) poll(ctx context.Context, jobID string, wait time.Dur
 		startedAt := job.startedAt
 		command := job.command
 		shellPath := job.shell
+		sandboxMode := job.sandbox
 		notifyCh := job.notifyCh
 		job.mu.Unlock()
 
@@ -546,6 +599,7 @@ func (m *asyncBashManager) poll(ctx context.Context, jobID string, wait time.Dur
 			Status:           status,
 			Command:          command,
 			Shell:            shellPath,
+			SandboxMode:      sandboxMode,
 			StdoutDelta:      string(stdoutBytes),
 			StderrDelta:      string(stderrBytes),
 			StdoutBaseOffset: stdoutBaseOffset,

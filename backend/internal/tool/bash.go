@@ -19,6 +19,7 @@ type bashToolRequest struct {
 
 type BashToolResult struct {
 	Shell           string `json:"shell"`
+	SandboxMode     string `json:"sandbox_mode,omitempty"`
 	Stdout          string `json:"stdout"`
 	Stderr          string `json:"stderr"`
 	ExitCode        int    `json:"exit_code"`
@@ -74,6 +75,13 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err := permissions.ValidateCommand(profile, req.Command, dec.Constraints.Allowlist); err != nil {
 		return nil, err
 	}
+	mode := strings.ToLower(strings.TrimSpace(SandboxMode(dec, "none")))
+	if mode == "" {
+		mode = "none"
+	}
+	if mode != "none" && mode != "docker" {
+		return nil, errors.New("unsupported sandbox_mode (expected none|docker)")
+	}
 
 	root, err := resolveWorkspaceRoot(ctx)
 	if err != nil {
@@ -81,13 +89,19 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
-	result, err := shell.RunBash(ctx, req.Command, timeout, root, "")
+	var result shell.Result
+	if mode == "docker" {
+		result, err = shell.RunBashDocker(ctx, req.Command, timeout, root)
+	} else {
+		result, err = shell.RunBash(ctx, req.Command, timeout, root, "")
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	return BashToolResult{
 		Shell:           result.Shell,
+		SandboxMode:     mode,
 		Stdout:          result.Stdout,
 		Stderr:          result.Stderr,
 		ExitCode:        result.ExitCode,

@@ -28,6 +28,7 @@ type Constraints struct {
 	ReadOutsideWorkspace *bool    `json:"read_outside_workspace,omitempty"`
 	CommandProfile       string   `json:"command_profile,omitempty"`
 	Allowlist            []string `json:"allowlist,omitempty"`
+	SandboxMode          string   `json:"sandbox_mode,omitempty"`
 }
 
 type Policy struct {
@@ -45,10 +46,10 @@ type Decision struct {
 }
 
 type Snapshot struct {
-	Policy      Policy   `json:"policy"`
-	PolicyHash  string   `json:"policy_hash"`
-	ResolvedAt  string   `json:"resolved_at"`
-	PrincipalID string   `json:"principal_id"`
+	Policy      Policy `json:"policy"`
+	PolicyHash  string `json:"policy_hash"`
+	ResolvedAt  string `json:"resolved_at"`
+	PrincipalID string `json:"principal_id"`
 }
 
 func DefaultPolicy() Policy {
@@ -165,4 +166,3 @@ func isToolDisabledByEnv(id string) bool {
 	v := strings.TrimSpace(os.Getenv(toolDisableEnvVar(id)))
 	return v == "1" || strings.EqualFold(v, "true")
 }
-
