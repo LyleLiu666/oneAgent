@@ -47,10 +47,10 @@ func AllowedCommands(profile string) map[string]struct{} {
 		}
 	default:
 		return map[string]struct{}{
-			"ls":  {},
-			"cat": {},
-			"rg":  {},
-			"pwd": {},
+			"ls":   {},
+			"cat":  {},
+			"rg":   {},
+			"pwd":  {},
 			"echo": {},
 		}
 	}
@@ -64,6 +64,9 @@ func ValidateCommand(profile string, command string, allowlist []string) error {
 	profile = strings.TrimSpace(strings.ToLower(profile))
 	if profile == "" {
 		profile = "dev"
+	}
+	if profile == "readonly" && containsRedirectionOutsideQuotes(command) {
+		return fmt.Errorf("command not allowed by profile=%s: redirection", profile)
 	}
 
 	allowed := AllowedCommands(profile)
@@ -142,4 +145,33 @@ func isSeparatorToken(token string) bool {
 
 func isAssignmentToken(token string) bool {
 	return strings.Contains(token, "=") && !strings.HasPrefix(token, "./") && !strings.HasPrefix(token, "/")
+}
+
+func containsRedirectionOutsideQuotes(command string) bool {
+	inSingle := false
+	inDouble := false
+	escaped := false
+	for _, r := range command {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch r {
+		case '\\':
+			escaped = true
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '<', '>':
+			if !inSingle && !inDouble {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -16,7 +16,7 @@
 ## 4. Command Tools Hardening
 - [x] 4.1 Replace `ONEAGENT_BASH_ALLOW_RM` with policy-backed command profiles (e.g., readonly/dev/full)
 - [x] 4.2 Prefer allowlist over blacklist for `bash`/`run_command` executables
-- [ ] 4.3 Add regression tests for bypass patterns (scripts/interpreters/indirect deletes)
+- [x] 4.3 Add regression tests for bypass patterns (scripts/interpreters/indirect deletes)
 
 ## 5. UI / UX
 - [ ] 5.1 Add Tool Permissions workbench (view/edit policies; view effective permissions)
