@@ -113,3 +113,87 @@ func TestServer_SkillsAPI_ListAndArchive(t *testing.T) {
 	}
 }
 
+func TestServer_SkillsAPI_GetAndUpdateWithOCC(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	skillPath := filepath.Join(home, ".oneagent", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo-skill\ndescription: demo\n---\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	// Get includes sha256 + skill_md.
+	res, err := http.Get(srv.URL + "/api/skills/demo-skill")
+	if err != nil {
+		t.Fatalf("GET /api/skills/:id: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/skills/:id status=%d", res.StatusCode)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	sha := got["sha256"].(string)
+	if sha == "" {
+		t.Fatalf("expected sha256")
+	}
+
+	// Update with wrong sha -> conflict.
+	b, _ := json.Marshal(map[string]any{"skill_md": "# x\n", "expected_sha256": "deadbeef"})
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/skills/demo-skill", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /api/skills/:id: %v", err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", res2.StatusCode)
+	}
+
+	// Update with correct sha -> ok.
+	b, _ = json.Marshal(map[string]any{"skill_md": "---\nname: demo-skill\n---\nupdated\n", "expected_sha256": sha})
+	req, _ = http.NewRequest(http.MethodPut, srv.URL+"/api/skills/demo-skill", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	res3, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT /api/skills/:id(2): %v", err)
+	}
+	defer res3.Body.Close()
+	if res3.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res3.StatusCode)
+	}
+	var updated map[string]any
+	_ = json.NewDecoder(res3.Body).Decode(&updated)
+	if updated["sha256"] == sha {
+		t.Fatalf("expected sha256 to change")
+	}
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected skill to exist: %v", err)
+	}
+}

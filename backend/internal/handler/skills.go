@@ -2,6 +2,8 @@ package handler
 
 import (
 	"errors"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
+	"github.com/liu_y/oneAgent/backend/internal/fsutil"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 )
 
@@ -56,6 +59,164 @@ type archiveSkillResult struct {
 	OK           bool   `json:"ok"`
 	SkillID      string `json:"skill_id"`
 	ArchivedPath string `json:"archived_path"`
+}
+
+type getSkillResult struct {
+	SkillID     string       `json:"skill_id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Source      skill.Source `json:"source"`
+	Path        string       `json:"path"`
+	Archivable  bool         `json:"archivable"`
+
+	SHA256  string `json:"sha256"`
+	SkillMD string `json:"skill_md"`
+}
+
+func GetSkill(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill id is required"})
+		return
+	}
+
+	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	s, ok := cat.ByID(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+
+	home := strings.TrimSpace(rt.Config.Home)
+	archivable := canArchiveSkill(home, s)
+
+	if !archivable {
+		// For now, only expose raw SKILL.md for personal skills to avoid widening read scope.
+		c.JSON(http.StatusOK, getSkillResult{
+			SkillID:     s.ID,
+			Name:        s.Name,
+			Description: s.Description,
+			Source:      s.Source,
+			Path:        s.Path,
+			Archivable:  false,
+			SHA256:      "",
+			SkillMD:     "",
+		})
+		return
+	}
+
+	data, err := os.ReadFile(s.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	sum := sha256.Sum256(data)
+
+	c.JSON(http.StatusOK, getSkillResult{
+		SkillID:     s.ID,
+		Name:        s.Name,
+		Description: s.Description,
+		Source:      s.Source,
+		Path:        s.Path,
+		Archivable:  true,
+		SHA256:      hex.EncodeToString(sum[:]),
+		SkillMD:     string(data),
+	})
+}
+
+type updateSkillRequest struct {
+	SkillMD       string `json:"skill_md"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+}
+
+func UpdateSkill(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill id is required"})
+		return
+	}
+
+	var req updateSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if strings.TrimSpace(req.SkillMD) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill_md is required"})
+		return
+	}
+
+	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	s, ok := cat.ByID(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+
+	home := strings.TrimSpace(rt.Config.Home)
+	if !canArchiveSkill(home, s) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill is not editable"})
+		return
+	}
+
+	current, err := os.ReadFile(s.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	curSum := sha256.Sum256(current)
+	curSHA := hex.EncodeToString(curSum[:])
+	if strings.TrimSpace(req.ExpectedSHA256) != "" && strings.TrimSpace(req.ExpectedSHA256) != curSHA {
+		c.JSON(http.StatusConflict, gin.H{"error": "precondition failed: skill changed (expected_sha256 mismatch)"})
+		return
+	}
+
+	if err := fsutil.AtomicWriteFile(s.Path, []byte(req.SkillMD), 0o644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	updated, _ := os.ReadFile(s.Path)
+	newSum := sha256.Sum256(updated)
+
+	c.JSON(http.StatusOK, getSkillResult{
+		SkillID:     s.ID,
+		Name:        s.Name,
+		Description: s.Description,
+		Source:      s.Source,
+		Path:        s.Path,
+		Archivable:  true,
+		SHA256:      hex.EncodeToString(newSum[:]),
+		SkillMD:     string(updated),
+	})
 }
 
 func ArchiveSkill(c *gin.Context) {
@@ -138,7 +299,7 @@ func archiveOneAgentSkill(home string, s skill.Skill) (string, error) {
 	}
 	if strings.TrimSpace(s.Path) == "" {
 		return "", errors.New("skill path is required")
-	}
+}
 
 	srcDir := filepath.Dir(s.Path)
 	if _, err := os.Stat(srcDir); err != nil {
