@@ -40,6 +40,12 @@ const routes = [
     component: () => import("@/views/SopGovernance.vue"),
     meta: { requiresAuth: true },
   },
+  {
+    path: "/governance/skills",
+    name: "Skill Governance",
+    component: () => import("@/views/SkillGovernance.vue"),
+    meta: { requiresAuth: true },
+  },
 
   {
     path: "/:pathMatch(.*)*",

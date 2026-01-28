@@ -401,6 +401,27 @@ export async function getTaskEvents(taskId: string): Promise<TaskEvent[]> {
 }
 
 // ============================================================================
+// Skills (governance)
+// ============================================================================
+
+export interface SkillInfo {
+    skill_id: string
+    name: string
+    description: string
+    source: string
+    path: string
+    archivable: boolean
+}
+
+export async function listSkills(): Promise<SkillInfo[]> {
+    return api('/api/skills')
+}
+
+export async function archiveSkill(skillId: string): Promise<{ ok: boolean; skill_id: string; archived_path: string }> {
+    return api(`/api/skills/${encodeURIComponent(skillId)}/archive`, { method: 'POST', body: {} })
+}
+
+// ============================================================================
 // Work Ledger (Receipts / Digest)
 // ============================================================================
 

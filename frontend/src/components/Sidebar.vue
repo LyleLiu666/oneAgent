@@ -35,7 +35,8 @@ const navItems = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Chat', path: '/chat', icon: MessageSquare },
   { name: 'Tasks', path: '/tasks', icon: ListTodo },
-  { name: 'Governance', path: '/governance/sop', icon: ListChecks },
+  { name: 'SOP Governance', path: '/governance/sop', icon: ListChecks },
+  { name: 'Skill Governance', path: '/governance/skills', icon: ListChecks },
   { name: 'Ledger', path: '/ledger', icon: ScrollText },
   { name: 'Settings', path: '/settings', icon: Settings },
 
