@@ -8,6 +8,7 @@ The core idea is: users should be able to **install once, choose a workspace fol
 This project is designed for users who:
 - Have a personal “domain”: writing, planning, coding, research, email handling, etc.
 - Want both **custom workflows** (their own know-how) and a **general all-purpose assistant**.
+- Want the agent to **use their local files as working context** (manuals, guidelines, playbooks, specs).
 
 We model reusable know-how as **Skills**: portable, composable, and governable assets that encapsulate workflow + prompt + references/scripts/templates.
 We also provide **skill recall** for users who want “omniscient assistant” behavior, but in a controllable and auditable way.
@@ -63,6 +64,14 @@ the system should automatically compress history into:
 - **findings** (key decisions, constraints, results, evidence)
 
 Compression must preserve the ability to resume work safely and produce evidence.
+
+### Learning (SOP / know-how extraction)
+The system SHOULD be able to extract repeated “receipt patterns” from real execution history into candidate SOPs/Skills.
+Principles:
+- Must be a separate pipeline (no impact on core execution stability).
+- Must be evidence-driven (store only when it improves end-to-end delivery, not “interesting” output).
+- Must be human-in-the-loop (governance workbench: dedupe/merge, drop obsolete, promote canonical).
+- Prefer high-signal assets: “If a simple question yields similar results, it’s probably not worth storing.”
 
 ### Observability & reliability (must-have)
 LLMs are inherently non-deterministic, so oneAgent treats the following as first-class:
