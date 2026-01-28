@@ -421,6 +421,21 @@ export async function archiveSkill(skillId: string): Promise<{ ok: boolean; skil
     return api(`/api/skills/${encodeURIComponent(skillId)}/archive`, { method: 'POST', body: {} })
 }
 
+export async function getSkill(skillId: string): Promise<SkillInfo & { sha256?: string; skill_md?: string }> {
+    return api(`/api/skills/${encodeURIComponent(skillId)}`)
+}
+
+export async function updateSkill(payload: {
+    skill_id: string
+    skill_md: string
+    expected_sha256?: string
+}): Promise<SkillInfo & { sha256?: string; skill_md?: string }> {
+    return api(`/api/skills/${encodeURIComponent(payload.skill_id)}`, {
+        method: 'PUT',
+        body: { skill_md: payload.skill_md, expected_sha256: payload.expected_sha256 },
+    })
+}
+
 // ============================================================================
 // Work Ledger (Receipts / Digest)
 // ============================================================================
