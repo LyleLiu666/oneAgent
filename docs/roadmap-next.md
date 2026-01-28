@@ -1,107 +1,83 @@
-# oneAgent Roadmap（工作清单与优先级）— 2026-01-28（更新）
+# oneAgent Roadmap（Spec-first backlog 与优先级）— 2026-01-28（更新）
 
-目的：把“还没做的工作”固化成可执行的 backlog，避免上下文压缩后遗忘；并确保按“地基 → 上层”的依赖关系推进。
+目的：把“还没做的工作”固化成 **可执行的 backlog**，避免上下文压缩后遗忘；并按“地基 → 上层”的依赖关系推进。
+
+> Source of truth：
+> - 交付/实现进度：`openspec list`
+> - 规格内容：`openspec/changes/*` 与 `openspec/specs/*`
 
 ---
 
-## 0) 当前状态快照
+## 0) 当前状态快照（以 `openspec list` 为准）
 
-### 0.1 OpenSpec changes
-以 `openspec list` 为准：
-- **已完成（Complete）**：task queue / work ledger / SOP & skill governance 基础闭环已具备
-- **待实现（Active changes）**：剩余特性已全部落为 OpenSpec changes（proposal/tasks/specs）
+### 0.1 Active changes（已写规格，待实现）
+- `add-project-scripts`：workspace project config（setup/test/cleanup/dev_server/copy_files）+ 证据留存
+- `fix-skill-read-not-found-ux`：skill.read not-found 的可行动 UX
+- `add-diff-review-loop`：attempt diff artifacts + review comments + succeeded 后 follow-up attempt
+- `add-worktree-attempt-isolation`：git worktree 隔离 attempt（执行根目录 + 生命周期管理）
+- `add-mcp-server`：对外暴露 MCP server（local-only + auth/policy + events）
 
-当前待实现的 changes（未完成）：
-- （暂无）
+### 0.2 已完成（Complete）
+- `add-skill-governance-workbench`
+- `add-sop-governance-workbench`
+- `add-skill-governance-duplicates`
+- `add-skill-governance-edit`
+- `add-sidebar-ledger-status-badges`
 
-已完成并归档（2026-01-28）：
-- `add-cost-governance-limits`
-- `add-task-evidence-policy`
-- `add-skill-governance-merge`
-- `add-code-intelligence-tools`
-- `add-edit-v2-tool`
-- `add-prompt-assetization`
-- `add-office-export`
-- `add-defense-in-depth-security`
-
-### 0.2 交付风险：工作区未提交变更
-在进入下一阶段前，必须先把本地改动整理为可回滚的提交（否则“可复现/可推广”不成立）。
+### 0.3 交付风险：工作区未提交变更
+进入实现阶段前，必须把本地改动整理为可回滚提交（否则“可复现/可推广”不成立）。
 
 ---
 
 ## 1) P0（地基 / 必须先做）
 
-### P0.1 CI 扩展：把“本机绿”升级为“持续绿”
-**状态**：已落地（见 archived change `add-ci-daily-runs` / `openspec/specs/project-tooling/spec.md`）
+### P0.1 `add-project-scripts`（进来就能干活）
+**价值**：把 setup/test/cleanup/dev server/copy_files 显性化为配置资产，并纳入证据链，减少“每次都探索环境”。
 
-**验收（本地可跑）**
-- `cd backend && go test ./...`
-- `cd frontend && npm test -- --run`
-- `scripts/e2e_smoke_test.sh`
+**关键坑**
+- 脚本执行必须严格受 `system-tool-permissions` 约束（不能绕过 policy）。
+- `copy_files` 必须做路径逃逸校验（防止复制 workspace 外敏感文件）。
+- 失败留痕：stdout/stderr 与可操作错误必须齐全，否则排障成本爆炸。
 
-### P0.2 Release/分发闭环（部门推广前置）
-**状态**：release workflow/checksums/PortableGit resolution 已落地（见 archived change `add-release-artifacts-workflow` / `update-release-portablegit-resolution`）
-
-### P0.3 工具权限治理（Policy engine）
-**状态**：已归档完成（见 archived change `2026-01-28-add-tool-permissions-system` / `openspec/specs/system-tool-permissions/spec.md`）
-
-### P0.4 OpenSpec 归档
-**目标**：完成一个 change 并上线后再归档（保持 active 清爽）。
+### P0.2 `fix-skill-read-not-found-ux`（低成本高收益）
+**价值**：减少治理/学习阶段的“读不到 skill 却不知道怎么办”的摩擦，提升可用性。
 
 ---
 
-## 2) P1（核心体验：挂机交付与任务工作台）
+## 2) P1（核心体验：可审查交付 + 低风险迭代）
 
-### P1.1 完成通知/日报
-**状态**：UI 内通知 + badge 已落地（见 archived change `add-task-ui-notifications` / `add-ledger-status-badges`）
+### P1.1 `add-diff-review-loop`（审查闭环）
+**价值**：把交付从“聊天输出”升级为“可审查产物”，review comment 直接进入下一轮 attempt。
 
-后续如需外部通知（webhook/IM），再单独开 change。
+**关键坑**
+- diff artifacts 可能很大：需要大小上限与降级路径（只列 changed files + explain）。
+- follow-up attempt 从 `succeeded` 创建时要避免“覆盖历史结论”；必须保留 attempt history 与来源链路。
 
-### P1.2 TaskQueue 工作台深化
-**状态**：基础 workbench 已落地（见 archived change `add-taskqueue-workbench-ux`）
+### P1.2 `add-worktree-attempt-isolation`（隔离执行）
+**价值**：把“并发/污染/回滚”问题降维为 git 合并问题，天然支持审查与回退。
 
-**坑**
-- workspace 的共享状态污染：需要明确“串行 + 产物/证据驱动 resume”，避免隐式重入。
-- 若未来允许并发写入：必须引入 L2（OCC 条件写入）或 L3（worktree）避免“基于旧版本探索→写入到新版本”。
-
-### P1.3 默认 limits / 成本治理
-**状态**：steps/runtime 默认 limits 已落地（见 archived change `add-default-task-limits`）
-
-成本/Token 治理（max_cost/token cap）已落地（见 archived change `2026-01-28-add-cost-governance-limits`）。
+**关键坑**
+- Windows 文件占用/路径长度：worktree 清理与回收要足够鲁棒。
+- 非 git workspace：必须给出明确错误或按配置退化（不得 silent fallback）。
+- 生命周期：孤儿 worktree 的识别与清理需要证据与可操作提示。
 
 ---
 
-## 3) P2（留存复利：学习→治理→召回的下一层）
+## 3) P2（生态/集成：把 oneAgent 变成可编排运行时）
 
-### P2.1 “已物化 skill”的治理工作台
-**状态**
-- 列表/编辑/归档/duplicates：已落地（`add-skill-governance-workbench` / `add-skill-governance-edit` / `add-skill-governance-duplicates`）
-- merge/pin canonical：已落地（见 archived change `2026-01-28-add-skill-governance-merge`）
+### P2.1 `add-mcp-server`（标准协议入口）
+**价值**：让外部客户端通过 MCP 读取/订阅/管理任务与账本，支撑通知/日报与“挂机收割”场景。
 
-**坑**
-- “稀缺性/深度”随时间变化：需要定期重评与人工治理入口。
-
-### P2.2 强制证据进一步制度化
-**状态**：已落地（见 archived change `2026-01-28-add-task-evidence-policy`）
+**关键坑**
+- 默认必须 local-only；远程访问必须显式开启且复用 auth/policy。
+- MCP 调用必须进入证据链（否则排障与审计断裂）。
 
 ---
 
-## 4) P3（上限增强：可后置）
-
-### P3.1 edit_v2（可解释/可证明的编辑）
-对应 change：`add-edit-v2-tool`
-
-### P3.2 语义级工具（LSP/AST）
-对应 change：`add-code-intelligence-tools`
-
-### P3.3 Prompt 资产化
-对应 change：`add-prompt-assetization`
-
-### P3.4 Office “最后一公里”导出
-对应 change：`add-office-export`
-
----
-
-## 5) 执行顺序（下一步从这里开始）
-以 `openspec list` 中 active changes 为准，建议顺序：
-1) `add-office-export`（最后一公里导出）
+## 4) 下一步执行顺序（建议）
+按“收益/依赖/风险”综合排序：
+1) `add-project-scripts`（unblock 环境可复现）
+2) `add-diff-review-loop`（把交付变成可审查）
+3) `add-worktree-attempt-isolation`（把隔离执行变成默认路径）
+4) `add-mcp-server`（对外入口，可与上面并行实现但建议先只读）
+5) `fix-skill-read-not-found-ux`（穿插做，随时可落地）

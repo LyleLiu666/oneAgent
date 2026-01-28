@@ -23,3 +23,22 @@
 - **THEN** 系统返回清晰错误（指出文件路径与原因）
 - **AND** 系统不得 silent fallback（避免用户误以为脚本被执行）
 
+### Requirement: Project config MUST support scripts and copy_files schema
+系统必须 (MUST) 为 `.oneagent/project.json` 定义并校验一个明确的 schema（防止拼写错误导致 silent no-op），至少支持以下可选字段：
+- `setup_script`：string
+- `test_script`：string
+- `cleanup_script`：string
+- `dev_server_script`：string（用于未来的 preview/dev-server 场景）
+- `copy_files`：string[]（相对 workspace root 的文件路径列表）
+
+系统必须 (MUST) 将 `copy_files` 视为“显式声明需要复制进执行环境的文件清单”（例如 `.env`），并对每个条目执行路径校验，确保解析后的路径不逃逸出 workspace root。
+
+#### Scenario: project config schema 校验通过后可被使用
+- **GIVEN** workspace 根目录存在合法的 `.oneagent/project.json`（字段类型正确）
+- **WHEN** 系统读取并解析该文件
+- **THEN** 系统将解析结果作为该 workspace 的 project config（或等价结构）供后续流程使用
+
+#### Scenario: copy_files 包含逃逸路径时被拒绝
+- **GIVEN** `.oneagent/project.json` 的 `copy_files` 包含 `../secrets.env`（或等价可逃逸路径）
+- **WHEN** 系统读取并解析该文件
+- **THEN** 系统拒绝该 config 并返回可操作错误（指出字段与非法条目）
