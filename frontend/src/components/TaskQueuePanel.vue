@@ -58,7 +58,7 @@ const canCancel = computed(() => {
 
 const canResume = computed(() => {
     const s = latestStatus.value
-    return s === 'failed' || s === 'timed_out' || s === 'interrupted'
+    return s === 'failed' || s === 'limit_exceeded' || s === 'timed_out' || s === 'interrupted'
 })
 
 const refreshTasks = async () => {

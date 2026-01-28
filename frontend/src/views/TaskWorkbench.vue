@@ -51,6 +51,8 @@ const selectedError = ref('')
 
 const title = ref('')
 const prompt = ref('')
+const budgetTokens = ref('')
+const budgetCost = ref('')
 const submitting = ref(false)
 
 const latestAttempt = computed<TaskAttempt | null>(() => {
@@ -62,7 +64,7 @@ const latestAttempt = computed<TaskAttempt | null>(() => {
 const latestStatus = computed(() => latestAttempt.value?.status || '')
 
 const canCancel = computed(() => latestStatus.value === 'queued' || latestStatus.value === 'running')
-const canResume = computed(() => ['failed', 'timed_out', 'interrupted'].includes(latestStatus.value))
+const canResume = computed(() => ['failed', 'limit_exceeded', 'timed_out', 'interrupted'].includes(latestStatus.value))
 
 const normalizeWorkspace = (ws: string) => String(ws || '').trim()
 const shortHash = (hash?: string) => (hash && hash.length >= 8 ? hash.slice(0, 8) : hash || '')
@@ -165,7 +167,7 @@ const workspaceSummaries = computed<WorkspaceSummary[]>(() => {
     const st = String(a?.status || '')
     if (st === 'queued') s.queued++
     else if (st === 'running') s.running++
-    else if (['failed', 'timed_out', 'interrupted'].includes(st)) s.failed++
+    else if (['failed', 'limit_exceeded', 'timed_out', 'interrupted'].includes(st)) s.failed++
   }
   return Array.from(byWS.values()).sort((a, b) => a.workspace.localeCompare(b.workspace))
 })
@@ -204,13 +206,22 @@ const queueTask = async () => {
 
   submitting.value = true
   try {
+    const limits: any = {}
+    const tokenBudget = Number.parseInt(String(budgetTokens.value || '').trim(), 10)
+    if (Number.isFinite(tokenBudget) && tokenBudget > 0) limits.max_total_tokens = tokenBudget
+    const costBudget = Number.parseFloat(String(budgetCost.value || '').trim())
+    if (Number.isFinite(costBudget) && costBudget > 0) limits.max_cost_usd = costBudget
+
     const created = await createTask({
       workspace: ws,
       title: normalizeWorkspace(title.value) || undefined,
       prompt: p,
+      limits: Object.keys(limits).length ? limits : undefined,
     })
     prompt.value = ''
     title.value = ''
+    budgetTokens.value = ''
+    budgetCost.value = ''
     selectedTaskId.value = created.id
     await refreshTasks()
     await refreshSelected()
@@ -219,6 +230,15 @@ const queueTask = async () => {
   } finally {
     submitting.value = false
   }
+}
+
+const formatUsage = (a: TaskAttempt | null) => {
+  const u = a?.usage
+  if (!u) return ''
+  const calls = typeof u.calls === 'number' && u.calls > 0 ? `${u.calls} calls` : ''
+  const tokens = typeof u.total_tokens === 'number' && u.total_tokens > 0 ? `${u.total_tokens} tokens` : ''
+  const cost = typeof u.cost_usd === 'number' && u.cost_usd > 0 ? `$${u.cost_usd.toFixed(4)}` : ''
+  return [tokens, calls, cost].filter(Boolean).join(' · ')
 }
 
 const doCancel = async () => {
@@ -399,6 +419,20 @@ onUnmounted(() => {
                 class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
                 placeholder="Describe what you want done..."
               />
+              <div class="grid grid-cols-2 gap-2">
+                <input
+                  v-model="budgetTokens"
+                  inputmode="numeric"
+                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                  placeholder="Token budget (optional)"
+                />
+                <input
+                  v-model="budgetCost"
+                  inputmode="decimal"
+                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                  placeholder="Cost budget USD (optional)"
+                />
+              </div>
               <button
                 data-testid="workbench-queue"
                 class="px-4 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 disabled:opacity-50"
@@ -479,6 +513,7 @@ onUnmounted(() => {
                 <div class="text-xs text-surface-400">{{ latestAttempt.status }}</div>
               </div>
               <div v-if="latestAttempt.summary" class="text-sm text-surface-200 mt-2 whitespace-pre-wrap">{{ latestAttempt.summary }}</div>
+              <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 mt-2">usage: {{ formatUsage(latestAttempt) }}</div>
               <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400 mt-2">findings: {{ latestAttempt.findings_path }}</div>
               <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400 mt-1">trace: {{ latestAttempt.trace_log_path }}</div>
               <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400 mt-1">

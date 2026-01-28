@@ -131,6 +131,8 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			ContextSummary:    contextSummary,
 			MaxSteps:          maxSteps,
 			MaxRuntimeSeconds: maxRuntime,
+			MaxTotalTokens:    limits.MaxTotalTokens,
+			MaxCostUSD:        limits.MaxCostUSD,
 		}
 
 		res, runErr := subagent.Run(toolCtx, req)
@@ -151,6 +153,14 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			}
 			finished := time.Now()
 			started := finished.Add(-time.Duration(maxInt64(0, res.DurationMs)) * time.Millisecond)
+			signals := workledger.ReceiptSignals{DurationMs: res.DurationMs}
+			if res.Usage != nil {
+				signals.Calls = res.Usage.Calls
+				signals.PromptTokens = res.Usage.PromptTokens
+				signals.CompletionTokens = res.Usage.CompletionTokens
+				signals.TotalTokens = res.Usage.TotalTokens
+				signals.CostUSD = res.Usage.CostUSD
+			}
 			_, _ = rt.WorkLedger.CreateReceipt(workledger.CreateReceiptInput{
 				PrincipalID:   userID,
 				WorkspaceRoot: task.Workspace,
@@ -163,7 +173,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 					FindingsPath: strings.TrimSpace(res.FindingsPath),
 					TraceLogPath: strings.TrimSpace(res.TraceLogPath),
 				},
-				Signals: workledger.ReceiptSignals{DurationMs: res.DurationMs},
+				Signals: signals,
 			})
 		}
 
@@ -172,6 +182,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			Summary:      res.Summary,
 			FindingsPath: res.FindingsPath,
 			TraceLogPath: res.TraceLogPath,
+			Usage:        res.Usage,
 		}, runErr
 	}
 

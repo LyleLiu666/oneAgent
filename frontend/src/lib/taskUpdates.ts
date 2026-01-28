@@ -14,7 +14,14 @@ export type TaskUpdate = {
   finishedAt?: string
 }
 
-const TERMINAL_STATUSES = new Set<AttemptStatus>(['succeeded', 'failed', 'timed_out', 'interrupted', 'canceled'])
+const TERMINAL_STATUSES = new Set<AttemptStatus>([
+  'succeeded',
+  'failed',
+  'limit_exceeded',
+  'timed_out',
+  'interrupted',
+  'canceled',
+])
 
 export function isTerminalStatus(status: AttemptStatus | string): status is AttemptStatus {
   return TERMINAL_STATUSES.has(status as AttemptStatus)
@@ -89,4 +96,3 @@ export function saveTaskSnapshotsToStorage(storageKey: string, snapshots: Record
     // ignore
   }
 }
-

@@ -116,6 +116,9 @@ func TestRun_WritesFindingsAndTrace_WithChangedFilesAndPlanMarkDone(t *testing.T
 	if got.FindingsPath == "" {
 		t.Fatalf("expected findings_path")
 	}
+	if got.Usage == nil || got.Usage.Calls == 0 || got.Usage.TotalTokens == 0 {
+		t.Fatalf("expected usage totals, got %+v", got.Usage)
+	}
 
 	if _, err := os.Stat(got.TraceLogPath); err != nil {
 		t.Fatalf("stat trace log: %v", err)

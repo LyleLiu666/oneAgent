@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/liu_y/oneAgent/backend/internal/usage"
 )
 
 type DecisionMaker interface {
@@ -19,6 +21,7 @@ type AttemptResult struct {
 	Summary      string
 	FindingsPath string
 	TraceLogPath string
+	Usage        *usage.Totals
 }
 
 type ExecuteAttemptFunc func(ctx context.Context, task Task, attempt Attempt, resumedFrom *Attempt) (AttemptResult, error)
@@ -236,7 +239,7 @@ func (r *TaskRunner) Resume(taskID string) (Task, error) {
 			return errors.New("task has no attempts")
 		}
 		switch latest.Status {
-		case AttemptFailed, AttemptTimedOut, AttemptInterrupted:
+		case AttemptFailed, AttemptTimedOut, AttemptInterrupted, AttemptLimitExceeded:
 		default:
 			return fmt.Errorf("resume not allowed from status %q", latest.Status)
 		}
@@ -362,6 +365,7 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.Summary = strings.TrimSpace(result.Summary)
 	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
 	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
+	ranAttempt.Usage = result.Usage
 
 	finishedAt := Now()
 	finalStatus := AttemptFailed
@@ -369,7 +373,10 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 
 	if runErr != nil {
 		finalError = runErr.Error()
-		if errors.Is(runErr, context.Canceled) || errors.Is(attemptCtx.Err(), context.Canceled) {
+		var budgetErr *usage.BudgetExceededError
+		if errors.As(runErr, &budgetErr) {
+			finalStatus = AttemptLimitExceeded
+		} else if errors.Is(runErr, context.Canceled) || errors.Is(attemptCtx.Err(), context.Canceled) {
 			finalStatus = AttemptCanceled
 		} else if errors.Is(runErr, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
 			finalStatus = AttemptTimedOut

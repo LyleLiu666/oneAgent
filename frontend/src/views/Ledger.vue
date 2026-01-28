@@ -422,6 +422,19 @@ onMounted(async () => {
               </details>
 
               <details class="rounded-xl bg-surface-900/60 border border-surface-700/50">
+                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">Signals</summary>
+                <div class="px-4 pb-4 text-sm text-surface-200 space-y-1">
+                  <p v-if="selectedReceipt.signals?.duration_ms"><span class="text-surface-500">duration_ms:</span> {{ selectedReceipt.signals.duration_ms }}</p>
+                  <p v-if="selectedReceipt.signals?.calls"><span class="text-surface-500">calls:</span> {{ selectedReceipt.signals.calls }}</p>
+                  <p v-if="selectedReceipt.signals?.total_tokens"><span class="text-surface-500">total_tokens:</span> {{ selectedReceipt.signals.total_tokens }}</p>
+                  <p v-if="selectedReceipt.signals?.prompt_tokens"><span class="text-surface-500">prompt_tokens:</span> {{ selectedReceipt.signals.prompt_tokens }}</p>
+                  <p v-if="selectedReceipt.signals?.completion_tokens"><span class="text-surface-500">completion_tokens:</span> {{ selectedReceipt.signals.completion_tokens }}</p>
+                  <p v-if="selectedReceipt.signals?.cost_usd"><span class="text-surface-500">cost_usd:</span> {{ selectedReceipt.signals.cost_usd }}</p>
+                  <p v-if="!selectedReceipt.signals || Object.keys(selectedReceipt.signals || {}).length === 0" class="text-surface-500">(none)</p>
+                </div>
+              </details>
+
+              <details class="rounded-xl bg-surface-900/60 border border-surface-700/50">
                 <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">Raw JSON</summary>
                 <pre class="whitespace-pre-wrap text-xs text-surface-100 px-4 pb-4">{{ JSON.stringify(selectedReceipt, null, 2) }}</pre>
               </details>

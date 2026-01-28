@@ -18,6 +18,9 @@ import (
 )
 
 func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
+	t.Setenv("ONEAGENT_TASK_DEFAULT_MAX_TOTAL_TOKENS", "1000")
+	t.Setenv("ONEAGENT_TASK_DEFAULT_MAX_COST_USD", "1.25")
+
 	home := t.TempDir()
 	cfg := &config.Config{
 		Profile:          "local",
@@ -101,6 +104,9 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 	if created.Limits.MaxSteps <= 0 || created.Limits.MaxRuntimeSeconds <= 0 {
 		t.Fatalf("expected default limits to be applied, got %+v", created.Limits)
 	}
+	if created.Limits.MaxTotalTokens != 1000 || created.Limits.MaxCostUSD != 1.25 {
+		t.Fatalf("expected default budgets to be applied, got %+v", created.Limits)
+	}
 
 	// Wait for background run to finish (runner is async).
 	deadline := time.Now().Add(2 * time.Second)
@@ -153,5 +159,32 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 	}
 	if len(evs) == 0 {
 		t.Fatalf("expected events")
+	}
+
+	// Create task with explicit budgets.
+	body = map[string]any{
+		"workspace": workspace,
+		"title":     "T2",
+		"prompt":    "do the other thing",
+		"limits": map[string]any{
+			"max_total_tokens": 55,
+			"max_cost_usd":     0.75,
+		},
+	}
+	b, _ = json.Marshal(body)
+	res, err = http.Post(srv.URL+"/api/tasks", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatalf("POST /api/tasks (explicit budgets): %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/tasks (explicit budgets) status=%d", res.StatusCode)
+	}
+	var created2 taskqueue.Task
+	if err := json.NewDecoder(res.Body).Decode(&created2); err != nil {
+		t.Fatalf("decode create task (explicit budgets): %v", err)
+	}
+	if created2.Limits.MaxTotalTokens != 55 || created2.Limits.MaxCostUSD != 0.75 {
+		t.Fatalf("expected explicit budgets to roundtrip, got %+v", created2.Limits)
 	}
 }

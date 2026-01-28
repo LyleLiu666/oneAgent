@@ -11,10 +11,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/usage"
 )
 
 type ToolHandler func(ctx context.Context, raw json.RawMessage) (any, error)
@@ -42,6 +44,9 @@ type RunRequest struct {
 	MaxSteps          int
 	MaxRuntimeSeconds int
 	MaxLogBytes       int
+
+	MaxTotalTokens int
+	MaxCostUSD     float64
 }
 
 type RunResult struct {
@@ -52,6 +57,7 @@ type RunResult struct {
 	DurationMs   int64  `json:"duration_ms"`
 
 	PlanMarkDone []PlanMarkDoneRecord `json:"plan_mark_done,omitempty"`
+	Usage        *usage.Totals        `json:"usage,omitempty"`
 }
 
 type PlanMarkDoneRecord struct {
@@ -176,6 +182,7 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		planDone []PlanMarkDoneRecord
 		changed  = make(map[string]struct{})
 		loopErr  error
+		totals   usage.Totals
 	)
 
 	normalizeChangedPath := func(p string) string {
@@ -201,6 +208,45 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 
 	completed := false
 	for step := 0; step < maxSteps; step++ {
+		if step > 0 {
+			if req.MaxTotalTokens > 0 && totals.TotalTokens >= req.MaxTotalTokens {
+				loopErr = &usage.BudgetExceededError{
+					MaxTotalTokens: req.MaxTotalTokens,
+					MaxCostUSD:     req.MaxCostUSD,
+					Used:           totals,
+					Message:        fmt.Sprintf("budget exceeded: max_total_tokens=%d used_total_tokens=%d (resume with higher limits or split the task)", req.MaxTotalTokens, totals.TotalTokens),
+				}
+				logEvent(writer, limiter, true, map[string]any{
+					"type":            "budget_exceeded",
+					"step":            step,
+					"max_total_tokens": req.MaxTotalTokens,
+					"max_cost_usd":     req.MaxCostUSD,
+					"totals":           totals,
+					"error":            loopErr.Error(),
+				})
+				break
+			}
+			if req.MaxCostUSD > 0 && totals.CostUSD >= req.MaxCostUSD {
+				loopErr = &usage.BudgetExceededError{
+					MaxTotalTokens: req.MaxTotalTokens,
+					MaxCostUSD:     req.MaxCostUSD,
+					Used:           totals,
+					Message:        fmt.Sprintf("budget exceeded: max_cost_usd=%.4f used_cost_usd=%.4f (resume with higher limits or split the task)", req.MaxCostUSD, totals.CostUSD),
+				}
+				logEvent(writer, limiter, true, map[string]any{
+					"type":            "budget_exceeded",
+					"step":            step,
+					"max_total_tokens": req.MaxTotalTokens,
+					"max_cost_usd":     req.MaxCostUSD,
+					"totals":           totals,
+					"error":            loopErr.Error(),
+				})
+				break
+			}
+		}
+
+		promptTokens := estimatePromptTokens(messages)
+
 		logEvent(writer, limiter, false, map[string]any{
 			"type":  "llm_call",
 			"step":  step,
@@ -217,6 +263,23 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			loopErr = err
 			break
 		}
+
+		completionTokens := usage.EstimateTokens(result.Content + toolCallsText(result.ToolCalls))
+		callTotal := promptTokens + completionTokens
+		totals.AddCall(usage.Call{
+			PromptTokens:     promptTokens,
+			CompletionTokens: completionTokens,
+			TotalTokens:      callTotal,
+			CostUSD:          0,
+		})
+		logEvent(writer, limiter, false, map[string]any{
+			"type":              "usage",
+			"step":              step,
+			"prompt_tokens":     promptTokens,
+			"completion_tokens": completionTokens,
+			"total_tokens":      callTotal,
+			"totals":            totals,
+		})
 
 		logEvent(writer, limiter, false, map[string]any{
 			"type":   "llm_result",
@@ -390,7 +453,55 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		TraceLogPath: tracePath,
 		DurationMs:   time.Since(started).Milliseconds(),
 		PlanMarkDone: planDone,
+		Usage:        &totals,
 	}, loopErr
+}
+
+func estimatePromptTokens(messages []llm.ChatMessage) int {
+	if len(messages) == 0 {
+		return 0
+	}
+	var b strings.Builder
+	for _, m := range messages {
+		b.WriteString(m.Role)
+		b.WriteString("\n")
+		b.WriteString(m.Name)
+		b.WriteString("\n")
+		b.WriteString(m.ToolCallID)
+		b.WriteString("\n")
+		b.WriteString(m.Content)
+		b.WriteString("\n")
+		for _, tc := range m.ToolCalls {
+			b.WriteString(tc.ID)
+			b.WriteString("\n")
+			b.WriteString(tc.Type)
+			b.WriteString("\n")
+			b.WriteString(tc.Function.Name)
+			b.WriteString("\n")
+			b.WriteString(tc.Function.Arguments)
+			b.WriteString("\n")
+		}
+	}
+	// Mix in rune count to reduce systematic biases for different scripts/languages.
+	return usage.EstimateTokens(b.String()) + (utf8.RuneCountInString(b.String()) / 128)
+}
+
+func toolCallsText(calls []llm.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range calls {
+		b.WriteString(c.ID)
+		b.WriteString("\n")
+		b.WriteString(c.Type)
+		b.WriteString("\n")
+		b.WriteString(c.Function.Name)
+		b.WriteString("\n")
+		b.WriteString(c.Function.Arguments)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func callWithTools(ctx context.Context, client llm.Client, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, combined *strings.Builder) (llm.ChatCompletionResult, error) {

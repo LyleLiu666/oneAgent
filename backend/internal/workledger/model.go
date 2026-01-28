@@ -27,6 +27,12 @@ type ReceiptArtifacts struct {
 
 type ReceiptSignals struct {
 	DurationMs int64 `json:"duration_ms,omitempty"`
+
+	Calls            int     `json:"calls,omitempty"`
+	PromptTokens     int     `json:"prompt_tokens,omitempty"`
+	CompletionTokens int     `json:"completion_tokens,omitempty"`
+	TotalTokens      int     `json:"total_tokens,omitempty"`
+	CostUSD          float64 `json:"cost_usd,omitempty"`
 }
 
 type Receipt struct {
@@ -45,4 +51,3 @@ type Receipt struct {
 	Artifacts ReceiptArtifacts `json:"artifacts,omitempty"`
 	Signals   ReceiptSignals   `json:"signals,omitempty"`
 }
-

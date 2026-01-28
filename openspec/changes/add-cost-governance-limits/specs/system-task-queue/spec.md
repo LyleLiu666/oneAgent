@@ -15,3 +15,20 @@
 - **THEN** 系统停止该 attempt 并进入终态
 - **AND** summary/trace 中包含“预算耗尽”的可解释原因
 
+### Requirement: Task attempt MUST expose aggregated usage
+系统必须 (MUST) 在 task attempt 上暴露累计 usage，以便用户理解“跑了多少、花了多少”（best-effort）：
+- `attempt.usage.calls`
+- `attempt.usage.prompt_tokens`
+- `attempt.usage.completion_tokens`
+- `attempt.usage.total_tokens`
+- `attempt.usage.cost_usd`（如果可得）
+
+#### Scenario: Get task returns attempt usage
+- **GIVEN** 某 attempt 已产生至少一次 LLM 调用
+- **WHEN** 用户查询 task
+- **THEN** 返回的 attempt 包含 `usage.total_tokens > 0`
+
+#### Scenario: Budget exceeded attempt is resumable
+- **GIVEN** 某 attempt 因预算耗尽而进入终态（例如 `status=limit_exceeded`）
+- **WHEN** 用户对该 task 执行 resume
+- **THEN** 系统创建新的 attempt 并允许继续执行

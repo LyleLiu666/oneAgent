@@ -317,6 +317,7 @@ export type AttemptStatus =
     | 'running'
     | 'succeeded'
     | 'failed'
+    | 'limit_exceeded'
     | 'canceled'
     | 'timed_out'
     | 'interrupted'
@@ -324,6 +325,8 @@ export type AttemptStatus =
 export interface TaskLimits {
     max_steps?: number
     max_runtime_seconds?: number
+    max_total_tokens?: number
+    max_cost_usd?: number
 }
 
 export interface TaskObserverDecision {
@@ -376,6 +379,13 @@ export interface TaskAttempt {
     findings_path?: string
     trace_log_path?: string
     observer?: TaskObserverDecision
+    usage?: {
+        calls?: number
+        prompt_tokens?: number
+        completion_tokens?: number
+        total_tokens?: number
+        cost_usd?: number
+    }
     error?: string
 }
 
@@ -565,6 +575,11 @@ export interface ReceiptArtifacts {
 
 export interface ReceiptSignals {
     duration_ms?: number
+    calls?: number
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    cost_usd?: number
 }
 
 export interface Receipt {

@@ -361,11 +361,38 @@ func buildReceiptMarkdown(r Receipt) string {
 		b.WriteString("\n")
 	}
 
-	if r.Signals.DurationMs > 0 {
+	if r.Signals.DurationMs > 0 || r.Signals.TotalTokens > 0 || r.Signals.Calls > 0 || r.Signals.CostUSD > 0 {
 		b.WriteString("## Signals\n\n")
-		b.WriteString("- duration_ms: ")
-		b.WriteString(fmt.Sprintf("%d", r.Signals.DurationMs))
-		b.WriteString("\n")
+		if r.Signals.DurationMs > 0 {
+			b.WriteString("- duration_ms: ")
+			b.WriteString(fmt.Sprintf("%d", r.Signals.DurationMs))
+			b.WriteString("\n")
+		}
+		if r.Signals.Calls > 0 {
+			b.WriteString("- calls: ")
+			b.WriteString(fmt.Sprintf("%d", r.Signals.Calls))
+			b.WriteString("\n")
+		}
+		if r.Signals.PromptTokens > 0 {
+			b.WriteString("- prompt_tokens: ")
+			b.WriteString(fmt.Sprintf("%d", r.Signals.PromptTokens))
+			b.WriteString("\n")
+		}
+		if r.Signals.CompletionTokens > 0 {
+			b.WriteString("- completion_tokens: ")
+			b.WriteString(fmt.Sprintf("%d", r.Signals.CompletionTokens))
+			b.WriteString("\n")
+		}
+		if r.Signals.TotalTokens > 0 {
+			b.WriteString("- total_tokens: ")
+			b.WriteString(fmt.Sprintf("%d", r.Signals.TotalTokens))
+			b.WriteString("\n")
+		}
+		if r.Signals.CostUSD > 0 {
+			b.WriteString("- cost_usd: ")
+			b.WriteString(fmt.Sprintf("%.4f", r.Signals.CostUSD))
+			b.WriteString("\n")
+		}
 	}
 
 	return b.String()

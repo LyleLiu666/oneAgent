@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/permissions"
+	"github.com/liu_y/oneAgent/backend/internal/usage"
 )
 
 type AttemptStatus string
@@ -13,6 +14,7 @@ const (
 	AttemptRunning     AttemptStatus = "running"
 	AttemptSucceeded   AttemptStatus = "succeeded"
 	AttemptFailed      AttemptStatus = "failed"
+	AttemptLimitExceeded AttemptStatus = "limit_exceeded"
 	AttemptCanceled    AttemptStatus = "canceled"
 	AttemptTimedOut    AttemptStatus = "timed_out"
 	AttemptInterrupted AttemptStatus = "interrupted"
@@ -21,6 +23,8 @@ const (
 type Limits struct {
 	MaxSteps          int `json:"max_steps,omitempty"`
 	MaxRuntimeSeconds int `json:"max_runtime_seconds,omitempty"`
+	MaxTotalTokens    int     `json:"max_total_tokens,omitempty"`
+	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
 }
 
 type ObserverDecision struct {
@@ -49,6 +53,8 @@ type Attempt struct {
 	TraceLogPath string `json:"trace_log_path,omitempty"`
 
 	Observer *ObserverDecision `json:"observer,omitempty"`
+
+	Usage *usage.Totals `json:"usage,omitempty"`
 
 	Error string `json:"error,omitempty"`
 }
