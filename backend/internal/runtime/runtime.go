@@ -25,6 +25,8 @@ type Runtime struct {
 
 	AuthToken string
 
+	Pairing *PairingService
+
 	Settings *settingsdb.DB
 	Sessions *sessionstore.Store
 	LLMLog   *llmlog.Writer
@@ -107,6 +109,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		Config:     cfg,
 		Layout:     layout,
 		AuthToken:  token,
+		Pairing:    NewPairingService(),
 		Settings:   settings,
 		Sessions:   sessions,
 		LLMLog:     llmLogger,

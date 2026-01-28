@@ -1630,9 +1630,11 @@ func runToolLoop(
 				stepTraceEntries = append(stepTraceEntries, entry)
 			}
 
+			rawToolContent := string(response)
+			recordSuspiciousMatches(broadcaster, &stepTraceEntries, sessionID, userID, "tool_output", call.Function.Name, call.ID, rawToolContent)
 			messages = append(messages, llm.ChatMessage{
 				Role:       model.MessageRoleTool,
-				Content:    string(response),
+				Content:    wrapUntrustedToolOutput(call.Function.Name, call.ID, rawToolContent),
 				ToolCallID: call.ID,
 				Name:       call.Function.Name,
 			})

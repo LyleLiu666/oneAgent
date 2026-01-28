@@ -101,6 +101,9 @@ func TestRunToolLoop_SkillRead_ByName(t *testing.T) {
 	if last.Name != "skill.read" {
 		t.Fatalf("expected tool name=%q, got %q", "skill.read", last.Name)
 	}
+	if !strings.Contains(last.Content, "BEGIN_UNTRUSTED_CONTENT") || !strings.Contains(last.Content, "END_UNTRUSTED_CONTENT") {
+		t.Fatalf("expected untrusted boundary markers, got %q", last.Content)
+	}
 	if !strings.Contains(last.Content, "skill_md") {
 		t.Fatalf("expected skill_md in tool output, got %q", last.Content)
 	}

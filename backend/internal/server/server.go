@@ -42,6 +42,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 	router.Use(middleware.APIAuth(rt,
 		"/api/auth/config",
 		"/api/auth/callback",
+		"/api/auth/pair/exchange",
 	))
 
 	// Health check endpoint (no auth required).
@@ -113,6 +114,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/admin/tokens", handler.ListAuthTokens)
 		api.POST("/admin/tokens", handler.CreateAuthToken)
 		api.POST("/admin/tokens/revoke", handler.RevokeAuthToken)
+		api.POST("/admin/pairing_codes", handler.CreatePairingCode)
 		api.GET("/admin/tool_policies/:principal_id", handler.GetToolPolicy)
 		api.PUT("/admin/tool_policies/:principal_id", handler.SetToolPolicy)
 
@@ -145,6 +147,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 	// Public Auth Endpoints (No Auth Required).
 	router.GET("/api/auth/config", handler.GetAuthConfig)
 	router.POST("/api/auth/callback", handler.OAuthCallback)
+	router.POST("/api/auth/pair/exchange", handler.ExchangePairingCode)
 
 	// Serve static files (Vue frontend).
 	staticFS, err := fs.Sub(web.Static, "static")

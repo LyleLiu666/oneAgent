@@ -105,6 +105,9 @@ func TestRunToolLoop_SelfHeal_UnknownTool(t *testing.T) {
 	if last.Name != "does_not_exist" {
 		t.Fatalf("expected tool name=%q, got %q", "does_not_exist", last.Name)
 	}
+	if !strings.Contains(last.Content, "BEGIN_UNTRUSTED_CONTENT") || !strings.Contains(last.Content, "END_UNTRUSTED_CONTENT") {
+		t.Fatalf("expected untrusted boundary markers, got %q", last.Content)
+	}
 	if !strings.Contains(last.Content, "unknown tool") {
 		t.Fatalf("expected unknown tool error payload, got %q", last.Content)
 	}

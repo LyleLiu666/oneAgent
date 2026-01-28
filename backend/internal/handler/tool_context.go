@@ -131,6 +131,7 @@ func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol stri
 
 			llmMsg := llm.ChatMessage{Role: msg.Role, Content: content}
 			if protocol == "json" && ok {
+				llmMsg.Content = wrapUntrustedToolOutput(payload.Name, payload.ToolCallID, llmMsg.Content)
 				llmMsg.ToolCallID = payload.ToolCallID
 				llmMsg.Name = payload.Name
 			}
