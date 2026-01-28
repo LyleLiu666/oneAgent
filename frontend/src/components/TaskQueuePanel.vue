@@ -405,6 +405,10 @@ onUnmounted(() => {
                                     <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">trace_log_path</p>
                                     <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.trace_log_path }}</code>
                                 </div>
+                                <div v-if="latestAttempt?.test_report_path" class="text-xs">
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">test_report_path</p>
+                                    <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.test_report_path }}</code>
+                                </div>
 
                                 <div class="flex items-center justify-end gap-2 pt-1">
                                     <button

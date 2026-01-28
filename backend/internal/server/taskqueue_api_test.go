@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,10 +49,14 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 			}
 			findings := filepath.Join(dir, "FINDINGS.md")
 			trace := filepath.Join(dir, "trace.jsonl")
+			testReport := filepath.Join(dir, "TEST_REPORT.txt")
 			if err := os.WriteFile(findings, []byte("# Findings\n- ok\n"), 0o600); err != nil {
 				return taskqueue.AttemptResult{}, err
 			}
 			if err := os.WriteFile(trace, []byte("{\"type\":\"complete\"}\n"), 0o600); err != nil {
+				return taskqueue.AttemptResult{}, err
+			}
+			if err := os.WriteFile(testReport, []byte("ok\n"), 0o600); err != nil {
 				return taskqueue.AttemptResult{}, err
 			}
 			return taskqueue.AttemptResult{
@@ -59,6 +64,7 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 				Summary:      "done",
 				FindingsPath: findings,
 				TraceLogPath: trace,
+				TestReportPath: testReport,
 			}, nil
 		},
 		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
@@ -110,6 +116,7 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 
 	// Wait for background run to finish (runner is async).
 	deadline := time.Now().Add(2 * time.Second)
+	var last taskqueue.Task
 	for time.Now().Before(deadline) {
 		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID, nil)
 		resp, err := http.DefaultClient.Do(req)
@@ -119,10 +126,17 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 		var got taskqueue.Task
 		_ = json.NewDecoder(resp.Body).Decode(&got)
 		_ = resp.Body.Close()
+		last = got
 		if a := got.LatestAttempt(); a != nil && a.Status == taskqueue.AttemptSucceeded {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if last.LatestAttempt() == nil || last.LatestAttempt().Status != taskqueue.AttemptSucceeded {
+		t.Fatalf("expected task to finish, got %+v", last.LatestAttempt())
+	}
+	if strings.TrimSpace(last.LatestAttempt().TestReportPath) == "" {
+		t.Fatalf("expected test_report_path after attempt finished, got %+v", last.LatestAttempt())
 	}
 
 	// List by workspace.

@@ -21,6 +21,7 @@ type AttemptResult struct {
 	Summary      string
 	FindingsPath string
 	TraceLogPath string
+	TestReportPath string
 	Usage        *usage.Totals
 }
 
@@ -365,6 +366,7 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.Summary = strings.TrimSpace(result.Summary)
 	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
 	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
+	ranAttempt.TestReportPath = strings.TrimSpace(result.TestReportPath)
 	ranAttempt.Usage = result.Usage
 
 	finishedAt := Now()

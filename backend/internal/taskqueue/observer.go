@@ -21,6 +21,7 @@ type ObserveInput struct {
 	Summary      string
 	FindingsPath string
 	TraceLogPath string
+	TestReportPath string
 }
 
 type OutcomeObserver struct {
@@ -63,6 +64,7 @@ func (o *OutcomeObserver) Decide(ctx context.Context, in ObserveInput) (Observer
 
 	findingsText, findingsMeta := readFileHead(in.FindingsPath, findingsMax)
 	traceTail, traceMeta := readFileTail(in.TraceLogPath, traceTailMax)
+	testReportText, testReportMeta := readFileHead(in.TestReportPath, findingsMax)
 
 	system := strings.TrimSpace(`
 You are an Outcome Observer for an autonomous coding agent.
@@ -100,6 +102,7 @@ Return ONLY a JSON object with keys:
 	user.WriteString("\n## Artifacts\n")
 	user.WriteString(fmt.Sprintf("- findings_path: %s (%s)\n", in.FindingsPath, findingsMeta))
 	user.WriteString(fmt.Sprintf("- trace_log_path: %s (%s)\n", in.TraceLogPath, traceMeta))
+	user.WriteString(fmt.Sprintf("- test_report_path: %s (%s)\n", in.TestReportPath, testReportMeta))
 
 	if strings.TrimSpace(findingsText) != "" {
 		user.WriteString("\n### Findings excerpt\n")
@@ -115,6 +118,15 @@ Return ONLY a JSON object with keys:
 		user.WriteString("```text\n")
 		user.WriteString(traceTail)
 		if !strings.HasSuffix(traceTail, "\n") {
+			user.WriteString("\n")
+		}
+		user.WriteString("```\n")
+	}
+	if strings.TrimSpace(testReportText) != "" {
+		user.WriteString("\n### Test report excerpt\n")
+		user.WriteString("```markdown\n")
+		user.WriteString(testReportText)
+		if !strings.HasSuffix(testReportText, "\n") {
 			user.WriteString("\n")
 		}
 		user.WriteString("```\n")
@@ -228,4 +240,3 @@ func truncateString(s string, max int) string {
 	}
 	return string(r[:max]) + "..."
 }
-

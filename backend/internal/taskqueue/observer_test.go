@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 )
@@ -30,11 +31,15 @@ func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	dir := t.TempDir()
 	findings := filepath.Join(dir, "FINDINGS.md")
 	trace := filepath.Join(dir, "trace.jsonl")
+	report := filepath.Join(dir, "TEST_REPORT.md")
 	if err := os.WriteFile(findings, []byte("# ok\n"), 0o600); err != nil {
 		t.Fatalf("write findings: %v", err)
 	}
 	if err := os.WriteFile(trace, []byte("{\"type\":\"start\"}\n"), 0o600); err != nil {
 		t.Fatalf("write trace: %v", err)
+	}
+	if err := os.WriteFile(report, []byte("TEST_REPORT_MARKER\n"), 0o600); err != nil {
+		t.Fatalf("write report: %v", err)
 	}
 
 	client := &stubLLMClient{
@@ -50,6 +55,7 @@ func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 		Summary:        "finished",
 		FindingsPath:   findings,
 		TraceLogPath:   trace,
+		TestReportPath: report,
 	})
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
@@ -59,6 +65,9 @@ func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	}
 	if len(client.lastMessages) != 2 || client.lastMessages[0].Role != "system" || client.lastMessages[1].Role != "user" {
 		t.Fatalf("unexpected messages: %+v", client.lastMessages)
+	}
+	if !strings.Contains(client.lastMessages[1].Content, "TEST_REPORT_MARKER") {
+		t.Fatalf("expected test report excerpt to be included in observer input")
 	}
 }
 
@@ -93,4 +102,3 @@ func TestOutcomeObserver_Decide_RequiresClient(t *testing.T) {
 		t.Fatalf("expected error")
 	}
 }
-

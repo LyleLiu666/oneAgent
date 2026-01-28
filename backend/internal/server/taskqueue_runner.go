@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -138,6 +140,41 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		res, runErr := subagent.Run(toolCtx, req)
 		_ = modelName // reserved for future observer/executor tuning
 
+		// Best-effort test report generation (evidence), written next to findings/trace when possible.
+		testReportPath := ""
+		if strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_TEST_REPORT")) != "1" {
+			outDir := ""
+			if strings.TrimSpace(res.FindingsPath) != "" {
+				outDir = filepath.Dir(res.FindingsPath)
+			} else if strings.TrimSpace(res.TraceLogPath) != "" {
+				outDir = filepath.Dir(res.TraceLogPath)
+			}
+
+			if outDir != "" {
+				report, _ := generateTestReport(toolCtx, testReportInput{
+					WorkspaceRoot: task.Workspace,
+					OutputDir:     outDir,
+					Enable:        true,
+					RunBash: func(ctx context.Context, command string, timeout time.Duration) (tool.BashToolResult, error) {
+						raw := []byte(fmt.Sprintf(`{"command":%q,"timeout_ms":%d}`, command, int(timeout.Milliseconds())))
+						out, err := handlers["bash"](ctx, raw)
+						if err != nil {
+							return tool.BashToolResult{}, err
+						}
+						if br, ok := out.(tool.BashToolResult); ok {
+							return br, nil
+						}
+						// Tolerate map[string]any output shapes.
+						b, _ := json.Marshal(out)
+						var br tool.BashToolResult
+						_ = json.Unmarshal(b, &br)
+						return br, nil
+					},
+				})
+				testReportPath = strings.TrimSpace(report)
+			}
+		}
+
 		if rt.WorkLedger != nil {
 			summary := strings.TrimSpace(res.Summary)
 			if summary == "" {
@@ -172,6 +209,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 				Artifacts: workledger.ReceiptArtifacts{
 					FindingsPath: strings.TrimSpace(res.FindingsPath),
 					TraceLogPath: strings.TrimSpace(res.TraceLogPath),
+					TestReportPath: strings.TrimSpace(testReportPath),
 				},
 				Signals: signals,
 			})
@@ -182,6 +220,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			Summary:      res.Summary,
 			FindingsPath: res.FindingsPath,
 			TraceLogPath: res.TraceLogPath,
+			TestReportPath: testReportPath,
 			Usage:        res.Usage,
 		}, runErr
 	}
@@ -209,6 +248,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			Summary:       attempt.Summary,
 			FindingsPath:  attempt.FindingsPath,
 			TraceLogPath:  attempt.TraceLogPath,
+			TestReportPath: attempt.TestReportPath,
 		})
 	}
 

@@ -378,6 +378,7 @@ export interface TaskAttempt {
     summary?: string
     findings_path?: string
     trace_log_path?: string
+    test_report_path?: string
     observer?: TaskObserverDecision
     usage?: {
         calls?: number

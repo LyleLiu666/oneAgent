@@ -51,6 +51,7 @@ type Attempt struct {
 	Summary      string `json:"summary,omitempty"`
 	FindingsPath string `json:"findings_path,omitempty"`
 	TraceLogPath string `json:"trace_log_path,omitempty"`
+	TestReportPath string `json:"test_report_path,omitempty"`
 
 	Observer *ObserverDecision `json:"observer,omitempty"`
 

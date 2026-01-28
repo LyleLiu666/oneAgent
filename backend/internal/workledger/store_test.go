@@ -3,6 +3,7 @@ package workledger
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,6 +24,7 @@ func TestStore_CreateAndGetReceipt(t *testing.T) {
 		Artifacts: ReceiptArtifacts{
 			FindingsPath: "/tmp/findings.md",
 			TraceLogPath: "/tmp/trace.jsonl",
+			TestReportPath: "/tmp/test_report.txt",
 		},
 		Signals: ReceiptSignals{DurationMs: 123},
 	})
@@ -49,6 +51,14 @@ func TestStore_CreateAndGetReceipt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.ReceiptsDir(), r.ReceiptID, "receipt.md")); err != nil {
 		t.Fatalf("stat receipt.md: %v", err)
+	}
+
+	md, err := os.ReadFile(filepath.Join(store.ReceiptsDir(), r.ReceiptID, "receipt.md"))
+	if err != nil {
+		t.Fatalf("read receipt.md: %v", err)
+	}
+	if !strings.Contains(string(md), "test_report_path: /tmp/test_report.txt") {
+		t.Fatalf("expected receipt.md to include test_report_path, got:\n%s", string(md))
 	}
 }
 
@@ -114,4 +124,3 @@ func TestStore_ListReceipts_FiltersAndSearches(t *testing.T) {
 		t.Fatalf("unexpected search results: %+v", search)
 	}
 }
-

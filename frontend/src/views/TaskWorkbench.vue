@@ -516,6 +516,7 @@ onUnmounted(() => {
               <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 mt-2">usage: {{ formatUsage(latestAttempt) }}</div>
               <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400 mt-2">findings: {{ latestAttempt.findings_path }}</div>
               <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400 mt-1">trace: {{ latestAttempt.trace_log_path }}</div>
+              <div v-if="latestAttempt.test_report_path" class="text-xs text-surface-400 mt-1">test report: {{ latestAttempt.test_report_path }}</div>
               <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400 mt-1">
                 policy:
                 <span class="font-mono text-surface-200">{{ latestAttempt.policy_snapshot.policy?.id }}</span>
