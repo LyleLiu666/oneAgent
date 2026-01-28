@@ -27,6 +27,26 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **WHEN** 用户执行 `oneagent serve --profile local --bind ::`（或等价 IPv6 监听地址）
 - **THEN** 服务可以正常启动并接受来自 IPv6 的请求（例如浏览器可访问 UI）
 
+### Requirement: System MUST support a loopback-only secure bind mode
+系统必须 (MUST) 支持将服务仅绑定在 loopback 地址（例如 `127.0.0.1` 或 `::1`），用于“同机访问最小暴露”模式。
+
+#### Scenario: Serve binds loopback successfully
+- **WHEN** 用户执行 `oneagent serve --bind 127.0.0.1`
+- **THEN** 服务启动成功且 UI 可通过 `http://localhost:<port>` 访问
+
+#### Scenario: Non-loopback bind shows strong warning
+- **WHEN** 用户执行 `oneagent serve --bind 0.0.0.0`（或 `--bind ::`）
+- **THEN** 系统在启动日志与 UI 中明确提示“局域网/公网暴露风险很大”
+- **AND** 给出安全替代方案（loopback/Tailscale）
+
+### Requirement: Doctor MUST report network exposure posture
+系统必须 (MUST) 在 `oneagent doctor`（或等价诊断）中报告当前 bind 地址是否为 loopback，并在非 loopback 时给出可操作的安全建议（例如使用 loopback + Tailscale）。
+
+#### Scenario: doctor shows actionable suggestion when exposed
+- **GIVEN** 当前配置 bind 为非 loopback
+- **WHEN** 用户执行 `oneagent doctor`
+- **THEN** doctor 输出包含风险提示与替代建议（可操作命令或指引）
+
 ### Requirement: 支持反向代理场景（不依赖 IP 阻断）
 系统必须 (MUST) 支持在反向代理（Nginx/Caddy/Traefik 等）之后运行的场景，且不得依赖“根据 RemoteIP 判定公网/内网并阻断”的逻辑作为默认安全边界（反代下 RemoteIP 往往是代理地址）。
 
@@ -169,4 +189,3 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **GIVEN** 系统配置了默认 `max_total_tokens` 与 `max_cost_usd`
 - **WHEN** 用户创建 task 且未提供这些字段
 - **THEN** 系统自动填充默认预算
-
