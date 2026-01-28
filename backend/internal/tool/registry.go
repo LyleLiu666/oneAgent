@@ -150,11 +150,16 @@ func MountWithSnapshot(ids []string, snap permissions.Snapshot) ([]Definition, e
 			return nil, fmt.Errorf("unknown tool id: %s", trimmed)
 		}
 		if isToolDisabledByEnv(def.ID) {
-			return nil, fmt.Errorf("tool disabled by configuration: %s (set %s=0 to enable)", def.ID, toolDisableEnvVar(def.ID))
+			dec := permissions.Decision{Allowed: false, Reason: "disabled_by_env"}
+			deny := newPolicyDenyError(def.ID, snap, dec)
+			logPolicyDeny(deny)
+			return nil, deny
 		}
 		dec := permissions.Evaluate(policy, def.ID)
 		if !dec.Allowed {
-			return nil, fmt.Errorf("tool not allowed by policy: %s", def.ID)
+			deny := newPolicyDenyError(def.ID, snap, dec)
+			logPolicyDeny(deny)
+			return nil, deny
 		}
 		seen[trimmed] = true
 		defs = append(defs, wrapWithSnapshot(def, snap))

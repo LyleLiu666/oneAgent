@@ -186,6 +186,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
+	policySnap, err := h.rt.ResolveToolPolicySnapshot(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Create or get session
 	sessionID := req.SessionID
@@ -266,7 +271,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 
-	toolDefs, err := tool.Mount(selectedToolIDs)
+	toolDefs, err := tool.MountWithSnapshot(selectedToolIDs, policySnap)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -575,6 +580,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			ctx := context.Background() // Use background context so generation survives request cancellation
 			ctx = tool.ContextWithSessionID(ctx, sessionID)
 			ctx = tool.ContextWithUserID(ctx, userID)
+			ctx = tool.ContextWithPolicySnapshot(ctx, policySnap)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
 			ctx = tool.ContextWithRuntimeLayout(ctx, h.rt.Layout)
@@ -613,16 +619,16 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 			llmCallID := uuid.NewString()
 			callRecord := llmlog.CallRecord{
-				ID:                 llmCallID,
-				SessionID:          sessionID,
-				UserID:             userID,
-				Model:              resolvedModel.ModelName,
-				Provider:           resolvedModel.ProviderType,
-				CreatedAt:          time.Now(),
+				ID:        llmCallID,
+				SessionID: sessionID,
+				UserID:    userID,
+				Model:     resolvedModel.ModelName,
+				Provider:  resolvedModel.ProviderType,
+				CreatedAt: time.Now(),
 				Request: map[string]any{
-					"messages":                messages,
-					"tool_protocol":           toolProtocol,
-					"tool_ids":                selectedToolIDs,
+					"messages":                  messages,
+					"tool_protocol":             toolProtocol,
+					"tool_ids":                  selectedToolIDs,
 					"cacheable_message_indexes": llm.CacheableMessageIndexes(messages),
 				},
 				PromptCacheEnabled: opts.EnablePromptCache,
@@ -702,7 +708,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 								if r, ok := resultByID[call.ID]; ok {
 									if call.Function.Name == "subagent" {
 										var parsed struct {
-											OK          bool   `json:"ok"`
+											OK           bool   `json:"ok"`
 											Summary      string `json:"summary"`
 											FindingsPath string `json:"findings_path"`
 											TraceLogPath string `json:"trace_log_path"`
@@ -718,13 +724,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 											"arguments":    call.Function.Arguments,
 										}
 										entry.Output = map[string]any{
-											"ok":            parsed.OK,
-											"summary":       parsed.Summary,
-											"findings_path": parsed.FindingsPath,
+											"ok":             parsed.OK,
+											"summary":        parsed.Summary,
+											"findings_path":  parsed.FindingsPath,
 											"trace_log_path": parsed.TraceLogPath,
-											"run_id":        parsed.RunID,
-											"duration_ms":   parsed.DurationMs,
-											"error":         parsed.Error,
+											"run_id":         parsed.RunID,
+											"duration_ms":    parsed.DurationMs,
+											"error":          parsed.Error,
 										}
 										entry.Metadata["tool_call_id"] = call.ID
 										entry.Metadata["protocol"] = "xml"
@@ -1537,7 +1543,7 @@ func runToolLoop(
 
 			if enableTrace && isSubagent {
 				var parsed struct {
-					OK          bool   `json:"ok"`
+					OK           bool   `json:"ok"`
 					Summary      string `json:"summary"`
 					FindingsPath string `json:"findings_path"`
 					TraceLogPath string `json:"trace_log_path"`
@@ -1553,13 +1559,13 @@ func runToolLoop(
 					"arguments":    call.Function.Arguments,
 				}
 				entry.Output = map[string]any{
-					"ok":            parsed.OK,
-					"summary":       parsed.Summary,
-					"findings_path": parsed.FindingsPath,
+					"ok":             parsed.OK,
+					"summary":        parsed.Summary,
+					"findings_path":  parsed.FindingsPath,
 					"trace_log_path": parsed.TraceLogPath,
-					"run_id":        parsed.RunID,
-					"duration_ms":   parsed.DurationMs,
-					"error":         parsed.Error,
+					"run_id":         parsed.RunID,
+					"duration_ms":    parsed.DurationMs,
+					"error":          parsed.Error,
 				}
 				entry.Metadata["tool_call_id"] = call.ID
 				entry.Metadata["protocol"] = "json"

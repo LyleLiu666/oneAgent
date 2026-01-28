@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
@@ -166,7 +167,11 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		ids = filtered
 	}
 
-	defs, err := Mount(ids)
+	snap, ok := PolicySnapshotFromContext(ctx)
+	if !ok {
+		snap = permissions.ResolveSnapshot(userID, permissions.DefaultPolicy(), time.Now())
+	}
+	defs, err := MountWithSnapshot(ids, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +187,7 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		Root:       ws.Root,
 		WriteScope: req.Scope,
 	})
+	subCtx = ContextWithPolicySnapshot(subCtx, snap)
 
 	skillsSummary := ""
 	k := 3
@@ -294,25 +300,25 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 
 	result, runErr := subagent.Run(subCtx, subagent.RunRequest{
-		ParentSessionID: sessionID,
-		UserID:          userID,
-		SystemPrompt:    systemPrompt,
-		Client:          client,
-		Tools:           ToolsForLLM(defs),
-		Handlers:        handlers,
-		WorkspaceRoot:   workspaceRoot,
-		WriteScope:      req.Scope,
-		LogsBaseDir:     layout.SubagentLogsDir,
-		Task:            task,
-		ContextSummary:  strings.TrimSpace(req.ContextSummary),
-		SkillsSummary:   skillsSummary,
-		MaxSteps:        req.MaxSteps,
+		ParentSessionID:   sessionID,
+		UserID:            userID,
+		SystemPrompt:      systemPrompt,
+		Client:            client,
+		Tools:             ToolsForLLM(defs),
+		Handlers:          handlers,
+		WorkspaceRoot:     workspaceRoot,
+		WriteScope:        req.Scope,
+		LogsBaseDir:       layout.SubagentLogsDir,
+		Task:              task,
+		ContextSummary:    strings.TrimSpace(req.ContextSummary),
+		SkillsSummary:     skillsSummary,
+		MaxSteps:          req.MaxSteps,
 		MaxRuntimeSeconds: req.MaxRuntimeSeconds,
-		MaxLogBytes:     req.MaxLogBytes,
+		MaxLogBytes:       req.MaxLogBytes,
 	})
 
 	out := subagentToolResult{
-		OK:          runErr == nil,
+		OK:           runErr == nil,
 		Summary:      result.Summary,
 		FindingsPath: result.FindingsPath,
 		TraceLogPath: result.TraceLogPath,

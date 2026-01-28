@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/handler"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
-	"github.com/liu_y/oneAgent/backend/internal/handler"
 	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
@@ -33,11 +33,6 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		return rt.TaskRunner.Start()
 	}
 
-	tools, handlers, err := buildSubagentToolset()
-	if err != nil {
-		return err
-	}
-
 	exec := func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, resumedFrom *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
 		userID := strings.TrimSpace(task.UserID)
 		if userID == "" {
@@ -49,8 +44,31 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			return taskqueue.AttemptResult{}, err
 		}
 
+		policySnap, err := rt.ResolveToolPolicySnapshot(ctx, userID)
+		if err != nil {
+			return taskqueue.AttemptResult{}, err
+		}
+
+		toolIDs := make([]string, 0, 16)
+		for _, def := range tool.All() {
+			if def.ID == tool.ToolIDSubagent {
+				continue
+			}
+			toolIDs = append(toolIDs, def.ID)
+		}
+		defs, err := tool.MountWithSnapshot(toolIDs, policySnap)
+		if err != nil {
+			return taskqueue.AttemptResult{}, err
+		}
+		tools := tool.ToolsForLLM(defs)
+		handlers := make(map[string]subagent.ToolHandler, len(defs))
+		for _, def := range defs {
+			handlers[def.Spec.Function.Name] = subagent.ToolHandler(def.Handler)
+		}
+
 		toolCtx := ctx
 		toolCtx = tool.ContextWithUserID(toolCtx, userID)
+		toolCtx = tool.ContextWithPolicySnapshot(toolCtx, policySnap)
 		toolCtx = tool.ContextWithSettingsDB(toolCtx, rt.Settings)
 		toolCtx = tool.ContextWithSkillManager(toolCtx, rt.Skills)
 		toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
@@ -73,18 +91,18 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 
 		contextSummary := buildResumeContextSummary(resumedFrom)
 		req := subagent.RunRequest{
-			ParentSessionID: task.ID,
-			UserID:          userID,
-			SystemPrompt:    handler.DefaultSystemPrompt,
-			Client:          client,
-			Tools:           tools,
-			Handlers:        handlers,
-			WorkspaceRoot:   task.Workspace,
-			WriteScope:      nil,
-			LogsBaseDir:     rt.Layout.SubagentLogsDir,
-			Task:            task.Prompt,
-			ContextSummary:  contextSummary,
-			MaxSteps:        maxSteps,
+			ParentSessionID:   task.ID,
+			UserID:            userID,
+			SystemPrompt:      handler.DefaultSystemPrompt,
+			Client:            client,
+			Tools:             tools,
+			Handlers:          handlers,
+			WorkspaceRoot:     task.Workspace,
+			WriteScope:        nil,
+			LogsBaseDir:       rt.Layout.SubagentLogsDir,
+			Task:              task.Prompt,
+			ContextSummary:    contextSummary,
+			MaxSteps:          maxSteps,
 			MaxRuntimeSeconds: maxRuntime,
 		}
 
@@ -169,27 +187,6 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
-}
-
-func buildSubagentToolset() ([]llm.Tool, map[string]subagent.ToolHandler, error) {
-	ids := make([]string, 0, 16)
-	for _, def := range tool.All() {
-		if def.ID == tool.ToolIDSubagent {
-			continue
-		}
-		ids = append(ids, def.ID)
-	}
-	defs, err := tool.Mount(ids)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	handlers := make(map[string]subagent.ToolHandler, len(defs))
-	for _, def := range defs {
-		handlers[def.Spec.Function.Name] = subagent.ToolHandler(def.Handler)
-	}
-
-	return tool.ToolsForLLM(defs), handlers, nil
 }
 
 func buildResumeContextSummary(resumedFrom *taskqueue.Attempt) string {
