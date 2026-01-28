@@ -245,10 +245,11 @@ func (r *TaskRunner) Resume(taskID string) (Task, error) {
 		newAttemptID = NewID()
 		fromAttempt = latest.ID
 		tk.Attempts = append(tk.Attempts, Attempt{
-			ID:                  newAttemptID,
-			Status:              AttemptQueued,
-			CreatedAt:           now,
+			ID:                   newAttemptID,
+			Status:               AttemptQueued,
+			CreatedAt:            now,
 			ResumedFromAttemptID: latest.ID,
+			PrincipalID:          tk.UserID,
 		})
 		return nil
 	})

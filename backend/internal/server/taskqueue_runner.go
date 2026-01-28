@@ -48,6 +48,33 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		if err != nil {
 			return taskqueue.AttemptResult{}, err
 		}
+		if rt.Tasks != nil && strings.TrimSpace(attempt.ID) != "" {
+			snapCopy := policySnap
+			_, _ = rt.Tasks.UpdateTask(task.ID, func(tk *taskqueue.Task) error {
+				a := tk.LatestAttempt()
+				if a == nil || a.ID != attempt.ID {
+					return nil
+				}
+				if strings.TrimSpace(a.PrincipalID) == "" {
+					a.PrincipalID = userID
+				}
+				if a.PolicySnapshot == nil {
+					a.PolicySnapshot = &snapCopy
+				}
+				return nil
+			})
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
+				Type:      "attempt.policy_snapshot",
+				Message:   "Policy snapshot resolved",
+				Data: map[string]any{
+					"principal_id": userID,
+					"policy_id":    policySnap.Policy.ID,
+					"policy_hash":  policySnap.PolicyHash,
+				},
+			})
+		}
 
 		toolIDs := make([]string, 0, 16)
 		for _, def := range tool.All() {

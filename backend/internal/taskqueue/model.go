@@ -1,6 +1,10 @@
 package taskqueue
 
-import "time"
+import (
+	"time"
+
+	"github.com/liu_y/oneAgent/backend/internal/permissions"
+)
 
 type AttemptStatus string
 
@@ -35,6 +39,9 @@ type Attempt struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	ResumedFromAttemptID string `json:"resumed_from_attempt_id,omitempty"`
+
+	PrincipalID    string                `json:"principal_id,omitempty"`
+	PolicySnapshot *permissions.Snapshot `json:"policy_snapshot,omitempty"`
 
 	RunID        string `json:"run_id,omitempty"`
 	Summary      string `json:"summary,omitempty"`
@@ -83,4 +90,3 @@ type Event struct {
 
 // Now returns current time; overrideable in tests.
 var Now = time.Now
-

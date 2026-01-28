@@ -69,14 +69,15 @@ func APIAuth(rt *runtime.Runtime, publicPaths ...string) gin.HandlerFunc {
 
 		switch strings.ToLower(strings.TrimSpace(rt.Config.AuthMode)) {
 		case "none":
-			injectLocalUser(c)
+			injectUser(c, "local")
 			c.Next()
 			return
 		case "token":
-			if !authenticateLocalToken(c, rt.AuthToken) {
+			userID, ok := authenticateLocalToken(c, rt)
+			if !ok {
 				return
 			}
-			injectLocalUser(c)
+			injectUser(c, userID)
 			c.Next()
 			return
 		default:
@@ -86,14 +87,14 @@ func APIAuth(rt *runtime.Runtime, publicPaths ...string) gin.HandlerFunc {
 	}
 }
 
-func authenticateLocalToken(c *gin.Context, expectedToken string) bool {
+func authenticateLocalToken(c *gin.Context, rt *runtime.Runtime) (string, bool) {
 	// Extract token from Authorization header
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"error": "Authorization header required",
 		})
-		return false
+		return "", false
 	}
 
 	// Parse Bearer token
@@ -102,20 +103,41 @@ func authenticateLocalToken(c *gin.Context, expectedToken string) bool {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 			"error": "Invalid authorization header format",
 		})
-		return false
+		return "", false
 	}
 
-	tokenString := parts[1]
-
-	if expectedToken == "" || tokenString != expectedToken {
+	tokenString := strings.TrimSpace(parts[1])
+	if tokenString == "" {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-		return false
+		return "", false
 	}
-	return true
+
+	// Prefer settingsdb token mapping when available.
+	if rt != nil && rt.Settings != nil {
+		principalID, ok, err := rt.Settings.LookupAuthToken(c.Request.Context(), tokenString)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return "", false
+		}
+		if ok {
+			return principalID, true
+		}
+	}
+
+	// Backward-compatible fallback to the single local token file.
+	if rt != nil && strings.TrimSpace(rt.AuthToken) != "" && tokenString == rt.AuthToken {
+		return "local", true
+	}
+
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+	return "", false
 }
 
-func injectLocalUser(c *gin.Context) {
-	// Local tool mode is single-user by default.
-	c.Set("user_id", "local")
-	c.Set("username", "local")
+func injectUser(c *gin.Context, userID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "local"
+	}
+	c.Set("user_id", userID)
+	c.Set("username", userID)
 }

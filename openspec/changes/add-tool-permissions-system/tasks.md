@@ -9,9 +9,9 @@
 - [x] 2.4 Add structured deny errors + audit logs (trace + server logs)
 
 ## 3. Backend: Identity / Multi-user
-- [ ] 3.1 Add multi-token support mapping `Authorization: Bearer <token>` → `principal_id`
+- [x] 3.1 Add multi-token support mapping `Authorization: Bearer <token>` → `principal_id`
 - [ ] 3.2 Add minimal admin APIs/CLI to manage tokens/users/roles (create/list/revoke)
-- [ ] 3.3 Propagate `principal_id` into task attempts and subagent runs
+- [x] 3.3 Propagate `principal_id` into task attempts and subagent runs
 
 ## 4. Command Tools Hardening
 - [x] 4.1 Replace `ONEAGENT_BASH_ALLOW_RM` with policy-backed command profiles (e.g., readonly/dev/full)

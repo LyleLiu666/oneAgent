@@ -89,9 +89,10 @@ func (s *Store) CreateTask(userID, workspace, title, prompt, modelID string, lim
 		CreatedAt: now,
 		UpdatedAt: now,
 		Attempts: []Attempt{{
-			ID:        attemptID,
-			Status:    AttemptQueued,
-			CreatedAt: now,
+			ID:          attemptID,
+			Status:      AttemptQueued,
+			CreatedAt:   now,
+			PrincipalID: userID,
 		}},
 	}
 
