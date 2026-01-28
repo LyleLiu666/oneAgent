@@ -508,12 +508,38 @@ export async function listSkills(): Promise<SkillInfo[]> {
     return api('/api/skills')
 }
 
-export async function listSkillDuplicates(): Promise<SkillDuplicateGroup[]> {
-    return api('/api/skills/duplicates')
+export async function listSkillDuplicates(params?: { workspace?: string }): Promise<SkillDuplicateGroup[]> {
+    const qs = new URLSearchParams()
+    if (params?.workspace) qs.set('workspace', params.workspace)
+    const q = qs.toString()
+    return api(`/api/skills/duplicates${q ? `?${q}` : ''}`)
 }
 
 export async function archiveSkill(skillId: string): Promise<{ ok: boolean; skill_id: string; archived_path: string }> {
     return api(`/api/skills/${encodeURIComponent(skillId)}/archive`, { method: 'POST', body: {} })
+}
+
+export interface PinSkillResult {
+    ok: boolean
+    skill_id: string
+    canonical_path: string
+    archived_paths?: string[]
+    shadowed_candidates?: SkillCandidateInfo[]
+}
+
+export async function pinSkillCandidate(
+    skillId: string,
+    payload: { source: string; path: string; workspace_root?: string; archive_shadowed_personal?: boolean }
+): Promise<PinSkillResult> {
+    return api(`/api/skills/${encodeURIComponent(skillId)}/pin`, { method: 'POST', body: payload })
+}
+
+export async function archiveShadowedPersonalDuplicates(skillId: string): Promise<{
+    ok: boolean
+    skill_id: string
+    archived_paths: string[]
+}> {
+    return api(`/api/skills/${encodeURIComponent(skillId)}/archive_shadowed`, { method: 'POST', body: {} })
 }
 
 export async function getSkill(skillId: string): Promise<SkillInfo & { sha256?: string; skill_md?: string }> {

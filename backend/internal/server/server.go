@@ -119,6 +119,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/skills/:id", handler.GetSkill)
 		api.PUT("/skills/:id", handler.UpdateSkill)
 		api.POST("/skills/:id/archive", handler.ArchiveSkill)
+		api.POST("/skills/:id/pin", handler.PinSkillCandidate)
+		api.POST("/skills/:id/archive_shadowed", handler.ArchiveShadowedPersonalDuplicates)
 
 		// Workspace helpers (local-tool mode).
 		api.POST("/workspace/choose", handler.ChooseWorkspace)

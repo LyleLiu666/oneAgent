@@ -9,6 +9,8 @@ vi.mock('@/api/client', () => ({
   listSkills: vi.fn(async () => []),
   listSkillDuplicates: vi.fn(async () => []),
   archiveSkill: vi.fn(async () => ({})),
+  pinSkillCandidate: vi.fn(async () => ({})),
+  archiveShadowedPersonalDuplicates: vi.fn(async () => ({})),
   getSkill: vi.fn(async () => ({})),
   updateSkill: vi.fn(async () => ({})),
 }))
@@ -84,6 +86,52 @@ it('loads skill details when selected and saves with OCC', async () => {
   await flushPromises()
 
   expect(apiClient.updateSkill).toHaveBeenCalledWith(expect.objectContaining({ skill_id: 'a', expected_sha256: 'abc' }))
+
+  wrapper.unmount()
+})
+
+it('pins a candidate from duplicates list', async () => {
+  const { default: SkillGovernance } = await import('@/views/SkillGovernance.vue')
+
+  ;(apiClient.listSkills as any).mockResolvedValueOnce([])
+  ;(apiClient.listSkillDuplicates as any).mockResolvedValueOnce([
+    {
+      skill_id: 'foo',
+      candidates: [
+        {
+          skill_id: 'foo',
+          name: 'foo',
+          description: 'from claude',
+          source: '.claude',
+          path: '/tmp/.claude/skills/foo/SKILL.md',
+          archivable: false,
+          effective: false,
+          precedence_rank: 2,
+        },
+        {
+          skill_id: 'foo',
+          name: 'foo',
+          description: 'personal',
+          source: '.oneagent',
+          path: '/tmp/.oneagent/skills/foo/SKILL.md',
+          archivable: true,
+          effective: true,
+          precedence_rank: 3,
+        },
+      ],
+    },
+  ])
+
+  const wrapper = shallowMount(SkillGovernance)
+  await flushPromises()
+
+  await wrapper.get('[data-testid="duplicate-pin"]').trigger('click')
+  await flushPromises()
+
+  expect((apiClient as any).pinSkillCandidate).toHaveBeenCalledWith(
+    'foo',
+    expect.objectContaining({ source: '.claude', path: '/tmp/.claude/skills/foo/SKILL.md' })
+  )
 
   wrapper.unmount()
 })

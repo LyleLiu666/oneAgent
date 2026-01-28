@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Archive, RefreshCw, Wrench, Save, Copy } from 'lucide-vue-next'
+import { Archive, RefreshCw, Wrench, Save, Copy, Pin, Layers } from 'lucide-vue-next'
 
 import {
+  archiveShadowedPersonalDuplicates,
   archiveSkill,
   getSkill,
   listSkillDuplicates,
   listSkills,
+  pinSkillCandidate,
   updateSkill,
   type SkillDuplicateGroup,
+  type SkillCandidateInfo,
   type SkillInfo,
 } from '@/api/client'
 
@@ -19,6 +22,9 @@ const skills = ref<SkillInfo[]>([])
 const duplicatesLoading = ref(false)
 const duplicatesError = ref('')
 const duplicates = ref<SkillDuplicateGroup[]>([])
+const duplicatesActionLoading = ref(false)
+const duplicatesActionError = ref('')
+const archiveShadowedBySkillID = ref<Record<string, boolean>>({})
 
 const selectedID = ref('')
 const selectedLoading = ref(false)
@@ -27,9 +33,18 @@ const selected = ref<(SkillInfo & { sha256?: string; skill_md?: string }) | null
 const editMD = ref('')
 const editSHA = ref('')
 
+const workspaceRoot = computed(() => {
+  try {
+    return String(globalThis?.localStorage?.getItem?.('oneagent-workspace') || '').trim()
+  } catch {
+    return ''
+  }
+})
+
 const refresh = async () => {
   error.value = ''
   duplicatesError.value = ''
+  duplicatesActionError.value = ''
   loading.value = true
   try {
     const list = await listSkills()
@@ -43,8 +58,13 @@ const refresh = async () => {
 
   duplicatesLoading.value = true
   try {
-    const dup = await listSkillDuplicates()
+    const dup = await listSkillDuplicates(workspaceRoot.value ? { workspace: workspaceRoot.value } : undefined)
     duplicates.value = Array.isArray(dup) ? dup : []
+    for (const g of duplicates.value) {
+      if (archiveShadowedBySkillID.value[g.skill_id] === undefined) {
+        archiveShadowedBySkillID.value[g.skill_id] = true
+      }
+    }
   } catch (e: any) {
     duplicates.value = []
     duplicatesError.value = String(e?.data?.error || e?.message || 'Failed to load duplicates')
@@ -122,6 +142,37 @@ const doArchive = async (s: SkillInfo) => {
     error.value = String(e?.data?.error || e?.message || 'Failed to archive skill')
   } finally {
     loading.value = false
+  }
+}
+
+const doPin = async (skillID: string, c: SkillCandidateInfo) => {
+  duplicatesActionError.value = ''
+  duplicatesActionLoading.value = true
+  try {
+    await pinSkillCandidate(skillID, {
+      source: c.source,
+      path: c.path,
+      workspace_root: workspaceRoot.value || undefined,
+      archive_shadowed_personal: Boolean(archiveShadowedBySkillID.value[skillID]),
+    })
+    await refresh()
+  } catch (e: any) {
+    duplicatesActionError.value = String(e?.data?.error || e?.message || 'Failed to pin skill')
+  } finally {
+    duplicatesActionLoading.value = false
+  }
+}
+
+const doArchiveShadowed = async (skillID: string) => {
+  duplicatesActionError.value = ''
+  duplicatesActionLoading.value = true
+  try {
+    await archiveShadowedPersonalDuplicates(skillID)
+    await refresh()
+  } catch (e: any) {
+    duplicatesActionError.value = String(e?.data?.error || e?.message || 'Failed to archive shadowed duplicates')
+  } finally {
+    duplicatesActionLoading.value = false
   }
 }
 
@@ -212,6 +263,12 @@ onMounted(async () => {
             </div>
 
             <div class="p-5">
+              <div
+                v-if="duplicatesActionError"
+                class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
+              >
+                {{ duplicatesActionError }}
+              </div>
               <div v-if="duplicatesError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
                 {{ duplicatesError }}
               </div>
@@ -223,6 +280,26 @@ onMounted(async () => {
                     <div class="min-w-0">
                       <p class="text-sm text-surface-100 font-semibold truncate">id={{ g.skill_id }}</p>
                       <p class="text-xs text-surface-500">{{ g.candidates.length }} candidates · first effective=true</p>
+                    </div>
+                    <div class="shrink-0 flex items-center gap-2">
+                      <label class="text-[11px] text-surface-500 inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          class="accent-primary-500"
+                          v-model="archiveShadowedBySkillID[g.skill_id]"
+                          :disabled="duplicatesActionLoading"
+                        />
+                        archive shadowed personal
+                      </label>
+                      <button
+                        data-testid="duplicate-archive-shadowed"
+                        class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+                        :disabled="duplicatesActionLoading"
+                        @click="doArchiveShadowed(g.skill_id)"
+                      >
+                        <Layers class="w-4 h-4" />
+                        Archive shadowed
+                      </button>
                     </div>
                   </div>
 
@@ -242,6 +319,16 @@ onMounted(async () => {
                         </p>
                       </div>
                       <div class="shrink-0">
+                        <button
+                          v-if="c.source !== '.oneagent'"
+                          data-testid="duplicate-pin"
+                          class="px-3 py-2 rounded-xl text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2 mr-2 disabled:opacity-50"
+                          :disabled="duplicatesActionLoading"
+                          @click="doPin(g.skill_id, c)"
+                        >
+                          <Pin class="w-4 h-4" />
+                          Pin
+                        </button>
                         <button
                           v-if="c.archivable"
                           data-testid="duplicate-archive"

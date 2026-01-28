@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -79,7 +80,8 @@ func ListSkillDuplicates(c *gin.Context) {
 		return
 	}
 
-	candidates, err := skill.DiscoverCandidates(c.Request.Context(), skill.DiscoverOptions{})
+	workspaceRoot := strings.TrimSpace(c.Query("workspace"))
+	candidates, err := skill.DiscoverCandidates(c.Request.Context(), skill.DiscoverOptions{WorkspaceRoot: workspaceRoot})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -393,4 +395,227 @@ func archiveOneAgentSkill(home string, s skill.Skill) (string, error) {
 	}
 
 	return filepath.Join(dstDir, "SKILL.md"), nil
+}
+
+type pinSkillRequest struct {
+	WorkspaceRoot   string       `json:"workspace_root,omitempty"`
+	Source          skill.Source `json:"source"`
+	Path            string       `json:"path"`
+	ArchiveShadowed bool         `json:"archive_shadowed_personal,omitempty"`
+}
+
+type pinSkillResult struct {
+	OK            bool                 `json:"ok"`
+	SkillID       string               `json:"skill_id"`
+	CanonicalPath string               `json:"canonical_path"`
+	ArchivedPaths []string             `json:"archived_paths,omitempty"`
+	Shadowed      []skillCandidateInfo `json:"shadowed_candidates,omitempty"`
+}
+
+func PinSkillCandidate(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	home := strings.TrimSpace(rt.Config.Home)
+	if home == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "home is required"})
+		return
+	}
+
+	skillID := strings.TrimSpace(c.Param("id"))
+	if skillID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill id is required"})
+		return
+	}
+	skillID = skill.NormalizeName(skillID)
+	if skillID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid skill id"})
+		return
+	}
+
+	var req pinSkillRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	req.Path = strings.TrimSpace(req.Path)
+	if req.Path == "" || strings.TrimSpace(string(req.Source)) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source and path are required"})
+		return
+	}
+
+	candidates, err := skill.DiscoverCandidates(c.Request.Context(), skill.DiscoverOptions{WorkspaceRoot: strings.TrimSpace(req.WorkspaceRoot)})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var picked *skill.Skill
+	for _, cand := range candidates {
+		if cand.Skill.ID == skillID && cand.Skill.Source == req.Source && strings.TrimSpace(cand.Skill.Path) == req.Path {
+			s := cand.Skill
+			picked = &s
+			break
+		}
+	}
+	if picked == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "candidate not found"})
+		return
+	}
+
+	data, err := os.ReadFile(picked.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "candidate not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	canonicalDir := filepath.Join(home, ".oneagent", "skills", skillID)
+	canonicalPath := filepath.Join(canonicalDir, "SKILL.md")
+	if err := os.MkdirAll(canonicalDir, 0o700); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := fsutil.AtomicWriteFile(canonicalPath, data, 0o644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	archived := []string(nil)
+	shadowed := []skillCandidateInfo(nil)
+	if req.ArchiveShadowed {
+		archived, shadowed, err = archiveShadowedPersonalDuplicates(c.Request.Context(), home, skillID, canonicalPath)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, pinSkillResult{
+		OK:            true,
+		SkillID:       skillID,
+		CanonicalPath: canonicalPath,
+		ArchivedPaths: archived,
+		Shadowed:      shadowed,
+	})
+}
+
+type archiveShadowedResult struct {
+	OK            bool     `json:"ok"`
+	SkillID       string   `json:"skill_id"`
+	ArchivedPaths []string `json:"archived_paths"`
+}
+
+func ArchiveShadowedPersonalDuplicates(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	home := strings.TrimSpace(rt.Config.Home)
+	if home == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "home is required"})
+		return
+	}
+
+	skillID := strings.TrimSpace(c.Param("id"))
+	if skillID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill id is required"})
+		return
+	}
+	skillID = skill.NormalizeName(skillID)
+	if skillID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid skill id"})
+		return
+	}
+
+	canonicalPath := filepath.Join(home, ".oneagent", "skills", skillID, "SKILL.md")
+	archived, _, err := archiveShadowedPersonalDuplicates(c.Request.Context(), home, skillID, canonicalPath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, archiveShadowedResult{
+		OK:            true,
+		SkillID:       skillID,
+		ArchivedPaths: archived,
+	})
+}
+
+func archiveShadowedPersonalDuplicates(ctx context.Context, home string, skillID string, canonicalPath string) ([]string, []skillCandidateInfo, error) {
+	home = strings.TrimSpace(home)
+	skillID = skill.NormalizeName(skillID)
+	canonicalPath = filepath.Clean(strings.TrimSpace(canonicalPath))
+	if home == "" || skillID == "" || canonicalPath == "" {
+		return nil, nil, errors.New("home, skillID, canonicalPath are required")
+	}
+	if _, err := os.Stat(canonicalPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, errors.New("canonical skill not found; pin first")
+		}
+		return nil, nil, err
+	}
+
+	canonicalReal := canonicalPath
+	if resolved, err := filepath.EvalSymlinks(canonicalPath); err == nil && strings.TrimSpace(resolved) != "" {
+		canonicalReal = filepath.Clean(resolved)
+	}
+
+	candidates, err := skill.DiscoverCandidates(ctx, skill.DiscoverOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	archived := make([]string, 0, 4)
+	shadowed := make([]skillCandidateInfo, 0, 4)
+
+	for _, cand := range candidates {
+		s := cand.Skill
+		if s.ID != skillID {
+			continue
+		}
+		if s.Source != skill.SourceOneAgent {
+			continue
+		}
+		if !canArchiveSkill(home, s) {
+			continue
+		}
+		candPath := filepath.Clean(strings.TrimSpace(s.Path))
+		if candPath == canonicalPath {
+			continue
+		}
+		candReal := candPath
+		if resolved, err := filepath.EvalSymlinks(candPath); err == nil && strings.TrimSpace(resolved) != "" {
+			candReal = filepath.Clean(resolved)
+		}
+		if candReal == canonicalReal {
+			continue
+		}
+
+		archivedPath, err := archiveOneAgentSkill(home, s)
+		if err != nil {
+			return nil, nil, err
+		}
+		archived = append(archived, archivedPath)
+		shadowed = append(shadowed, skillCandidateInfo{
+			SkillID:        s.ID,
+			Name:           s.Name,
+			Description:    s.Description,
+			Source:         s.Source,
+			Path:           s.Path,
+			Archivable:     true,
+			Effective:      cand.Effective,
+			PrecedenceRank: cand.PrecedenceRank,
+		})
+	}
+
+	return archived, shadowed, nil
 }
