@@ -46,6 +46,8 @@ func Init(cfg *config.Config) (*Runtime, error) {
 	if cfg == nil {
 		return nil, errors.New("config is required")
 	}
+	// Ensure packages that rely on global config (e.g., skill discovery) see the same config instance.
+	config.AppConfig = cfg
 
 	layout, err := EnsureLayout(cfg.Home)
 	if err != nil {

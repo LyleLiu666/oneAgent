@@ -1,0 +1,115 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/liu_y/oneAgent/backend/internal/config"
+	"github.com/liu_y/oneAgent/backend/internal/runtime"
+)
+
+func TestServer_SkillsAPI_ListAndArchive(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	// Seed a personal oneAgent skill.
+	skillPath := filepath.Join(home, ".oneagent", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo-skill\ndescription: demo\n---\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	// List skills should include demo-skill and mark it archivable.
+	res, err := http.Get(srv.URL + "/api/skills")
+	if err != nil {
+		t.Fatalf("GET /api/skills: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/skills status=%d", res.StatusCode)
+	}
+	var list []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	found := false
+	for _, it := range list {
+		if it["skill_id"] == "demo-skill" {
+			found = true
+			if it["archivable"] != true {
+				t.Fatalf("expected archivable=true, got %+v", it)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected demo-skill in list")
+	}
+
+	// Archive it.
+	body := bytes.NewReader([]byte(`{}`))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/skills/demo-skill/archive", body)
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/skills/:id/archive: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/skills/:id/archive status=%d", res.StatusCode)
+	}
+	var archived map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&archived)
+	if archived["ok"] != true {
+		t.Fatalf("expected ok=true, got %+v", archived)
+	}
+	if _, err := os.Stat(skillPath); err == nil {
+		t.Fatalf("expected original skill to be moved")
+	}
+
+	// List again should not include demo-skill.
+	res, err = http.Get(srv.URL + "/api/skills")
+	if err != nil {
+		t.Fatalf("GET /api/skills(2): %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/skills(2) status=%d", res.StatusCode)
+	}
+	list = nil
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list(2): %v", err)
+	}
+	for _, it := range list {
+		if it["skill_id"] == "demo-skill" {
+			t.Fatalf("expected demo-skill to be absent after archive")
+		}
+	}
+}
+
