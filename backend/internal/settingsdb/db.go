@@ -127,6 +127,15 @@ CREATE TABLE IF NOT EXISTS user_settings (
   PRIMARY KEY(user_id, key)
 );
 `,
+		`
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token TEXT PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  revoked_at_ms INTEGER
+);
+`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_tokens_principal_id ON auth_tokens(principal_id);`,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -158,4 +167,3 @@ func timeFromMillis(ms int64) time.Time {
 	}
 	return time.UnixMilli(ms)
 }
-

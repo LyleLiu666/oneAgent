@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -87,6 +88,14 @@ func runReadFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	req.FilePath = strings.TrimSpace(req.FilePath)
 	if req.FilePath == "" {
 		return nil, fmt.Errorf("filePath 不能为空")
+	}
+
+	dec, err := RequirePolicy(ctx, ToolIDReadFile)
+	if err != nil {
+		return nil, err
+	}
+	if IsReadOutsideWorkspaceDenied(dec) && filepath.IsAbs(req.FilePath) {
+		return nil, fmt.Errorf("read outside workspace is denied by policy")
 	}
 	if runeCount(req.FilePath) > maxWriteFilePathRunesLimit {
 		return nil, fmt.Errorf("filePath 过长，请缩短路径（建议 <= %d 字）", maxWriteFilePathRunesLimit)

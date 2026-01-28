@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
 
@@ -67,8 +66,13 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, errors.New("command is required")
 	}
 
-	if strings.TrimSpace(os.Getenv("ONEAGENT_BASH_ALLOW_RM")) != "1" && bashCommandContainsToken(req.Command, "rm") {
-		return nil, fmt.Errorf("bash: rm is disabled by default (set ONEAGENT_BASH_ALLOW_RM=1 to allow)")
+	dec, err := RequirePolicy(ctx, ToolIDBash)
+	if err != nil {
+		return nil, err
+	}
+	profile := CommandProfile(dec, "dev")
+	if err := permissions.ValidateCommand(profile, req.Command, dec.Constraints.Allowlist); err != nil {
+		return nil, err
 	}
 
 	root, err := resolveWorkspaceRoot(ctx)
@@ -92,29 +96,4 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		StdoutTruncated: result.StdoutTruncated,
 		StderrTruncated: result.StderrTruncated,
 	}, nil
-}
-
-func bashCommandContainsToken(command, token string) bool {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return false
-	}
-
-	// Very conservative tokenization: replace common shell separators with spaces.
-	repl := strings.NewReplacer(
-		";", " ",
-		"&", " ",
-		"|", " ",
-		"\n", " ",
-		"\r", " ",
-		"(", " ",
-		")", " ",
-	)
-	cleaned := repl.Replace(command)
-	for _, part := range strings.Fields(cleaned) {
-		if part == token {
-			return true
-		}
-	}
-	return false
 }

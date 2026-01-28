@@ -94,13 +94,26 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	if req.FilePath == "" {
 		return nil, fmt.Errorf("filePath 不能为空")
 	}
+	dec, err := RequirePolicy(ctx, ToolIDWriteFile)
+	if err != nil {
+		return nil, err
+	}
 	if runeCount(req.FilePath) > maxWriteFilePathRunesLimit {
 		return nil, fmt.Errorf("filePath 过长，请缩短路径（建议 <= %d 字）", maxWriteFilePathRunesLimit)
 	}
 
-	_, target, err := resolvePathForWrite(ctx, req.FilePath)
+	root, target, err := resolvePathForWrite(ctx, req.FilePath)
 	if err != nil {
 		return nil, err
+	}
+	if root != "" {
+		if rel, err := filepath.Rel(root, target); err == nil {
+			relSlash := filepath.ToSlash(rel)
+			relSlash = strings.TrimPrefix(relSlash, "./")
+			if err := EnforceFileScope(root, relSlash, dec); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	if req.Preconditions == nil {

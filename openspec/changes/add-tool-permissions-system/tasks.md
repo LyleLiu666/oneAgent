@@ -1,6 +1,6 @@
 ## 1. Specification
-- [ ] 1.1 Add `system-tool-permissions` spec + deltas for affected specs
-- [ ] 1.2 Run `openspec validate add-tool-permissions-system --strict --no-interactive`
+- [x] 1.1 Add `system-tool-permissions` spec + deltas for affected specs
+- [x] 1.2 Run `openspec validate add-tool-permissions-system --strict --no-interactive`
 
 ## 2. Backend: Policy Engine
 - [ ] 2.1 Define policy model (principal/role/rule/constraints) + evaluator
@@ -25,4 +25,3 @@
 ## 6. Cleanup
 - [ ] 6.1 Remove `ONEAGENT_BASH_ALLOW_RM` references (code/tests/specs/docs/doctor)
 - [ ] 6.2 Ensure e2e smoke tests remain green
-

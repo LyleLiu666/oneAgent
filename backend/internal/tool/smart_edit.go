@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -124,6 +125,11 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("edits 数量过多（%d），请分段调用（每次最多 %d 条）", len(edits), maxEditOpsPerCall)
 	}
 
+	dec, err := RequirePolicy(ctx, ToolIDEdit)
+	if err != nil {
+		return nil, err
+	}
+
 	totalRunes := 0
 	blocks := make([]sbe.EditBlock, 0, len(edits))
 	for i, op := range edits {
@@ -134,9 +140,18 @@ func runSmartEditTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("edits[%d].oldString 不能为空", i)
 		}
 
-		_, target, err := resolvePathForWrite(ctx, op.FilePath)
+		root, target, err := resolvePathForWrite(ctx, op.FilePath)
 		if err != nil {
 			return nil, fmt.Errorf("edits[%d]: %w", i, err)
+		}
+		if root != "" {
+			if rel, err := filepath.Rel(root, target); err == nil {
+				relSlash := filepath.ToSlash(rel)
+				relSlash = strings.TrimPrefix(relSlash, "./")
+				if err := EnforceFileScope(root, relSlash, dec); err != nil {
+					return nil, fmt.Errorf("edits[%d]: %w", i, err)
+				}
+			}
 		}
 
 		// Ensure file exists

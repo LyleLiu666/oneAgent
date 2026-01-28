@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/shell"
 )
 
@@ -140,6 +141,14 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	case "start":
 		if command == "" {
 			return nil, errors.New("command is required")
+		}
+		dec, err := RequirePolicy(ctx, ToolIDRunCommand)
+		if err != nil {
+			return nil, err
+		}
+		profile := CommandProfile(dec, "dev")
+		if err := permissions.ValidateCommand(profile, command, dec.Constraints.Allowlist); err != nil {
+			return nil, err
 		}
 		root, err := resolveWorkspaceRoot(ctx)
 		if err != nil {
