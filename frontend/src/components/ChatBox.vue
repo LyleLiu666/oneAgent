@@ -116,6 +116,26 @@ const normalizeTrace = (raw: any): string | undefined => {
   return String(raw)
 }
 
+const showSkillsHelpHint = computed(() => {
+  const msg = String(inputMessage.value || '').trim()
+  if (!msg) return false
+
+  const lower = msg.toLowerCase()
+  const hasSkillWord = msg.includes('技能') || lower.includes('skill') || lower.includes('skills')
+  if (!hasSkillWord) return false
+
+  return (
+    msg.includes('有哪些') ||
+    msg.includes('有什么') ||
+    msg.includes('列出') ||
+    msg.includes('列表') ||
+    msg.includes('可用') ||
+    lower.includes('list') ||
+    lower.includes('available') ||
+    lower.includes('what')
+  )
+})
+
 // Computed
 const workspaceOnboardingBlocking = computed(() => {
   const isNewSession = !chatStore.currentSessionId
@@ -1381,6 +1401,11 @@ onUnmounted(() => {
           </div>
           <p class="text-xs text-surface-500 mt-2 text-center">
             回车发送，Shift+Enter 换行
+          </p>
+          <p v-if="showSkillsHelpHint" class="text-xs text-surface-500 mt-1 text-center">
+            提示：可在
+            <a href="/governance/skills" class="text-primary-300 hover:underline">技能治理</a>
+            查看可用 skills；或运行 <span class="font-mono">oneagent skills status</span>。
           </p>
         </div>
       </div>
