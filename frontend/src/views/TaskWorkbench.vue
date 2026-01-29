@@ -608,14 +608,14 @@ onUnmounted(() => {
 <template>
   <div class="min-h-screen p-6 lg:p-10">
     <div class="max-w-screen-2xl mx-auto">
-      <div class="flex items-start justify-between gap-4 mb-6">
+      <div class="flex items-start justify-between gap-4 mb-8">
         <div>
           <h1 class="text-2xl font-bold text-surface-100">任务工作台</h1>
-          <p class="text-sm text-surface-500">多工作区队列、进度与控制</p>
+          <p class="text-sm text-surface-500 mt-1">多工作区队列、进度与控制</p>
         </div>
         <button
           data-testid="task-workbench-refresh"
-          class="px-4 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+          class="px-4 py-2 rounded-xl text-sm font-medium bg-surface-800/60 text-surface-300 hover:bg-surface-700/60 inline-flex items-center gap-2 transition-colors"
           :disabled="tasksLoading"
           @click="refreshTasks()"
         >
@@ -627,52 +627,61 @@ onUnmounted(() => {
       <div
         v-if="taskUpdates.length"
         data-testid="task-updates"
-        class="mb-4 rounded-2xl border border-surface-700/40 bg-surface-950/40 p-4"
+        class="mb-6 rounded-2xl bg-surface-800/40 shadow-sm p-4"
       >
-        <div class="flex items-center justify-between gap-3">
-          <div class="text-sm font-semibold text-surface-100">更新</div>
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+            <div class="text-sm font-semibold text-surface-100">更新</div>
+          </div>
           <button
-            class="text-xs text-surface-400 hover:text-surface-200"
+            class="text-xs text-surface-400 hover:text-surface-200 px-2 py-1 rounded-lg hover:bg-surface-700/50 transition-colors"
             @click="clearTaskUpdates"
           >
             清空
           </button>
         </div>
-        <div class="mt-2 space-y-2">
+        <div class="space-y-2">
           <div
             v-for="u in taskUpdates"
             :key="`${u.taskId}:${u.attemptId}:${u.status}`"
-            class="text-sm text-surface-200"
+            class="flex items-center gap-2 text-sm p-2 rounded-lg hover:bg-surface-700/30 transition-colors"
           >
-            <span class="font-mono text-surface-400">{{ u.status }}</span>
-            <span class="mx-2 text-surface-600">·</span>
-            <span class="text-surface-100">{{ u.title }}</span>
-            <span class="mx-2 text-surface-600">·</span>
-            <span class="text-surface-400 truncate">{{ u.workspace }}</span>
+            <span class="px-2 py-0.5 rounded-md text-xs font-medium"
+              :class="{
+                'bg-emerald-500/20 text-emerald-300': u.status === 'succeeded',
+                'bg-rose-500/20 text-rose-300': ['failed', 'canceled'].includes(u.status),
+                'bg-amber-500/20 text-amber-300': u.status === 'running',
+                'bg-surface-500/20 text-surface-400': ['queued', 'pending'].includes(u.status)
+              }"
+            >{{ u.status }}</span>
+            <span class="text-surface-100 font-medium truncate max-w-[200px]">{{ u.title }}</span>
+            <span class="text-surface-600">·</span>
+            <span class="text-surface-500 text-xs truncate">{{ u.workspace }}</span>
           </div>
         </div>
       </div>
 
       <div
         v-if="tasksError"
-        class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
+        class="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
       >
         {{ tasksError }}
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <!-- Left column: Workspaces + Task list -->
         <div class="space-y-4">
           <!-- Workspaces -->
-          <div class="glass rounded-2xl overflow-hidden">
-            <div class="px-5 py-4 border-b border-surface-700/50">
+          <div class="rounded-2xl bg-surface-900/40 shadow-lg shadow-black/5 overflow-hidden">
+            <div class="px-5 py-4">
               <p class="text-sm font-semibold text-surface-100">工作区</p>
               <p class="text-xs text-surface-500 mt-1">
                 每个工作区按 FIFO（L0）串行执行任务
               </p>
             </div>
 
-            <div class="p-4 border-b border-surface-700/50">
+            <div class="px-4 pb-4">
               <div class="flex gap-2">
                 <input
                   data-testid="workspace-add-input"
@@ -690,43 +699,47 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="max-h-[30vh] overflow-y-auto">
-              <button
-                v-for="ws in allWorkspaces"
-                :key="ws"
-                data-testid="workspace-item"
-                class="w-full text-left px-4 py-3 border-b border-surface-700/30 hover:bg-surface-900/40"
-                :class="workspaceSelected === ws ? 'bg-primary-500/10' : ''"
-                @click="selectWorkspace(ws)"
-              >
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-2 text-sm text-surface-100">
+            <div class="max-h-[30vh] overflow-y-auto px-2 pb-2">
+              <div class="space-y-1.5">
+                <button
+                  v-for="ws in allWorkspaces"
+                  :key="ws"
+                  data-testid="workspace-item"
+                  class="w-full text-left p-3 rounded-xl hover:bg-surface-800/50 transition-colors"
+                  :class="workspaceSelected === ws ? 'bg-surface-800/60 ring-1 ring-primary-500/30' : ''"
+                  @click="selectWorkspace(ws)"
+                >
+                  <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-surface-800/80 flex items-center justify-center flex-shrink-0">
                       <Folder class="w-4 h-4 text-surface-400" />
-                      <span class="truncate">{{ ws }}</span>
                     </div>
-                    <div class="text-xs text-surface-500 mt-1">
-                      <span
-                        v-if="workspaceSummaries.find((s) => s.workspace === ws)"
-                      >
-                        {{
-                          (() => {
-                            const s = workspaceSummaries.find(
-                              (x) => x.workspace === ws,
-                            );
-                            if (!s) return "";
-                            return `总计 ${s.total} · 排队 ${s.queued} · 运行中 ${s.running} · 失败 ${s.failed}`;
-                          })()
-                        }}
-                      </span>
-                      <span v-else>暂无任务</span>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm text-surface-100 truncate font-medium">
+                        {{ ws }}
+                      </div>
+                      <div class="text-xs text-surface-500 mt-1">
+                        <span
+                          v-if="workspaceSummaries.find((s) => s.workspace === ws)"
+                        >
+                          {{
+                            (() => {
+                              const s = workspaceSummaries.find(
+                                (x) => x.workspace === ws,
+                              );
+                              if (!s) return "";
+                              return `${s.total} 任务 · ${s.queued} 排队 · ${s.running} 运行`;
+                            })()
+                          }}
+                        </span>
+                        <span v-else>暂无任务</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </button>
+                </button>
+              </div>
               <div
                 v-if="allWorkspaces.length === 0"
-                class="p-6 text-sm text-surface-500"
+                class="p-6 text-sm text-surface-500 text-center"
               >
                 暂无工作区。
               </div>
@@ -734,56 +747,71 @@ onUnmounted(() => {
           </div>
 
           <!-- Tasks list -->
-          <div class="glass rounded-2xl overflow-hidden">
+          <div class="rounded-2xl bg-surface-900/40 shadow-lg shadow-black/5 overflow-hidden">
             <div
-              class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between"
+              class="px-5 py-4 flex items-center justify-between"
             >
-              <p class="text-sm font-semibold text-surface-100">任务</p>
-              <div
-                class="inline-flex items-center gap-2 text-xs text-surface-500"
-              >
-                <ListTodo class="w-4 h-4" />
-                {{ filteredTasks.length }}
+              <div class="flex items-center gap-3">
+                <p class="text-sm font-semibold text-surface-100">任务</p>
+                <div
+                  class="inline-flex items-center gap-1.5 text-xs text-surface-500 bg-surface-800/60 px-2 py-1 rounded-lg"
+                >
+                  <ListTodo class="w-3.5 h-3.5" />
+                  {{ filteredTasks.length }}
+                </div>
               </div>
             </div>
 
-            <div class="overflow-y-auto">
-              <button
-                v-for="t in filteredTasks"
-                :key="t.id"
-                data-testid="workbench-task-item"
-                class="w-full text-left px-4 py-3 border-b border-surface-700/30 hover:bg-surface-900/40"
-                :class="selectedTaskId === t.id ? 'bg-primary-500/10' : ''"
-                @click="
-                  selectedTaskId = t.id;
-                  refreshSelected();
-                "
-              >
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="text-sm text-surface-100 truncate">
-                      {{ t.title || t.id }}
+            <div class="overflow-y-auto px-2 pb-2">
+              <div class="space-y-1.5">
+                <button
+                  v-for="t in filteredTasks"
+                  :key="t.id"
+                  data-testid="workbench-task-item"
+                  class="w-full text-left p-3 rounded-xl hover:bg-surface-800/50 transition-colors"
+                  :class="selectedTaskId === t.id ? 'bg-surface-800/70 ring-1 ring-primary-500/30' : ''"
+                  @click="
+                    selectedTaskId = t.id;
+                    refreshSelected();
+                  "
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <div
+                          class="w-2 h-2 rounded-full flex-shrink-0"
+                          :class="{
+                            'bg-emerald-400': (t.attempts?.length ? t.attempts[t.attempts.length - 1].status : 'queued') === 'succeeded',
+                            'bg-rose-400': ['failed', 'canceled', 'limit_exceeded', 'timed_out', 'interrupted'].includes(t.attempts?.length ? t.attempts[t.attempts.length - 1].status : 'queued'),
+                            'bg-amber-400': (t.attempts?.length ? t.attempts[t.attempts.length - 1].status : 'queued') === 'running',
+                            'bg-surface-400': (t.attempts?.length ? t.attempts[t.attempts.length - 1].status : 'queued') === 'queued'
+                          }"
+                        ></div>
+                        <div class="text-sm text-surface-100 truncate font-medium">
+                          {{ t.title || t.id }}
+                        </div>
+                      </div>
+                      <div class="text-xs text-surface-500 mt-1.5 truncate pl-4">
+                        {{ t.prompt }}
+                      </div>
                     </div>
-                    <div class="text-xs text-surface-500 mt-1 truncate">
-                      {{ t.prompt }}
+                    <div class="text-[11px] text-surface-400 flex-shrink-0 mt-0.5">
+                      <span
+                        class="inline-flex items-center rounded-lg px-2 py-1 bg-surface-800/60 text-surface-400"
+                      >
+                        {{
+                          t.attempts?.length
+                            ? t.attempts[t.attempts.length - 1].status
+                            : "queued"
+                        }}
+                      </span>
                     </div>
                   </div>
-                  <div class="text-xs text-surface-400">
-                    <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 border border-surface-700/40 bg-surface-900/40"
-                    >
-                      {{
-                        t.attempts?.length
-                          ? t.attempts[t.attempts.length - 1].status
-                          : "queued"
-                      }}
-                    </span>
-                  </div>
-                </div>
-              </button>
+                </button>
+              </div>
               <div
                 v-if="filteredTasks.length === 0"
-                class="p-6 text-sm text-surface-500"
+                class="p-6 text-sm text-surface-500 text-center"
               >
                 该工作区暂无任务。
               </div>
@@ -794,26 +822,26 @@ onUnmounted(() => {
         <!-- Right column: Composer + Task details -->
         <div class="space-y-4">
           <!-- Composer -->
-          <div class="glass rounded-2xl overflow-hidden">
-            <div class="px-5 py-4 border-b border-surface-700/50">
+          <div class="rounded-2xl bg-surface-900/40 shadow-lg shadow-black/5 overflow-hidden">
+            <div class="px-5 py-4">
               <p class="text-sm font-semibold text-surface-100">新建任务</p>
               <p class="text-xs text-surface-500 mt-1">
                 在当前选中的工作区创建新任务
               </p>
             </div>
 
-            <div class="p-4">
-              <div class="grid grid-cols-1 gap-2">
+            <div class="px-4 pb-4">
+              <div class="grid grid-cols-1 gap-3">
                 <textarea
                   data-testid="workbench-prompt"
                   v-model="prompt"
                   rows="4"
-                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                  class="px-4 py-3 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/30 transition-all resize-none"
                   placeholder="描述你希望完成的内容..."
                 />
                 <button
                   data-testid="workbench-queue"
-                  class="px-4 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 disabled:opacity-50"
+                  class="px-4 py-2.5 rounded-xl text-sm font-medium bg-primary-500/20 text-primary-300 hover:bg-primary-500/30 disabled:opacity-50 transition-all"
                   :disabled="submitting || !workspaceSelected || !prompt.trim()"
                   @click="queueTask"
                 >
@@ -822,7 +850,7 @@ onUnmounted(() => {
                 <button
                   type="button"
                   data-testid="workbench-composer-advanced-toggle"
-                  class="text-xs text-surface-400 hover:text-surface-200 text-left"
+                  class="text-xs text-surface-400 hover:text-surface-200 text-left py-1 transition-colors"
                   @click="composerAdvancedOpen = !composerAdvancedOpen"
                 >
                   {{
@@ -834,25 +862,25 @@ onUnmounted(() => {
                 <div
                   v-if="composerAdvancedOpen"
                   data-testid="workbench-composer-advanced"
-                  class="grid grid-cols-1 gap-2"
+                  class="grid grid-cols-1 gap-3 pt-1"
                 >
                   <input
                     v-model="title"
-                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/30 transition-all"
                     placeholder="可选标题"
                   />
-                  <div class="grid grid-cols-2 gap-2">
+                  <div class="grid grid-cols-2 gap-3">
                     <input
                       v-model="budgetTokens"
                       inputmode="numeric"
-                      class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                      placeholder="Token 预算（可选）"
+                      class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/30 transition-all"
+                      placeholder="Token 预算"
                     />
                     <input
                       v-model="budgetCost"
                       inputmode="decimal"
-                      class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                      placeholder="成本预算 USD（可选）"
+                      class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/30 transition-all"
+                      placeholder="成本预算 USD"
                     />
                   </div>
                 </div>
@@ -861,10 +889,10 @@ onUnmounted(() => {
           </div>
 
           <!-- Task details -->
-          <div class="glass rounded-2xl overflow-hidden">
+          <div class="rounded-2xl bg-surface-900/40 shadow-lg shadow-black/5 overflow-hidden">
             <!-- Header: Title + Actions -->
             <div
-              class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-4"
+              class="px-5 py-4 flex items-center justify-between gap-4"
             >
               <div class="min-w-0">
                 <p class="text-sm font-semibold text-surface-100 truncate">
@@ -917,7 +945,7 @@ onUnmounted(() => {
             <!-- Tab Navigation -->
             <div
               v-if="selectedTask"
-              class="px-5 py-2 border-b border-surface-700/30 flex items-center gap-1 bg-surface-900/20"
+              class="px-5 py-3 flex items-center gap-1"
             >
               <button
                 v-for="tab in detailTabs"
@@ -927,11 +955,11 @@ onUnmounted(() => {
                     ? 'workbench-details-advanced-toggle'
                     : undefined
                 "
-                class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                class="px-4 py-2 rounded-xl text-xs font-medium transition-all"
                 :class="
                   activeDetailTab === tab.key
-                    ? 'bg-surface-700/50 text-surface-100'
-                    : 'text-surface-500 hover:text-surface-300 hover:bg-surface-800/30'
+                    ? 'bg-surface-700/60 text-surface-100 shadow-sm'
+                    : 'text-surface-500 hover:text-surface-300 hover:bg-surface-800/40'
                 "
                 @click="activeDetailTab = tab.key"
               >
@@ -946,43 +974,45 @@ onUnmounted(() => {
               {{ selectedError }}
             </div>
 
-            <div v-if="!selectedTask" class="p-6 text-sm text-surface-500">
-              选择任务查看详情。
+            <div v-if="!selectedTask" class="p-8 text-sm text-surface-500 text-center">
+              选择任务查看详情
             </div>
 
-            <div v-else class="p-4">
+            <div v-else class="p-4 pt-2">
               <!-- Overview Tab -->
               <div v-if="activeDetailTab === 'overview'" class="space-y-4">
                 <!-- Two-column layout: Status info | Details -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <!-- Left: Task Summary -->
                   <div class="space-y-3">
-                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-                      <div class="flex items-center gap-2 mb-3">
-                        <div class="w-2 h-2 rounded-full" :class="{
+                    <div class="rounded-2xl bg-surface-800/40 p-4 shadow-sm">
+                      <div class="flex items-center gap-3 mb-4">
+                        <div class="w-3 h-3 rounded-full" :class="{
                           'bg-emerald-400': latestStatus === 'succeeded',
                           'bg-rose-400': ['failed', 'canceled', 'limit_exceeded', 'timed_out', 'interrupted'].includes(latestStatus),
                           'bg-amber-400': latestStatus === 'running',
                           'bg-surface-400': latestStatus === 'queued'
                         }"></div>
-                        <span class="text-sm font-medium text-surface-200">{{ latestStatus || 'queued' }}</span>
+                        <span class="text-sm font-medium text-surface-100 capitalize">{{ latestStatus || 'queued' }}</span>
                       </div>
-                      <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 flex items-center gap-4">
-                        <span>用量：{{ formatUsage(latestAttempt) }}</span>
+                      <div v-if="formatUsage(latestAttempt)" class="flex items-center gap-3">
+                        <div class="px-3 py-1.5 rounded-lg bg-surface-900/60 text-xs text-surface-300">
+                          {{ formatUsage(latestAttempt) }}
+                        </div>
                       </div>
                     </div>
 
-                    <div v-if="latestAttempt?.observer" class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-                      <div class="flex items-center gap-2 mb-2">
-                        <div class="w-2 h-2 rounded-full" :class="latestAttempt.observer.pass ? 'bg-emerald-400' : 'bg-rose-400'"></div>
+                    <div v-if="latestAttempt?.observer" class="rounded-2xl bg-surface-800/40 p-4 shadow-sm">
+                      <div class="flex items-center gap-2 mb-3">
+                        <div class="w-2.5 h-2.5 rounded-full" :class="latestAttempt.observer.pass ? 'bg-emerald-400' : 'bg-rose-400'"></div>
                         <span class="text-xs font-medium text-surface-200">观察者：{{ latestAttempt.observer.pass ? '通过' : '失败' }}</span>
                       </div>
-                      <p class="text-xs text-surface-400">{{ latestAttempt.observer.reason }}</p>
-                      <div v-if="!latestAttempt.observer.pass && latestAttempt.observer.next_steps" class="mt-2 p-2 rounded-lg bg-surface-900/60 border border-surface-700/30">
+                      <p class="text-xs text-surface-400 mb-3">{{ latestAttempt.observer.reason }}</p>
+                      <div v-if="!latestAttempt.observer.pass && latestAttempt.observer.next_steps" class="p-3 rounded-xl bg-surface-900/60">
                         <p class="text-[11px] text-surface-500 mb-1">下一步：</p>
                         <p class="text-xs text-surface-300 whitespace-pre-wrap">{{ latestAttempt.observer.next_steps }}</p>
                       </div>
-                      <div v-if="!latestAttempt.observer.pass && latestAttempt.observer.questions_for_user?.length" class="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <div v-if="!latestAttempt.observer.pass && latestAttempt.observer.questions_for_user?.length" class="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
                         <p class="text-[11px] text-amber-400 mb-1">需要你确认：</p>
                         <p class="text-xs text-surface-300 whitespace-pre-wrap">{{ latestAttempt.observer.questions_for_user.join('\n') }}</p>
                       </div>
@@ -990,72 +1020,75 @@ onUnmounted(() => {
                   </div>
 
                   <!-- Right: Summary Text -->
-                  <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-                    <div class="flex items-center justify-between mb-3">
-                      <span class="text-sm font-medium text-surface-200">执行摘要</span>
-                      <span class="text-xs text-surface-500">{{ latestAttempt?.id?.slice(0, 8) }}</span>
+                  <div class="rounded-2xl bg-surface-800/40 p-5 shadow-sm h-fit">
+                    <div class="flex items-center justify-between mb-4">
+                      <span class="text-sm font-semibold text-surface-100">执行摘要</span>
+                      <span class="text-xs text-surface-500 font-mono">{{ latestAttempt?.id?.slice(0, 8) }}</span>
                     </div>
                     <div v-if="latestAttempt?.summary" class="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">
                       {{ latestAttempt.summary }}
                     </div>
-                    <div v-else class="text-sm text-surface-500 italic">暂无执行摘要</div>
+                    <div v-else class="text-sm text-surface-500 italic py-8 text-center">暂无执行摘要</div>
                   </div>
                 </div>
               </div>
 
               <!-- Review Tab -->
               <div v-else-if="activeDetailTab === 'review'" class="space-y-4">
-                <div v-if="!latestAttempt" class="text-sm text-surface-500">暂无尝试记录</div>
+                <div v-if="!latestAttempt" class="text-sm text-surface-500 text-center py-8">暂无尝试记录</div>
                 <div v-else class="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <!-- Left: File changes -->
                   <div class="space-y-4">
-                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-                      <div class="text-sm font-medium text-surface-200 mb-3">变更文件</div>
+                    <div class="rounded-2xl bg-surface-800/40 p-4 shadow-sm">
+                      <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm font-semibold text-surface-100">变更文件</span>
+                        <span v-if="changedFiles?.content" class="text-xs text-surface-500">{{ changedFiles.content.split('\n').filter(l => l.trim()).length }} 文件</span>
+                      </div>
                       <pre
                         v-if="changedFiles?.content"
-                        class="max-h-[40vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
+                        class="max-h-[40vh] overflow-auto rounded-xl bg-surface-950/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
                       >{{ changedFiles.content }}</pre>
-                      <div v-else class="text-sm text-surface-500 italic">暂无变更文件列表</div>
+                      <div v-else class="py-8 text-sm text-surface-500 text-center italic">暂无变更文件列表</div>
                     </div>
                   </div>
 
                   <!-- Right: Diff + Comments -->
                   <div class="space-y-4">
-                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-                      <div class="text-sm font-medium text-surface-200 mb-3">Diff Patch</div>
+                    <div class="rounded-2xl bg-surface-800/40 p-4 shadow-sm">
+                      <div class="text-sm font-semibold text-surface-100 mb-3">Diff Patch</div>
                       <pre
                         v-if="diffPatch?.content"
-                        class="max-h-[30vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
+                        class="max-h-[30vh] overflow-auto rounded-xl bg-surface-950/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
                       >{{ diffPatch.content }}</pre>
-                      <div v-else class="text-sm text-surface-500 italic">暂无 diff patch</div>
+                      <div v-else class="py-8 text-sm text-surface-500 text-center italic">暂无 diff patch</div>
                     </div>
 
                     <!-- Review Comments -->
-                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
-                      <div class="text-sm font-medium text-surface-200 mb-3">Review Comments</div>
+                    <div class="rounded-2xl bg-surface-800/40 p-4 shadow-sm">
+                      <div class="text-sm font-semibold text-surface-100 mb-3">Review Comments</div>
                       <div v-if="reviewComments.length" class="space-y-2 mb-4">
                         <div
                           v-for="(cmt, idx) in reviewComments"
                           :key="idx"
-                          class="rounded-xl bg-surface-900/40 p-3 text-sm text-surface-200"
+                          class="rounded-xl bg-surface-900/50 p-3 text-sm text-surface-200"
                         >
-                          <div class="text-[11px] text-surface-500"
+                          <div class="text-[11px] text-surface-500 mb-1"
                           >{{ cmt.ts }} · {{ cmt.principal_id }}</div>
-                          <div class="mt-1 whitespace-pre-wrap">{{ cmt.comment }}</div>
+                          <div class="whitespace-pre-wrap">{{ cmt.comment }}</div>
                         </div>
                       </div>
 
                       <textarea
                         data-testid="review-comment-input"
                         v-model="reviewCommentDraft"
-                        class="w-full rounded-xl bg-surface-900/40 border border-surface-700/40 p-3 text-surface-100 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        class="w-full rounded-xl bg-surface-900/50 border border-surface-700/40 p-3 text-surface-100 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 transition-all"
                         rows="2"
                         placeholder="写一条 review comment..."
                       />
                       <div class="mt-2 flex justify-end gap-2">
                         <button
                           data-testid="review-comment-submit"
-                          class="px-3 py-2 rounded-xl text-sm font-medium bg-indigo-500/80 text-white hover:bg-indigo-500 disabled:opacity-50"
+                          class="px-3 py-2 rounded-xl text-sm font-medium bg-indigo-500/80 text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
                           :disabled="submittingReviewComment || !reviewCommentDraft.trim()"
                           @click="submitReviewComment"
                         >
@@ -1065,13 +1098,13 @@ onUnmounted(() => {
                     </div>
 
                     <!-- Follow-up -->
-                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4"
+                    <div class="rounded-2xl bg-surface-800/40 p-4 shadow-sm"
                     >
-                      <div class="text-sm font-medium text-surface-200 mb-3">Follow-up Attempt</div>
+                      <div class="text-sm font-semibold text-surface-100 mb-3">Follow-up Attempt</div>
                       <textarea
                         data-testid="follow-up-notes-input"
                         v-model="followUpNotes"
-                        class="w-full rounded-xl bg-surface-900/40 border border-surface-700/40 p-3 text-surface-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500/30"
+                        class="w-full rounded-xl bg-surface-900/50 border border-surface-700/40 p-3 text-surface-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all"
                         rows="2"
                         placeholder="输入跟进指令..."
                       />
@@ -1079,7 +1112,7 @@ onUnmounted(() => {
                     >
                         <button
                           data-testid="follow-up-submit"
-                          class="px-3 py-2 rounded-xl text-sm font-medium bg-emerald-500/80 text-white hover:bg-emerald-500 disabled:opacity-50"
+                          class="px-3 py-2 rounded-xl text-sm font-medium bg-emerald-500/80 text-white hover:bg-emerald-500 disabled:opacity-50 transition-colors"
                           :disabled="submittingFollowUp || !followUpNotes.trim()"
                           @click="createFollowUpAttempt"
                         >
@@ -1094,22 +1127,22 @@ onUnmounted(() => {
               <!-- Events Tab -->
               <div v-else-if="activeDetailTab === 'events'" class="space-y-4"
               >
-                <div v-if="selectedLoading" class="text-sm text-surface-500"
+                <div v-if="selectedLoading" class="text-sm text-surface-500 text-center py-8"
                 >加载中…</div>
-                <div v-else-if="selectedEvents.length === 0" class="text-sm text-surface-500"
-                >暂无事件。</div>
-                <div v-else class="space-y-2 max-h-[60vh] overflow-y-auto pr-2"
+                <div v-else-if="selectedEvents.length === 0" class="text-sm text-surface-500 text-center py-8"
+                >暂无事件</div>
+                <div v-else class="rounded-2xl bg-surface-800/30 p-3 space-y-1 max-h-[60vh] overflow-y-auto"
                 >
                   <div
                     v-for="(e, idx) in selectedEvents"
                     :key="idx"
-                    class="flex items-start gap-3 py-2 border-b border-surface-700/20 last:border-0"
+                    class="flex items-start gap-3 p-2.5 rounded-xl hover:bg-surface-800/50 transition-colors"
                   >
-                    <span class="text-xs text-surface-500 font-mono flex-shrink-0 w-[52px]"
+                    <span class="text-xs text-surface-500 font-mono flex-shrink-0 w-[52px] pt-0.5"
                     >{{ e.ts.slice(11, 19) }}</span>
-                    <span class="text-xs font-mono text-surface-300 px-1.5 py-0.5 rounded bg-surface-800/50"
+                    <span class="text-[11px] font-medium text-surface-300 px-2 py-1 rounded-lg bg-surface-700/50 flex-shrink-0"
                     >{{ e.type }}</span>
-                    <span v-if="e.message" class="text-xs text-surface-400"
+                    <span v-if="e.message" class="text-xs text-surface-400 flex-1 break-words pt-0.5"
                     >{{ e.message }}</span>
                   </div>
                 </div>
@@ -1119,27 +1152,26 @@ onUnmounted(() => {
               <div v-else-if="activeDetailTab === 'advanced'" class="space-y-4"
               >
                 <div data-testid="workbench-details-advanced">
-                <div v-if="!latestAttempt" class="text-sm text-surface-500"
-                >暂无尝试记录</div>
-                <div v-else-if="advancedArtifacts.length" class="grid grid-cols-1 lg:grid-cols-2 gap-4"
+                <div v-if="!latestAttempt" class="text-sm text-surface-500 text-center py-8">暂无尝试记录</div>
+                <div v-else-if="advancedArtifacts.length" class="grid grid-cols-1 lg:grid-cols-2 gap-3"
                 >
                   <button
                     v-for="item in advancedArtifacts"
                     :key="item.kind"
                     type="button"
-                    class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3 text-left hover:bg-surface-900/40 transition-colors"
+                    class="rounded-2xl bg-surface-800/40 p-4 text-left hover:bg-surface-800/60 transition-all group"
                     :data-testid="`artifact-card-${item.kind}`"
                     @click="openArtifactModal(item)"
                   >
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="text-xs text-surface-500">{{ item.label }}</div>
-                      <div class="text-[11px] text-surface-400">查看</div>
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                      <div class="text-xs font-medium text-surface-300 uppercase tracking-wide">{{ item.label }}</div>
+                      <div class="text-[11px] text-surface-500 group-hover:text-surface-300 transition-colors">查看 →</div>
                     </div>
-                    <div class="mt-1 text-xs text-surface-300 font-mono break-all"
+                    <div class="text-[11px] text-surface-500 font-mono truncate"
                     >{{ item.path }}</div>
                   </button>
                 </div>
-                <div v-else class="text-sm text-surface-500">暂无可预览的文件</div>
+                <div v-else class="text-sm text-surface-500 text-center py-8">暂无可预览的文件</div>
                 </div>
               </div>
             </div>
@@ -1261,49 +1293,51 @@ onUnmounted(() => {
       class="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
       <div
-        class="absolute inset-0 bg-black/60"
+        class="absolute inset-0 bg-black/70"
         @click="closeArtifactModal"
       ></div>
       <div
-        class="relative w-full max-w-5xl rounded-2xl border border-surface-700/50 bg-surface-950/90 backdrop-blur p-4"
+        class="relative w-full max-w-5xl rounded-3xl bg-surface-900 shadow-2xl overflow-hidden"
       >
-        <div class="flex items-start justify-between gap-3">
+        <!-- Header -->
+        <div class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="text-sm font-semibold text-surface-100 truncate">
               {{ artifactModalLabel }}
             </div>
-            <div class="text-xs text-surface-400 font-mono break-all">
+            <div class="text-xs text-surface-500 font-mono break-all mt-0.5">
               {{ artifactModalPath }}
             </div>
           </div>
           <button
             type="button"
-            class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60"
+            class="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-700/50 text-surface-300 hover:bg-surface-600/50 transition-colors"
             @click="closeArtifactModal"
           >
             关闭
           </button>
         </div>
 
-        <div class="mt-3">
-          <div v-if="artifactModalLoading" class="text-sm text-surface-500">
+        <!-- Content -->
+        <div class="p-5">
+          <div v-if="artifactModalLoading" class="text-sm text-surface-500 py-8 text-center">
             加载中…
           </div>
           <div
             v-else-if="artifactModalError"
-            class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200"
+            class="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
           >
             {{ artifactModalError }}
           </div>
-          <div v-else class="space-y-2">
+          <div v-else class="space-y-3">
             <div
               v-if="artifactModalContent?.truncated"
-              class="text-xs text-amber-400"
+              class="text-xs text-amber-400 px-1"
             >
               内容已截断（仅展示前 512KB）
             </div>
             <pre
-              class="max-h-[70vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre"
+              class="max-h-[65vh] overflow-auto rounded-2xl bg-surface-950/60 p-4 text-[12px] text-surface-200 whitespace-pre font-mono leading-relaxed"
             >{{ artifactModalContent?.content }}</pre>
           </div>
         </div>
