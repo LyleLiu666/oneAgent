@@ -155,6 +155,60 @@ it('queues a new task using current workspace and model', async () => {
     wrapper.unmount()
 })
 
+it('shows newest events first', async () => {
+    const { default: TaskQueuePanel } = await import('@/components/TaskQueuePanel.vue')
+
+    ;(apiClient.listTasks as any).mockResolvedValueOnce([
+        {
+            id: 'task-1',
+            user_id: 'local',
+            workspace: '/tmp/ws',
+            title: 'T1',
+            prompt: 'do it',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            attempts: [{ id: 'a1', status: 'running', created_at: new Date().toISOString() }],
+        },
+    ])
+    ;(apiClient.getTask as any).mockResolvedValueOnce({
+        id: 'task-1',
+        user_id: 'local',
+        workspace: '/tmp/ws',
+        title: 'T1',
+        prompt: 'do it',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attempts: [{ id: 'a1', status: 'running', created_at: new Date().toISOString() }],
+    })
+    ;(apiClient.getTaskEvents as any).mockResolvedValueOnce([
+        { ts: '2020-01-01T00:00:00.000Z', task_id: 'task-1', type: 'task.created', message: 'old event' },
+        { ts: '2020-01-01T00:00:01.000Z', task_id: 'task-1', type: 'attempt.running', message: 'new event' },
+    ])
+
+    const wrapper = shallowMount(TaskQueuePanel, {
+        props: {
+            workspace: '/tmp/ws',
+            modelId: 'model-1',
+        },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('[data-testid="tasks-toggle"]').trigger('click')
+    await flushPromises()
+
+    const taskButton = wrapper.get('[data-testid="task-item"][data-task-id="task-1"]')
+    await taskButton.trigger('click')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('old event')
+    expect(text).toContain('new event')
+    expect(text.indexOf('new event')).toBeLessThan(text.indexOf('old event'))
+
+    wrapper.unmount()
+})
+
 it('shows updates when a task finishes after baseline', async () => {
     const { default: TaskQueuePanel } = await import('@/components/TaskQueuePanel.vue')
 

@@ -112,6 +112,18 @@ const canResume = computed(() =>
 
 const normalizeWorkspace = (ws: string) => String(ws || "").trim();
 
+const sortTaskEventsNewestFirst = (events: TaskEvent[]) => {
+  const safeEvents = Array.isArray(events) ? events : [];
+  return [...safeEvents].sort((a, b) => {
+    const at = Date.parse(String(a?.ts || ""));
+    const bt = Date.parse(String(b?.ts || ""));
+    if (!Number.isNaN(at) && !Number.isNaN(bt)) return bt - at;
+    if (!Number.isNaN(bt)) return 1;
+    if (!Number.isNaN(at)) return -1;
+    return String(b?.ts || "").localeCompare(String(a?.ts || ""));
+  });
+};
+
 const loadManualWorkspaces = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -193,7 +205,7 @@ const refreshSelected = async () => {
   try {
     const [t, evs] = await Promise.all([getTask(id), getTaskEvents(id)]);
     selectedTask.value = t;
-    selectedEvents.value = Array.isArray(evs) ? evs : [];
+    selectedEvents.value = Array.isArray(evs) ? sortTaskEventsNewestFirst(evs) : [];
   } catch (e: any) {
     selectedError.value = String(
       e?.data?.error || e?.message || "Failed to load task",
@@ -286,7 +298,15 @@ const createFollowUpAttempt = async () => {
 };
 
 watch(
-  () => [activeDetailTab.value, latestAttempt.value?.id, selectedTask.value?.id],
+  [
+    activeDetailTab,
+    () => selectedTask.value?.id,
+    () => latestAttempt.value?.id,
+    () => latestAttempt.value?.status,
+    () => latestAttempt.value?.diff_patch_path,
+    () => latestAttempt.value?.changed_files_path,
+    () => latestAttempt.value?.review_comments_path,
+  ],
   async ([tab]) => {
     if (tab !== "review") return;
     await loadReviewArtifacts();
@@ -483,7 +503,7 @@ onUnmounted(() => {
 
 <template>
   <div class="min-h-screen p-6 lg:p-10">
-    <div class="max-w-6xl mx-auto">
+    <div class="max-w-screen-2xl mx-auto">
       <div class="flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 class="text-2xl font-bold text-surface-100">任务工作台</h1>

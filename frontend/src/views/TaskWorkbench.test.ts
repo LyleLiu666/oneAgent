@@ -68,6 +68,105 @@ it("loads tasks and groups by workspace", async () => {
   wrapper.unmount();
 });
 
+it("uses a wider container to reduce side whitespace", async () => {
+  vi.stubGlobal("localStorage", {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  expect(wrapper.find(".max-w-screen-2xl").exists()).toBe(true);
+
+  wrapper.unmount();
+});
+
+it("does not reload review artifacts on background refresh when attempt unchanged", async () => {
+  vi.useFakeTimers();
+  const store = new Map<string, string>([["oneagent-workspace", "/tmp/wsA"]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  (apiClient.listTasks as any).mockResolvedValue([
+    {
+      id: "t1",
+      user_id: "local",
+      workspace: "/tmp/wsA",
+      title: "A1",
+      prompt: "do A",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: "a1", status: "running", created_at: new Date().toISOString() },
+      ],
+    },
+  ]);
+  (apiClient.getTask as any).mockImplementation(async () => ({
+    id: "t1",
+    user_id: "local",
+    workspace: "/tmp/wsA",
+    title: "A1",
+    prompt: "do A",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      { id: "a1", status: "running", created_at: new Date().toISOString() },
+    ],
+  }));
+  (apiClient.getTaskEvents as any).mockResolvedValue([]);
+  (apiClient.getTaskAttemptDiffPatch as any).mockResolvedValue({
+    path: "/tmp/diff.patch",
+    content: "diff --git a/a b/a\n",
+    truncated: false,
+  });
+  (apiClient.getTaskAttemptChangedFiles as any).mockResolvedValue({
+    path: "/tmp/changed_files.txt",
+    content: "a\n",
+    truncated: false,
+  });
+  (apiClient.listTaskAttemptReviewComments as any).mockResolvedValue([]);
+
+  const wrapper = shallowMount(TaskWorkbench);
+
+  const tick = async () => {
+    await Promise.resolve();
+    await wrapper.vm.$nextTick();
+  };
+
+  await tick();
+
+  await wrapper.get('[data-testid="workbench-task-item"]').trigger("click");
+  await tick();
+
+  await wrapper.get('[data-testid="workbench-review-toggle"]').trigger("click");
+  await tick();
+
+  expect(apiClient.getTaskAttemptDiffPatch).toHaveBeenCalledTimes(1);
+  expect(apiClient.getTaskAttemptChangedFiles).toHaveBeenCalledTimes(1);
+
+  vi.advanceTimersByTime(2000);
+  await tick();
+  await tick();
+
+  expect(apiClient.getTask).toHaveBeenCalledTimes(2);
+  expect(apiClient.getTaskAttemptDiffPatch).toHaveBeenCalledTimes(1);
+  expect(apiClient.getTaskAttemptChangedFiles).toHaveBeenCalledTimes(1);
+
+  wrapper.unmount();
+  vi.useRealTimers();
+});
+
 it("queues a task for selected workspace", async () => {
   const store = new Map<string, string>([["oneagent-workspace", "/tmp/wsA"]]);
   vi.stubGlobal("localStorage", {
@@ -178,6 +277,80 @@ it("shows updates when a task finishes after baseline", async () => {
   expect(wrapper.find('[data-testid=\"task-updates\"]').exists()).toBe(true);
   expect(wrapper.text()).toContain("更新");
   expect(wrapper.text()).toContain("succeeded");
+
+  wrapper.unmount();
+});
+
+it("shows newest events first", async () => {
+  const store = new Map<string, string>([["oneagent-workspace", "/tmp/wsA"]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  (apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "local",
+      workspace: "/tmp/wsA",
+      title: "A1",
+      prompt: "do A",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: "a1", status: "running", created_at: new Date().toISOString() },
+      ],
+    },
+  ]);
+  (apiClient.getTask as any).mockResolvedValueOnce({
+    id: "t1",
+    user_id: "local",
+    workspace: "/tmp/wsA",
+    title: "A1",
+    prompt: "do A",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      { id: "a1", status: "running", created_at: new Date().toISOString() },
+    ],
+  });
+  (apiClient.getTaskEvents as any).mockResolvedValueOnce([
+    {
+      ts: "2020-01-01T00:00:00.000Z",
+      task_id: "t1",
+      type: "task.created",
+      message: "old event",
+    },
+    {
+      ts: "2020-01-01T00:00:01.000Z",
+      task_id: "t1",
+      type: "attempt.running",
+      message: "new event",
+    },
+  ]);
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  await wrapper.get('[data-testid="workbench-task-item"]').trigger("click");
+  await flushPromises();
+
+  const eventsTab = wrapper
+    .findAll("button")
+    .find((b) => b.text().trim() === "事件");
+  expect(eventsTab, "expected 事件 tab button").toBeTruthy();
+
+  await eventsTab!.trigger("click");
+  await flushPromises();
+
+  const text = wrapper.text();
+  expect(text).toContain("old event");
+  expect(text).toContain("new event");
+  expect(text.indexOf("new event")).toBeLessThan(text.indexOf("old event"));
 
   wrapper.unmount();
 });

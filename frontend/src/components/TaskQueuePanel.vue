@@ -48,6 +48,18 @@ const selectedError = ref("");
 
 const effectiveWorkspace = computed(() => String(props.workspace || "").trim());
 
+const sortTaskEventsNewestFirst = (events: TaskEvent[]) => {
+  const safeEvents = Array.isArray(events) ? events : [];
+  return [...safeEvents].sort((a, b) => {
+    const at = Date.parse(String(a?.ts || ""));
+    const bt = Date.parse(String(b?.ts || ""));
+    if (!Number.isNaN(at) && !Number.isNaN(bt)) return bt - at;
+    if (!Number.isNaN(bt)) return 1;
+    if (!Number.isNaN(at)) return -1;
+    return String(b?.ts || "").localeCompare(String(a?.ts || ""));
+  });
+};
+
 const latestAttempt = computed<TaskAttempt | null>(() => {
   const t = selectedTask.value;
   if (!t || !Array.isArray(t.attempts) || t.attempts.length === 0) return null;
@@ -133,7 +145,7 @@ const refreshSelected = async () => {
   try {
     const [t, evs] = await Promise.all([getTask(id), getTaskEvents(id)]);
     selectedTask.value = t;
-    selectedEvents.value = Array.isArray(evs) ? evs : [];
+    selectedEvents.value = Array.isArray(evs) ? sortTaskEventsNewestFirst(evs) : [];
   } catch (e: any) {
     selectedError.value = String(
       e?.data?.error || e?.message || "Failed to load task",
