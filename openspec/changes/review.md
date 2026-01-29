@@ -7,24 +7,8 @@
 
 ## Priority（高 → 低）
 
-### P0（正在推进 / 近期必须收敛）
-- `add-worktree-attempt-isolation`（8/8）：git worktree 隔离 attempt（执行根目录 + 生命周期管理）
-- `add-mcp-server`（7/7）：对外暴露 MCP server（local-only + auth/policy + events）
-
-### P1（强 UX 价值 / 可并行）
-- `update-task-events-waterfall`（10/10）：事件/日志瀑布（Pretty/Raw + filter/search + no-flicker refresh + tail artifacts）
-- `update-ux-error-surface`（11/11）：统一错误披露（安全/可追踪/可操作）+ 逐页修 UX
-
-### P2（低成本高收益 / 穿插）
-- `fix-skill-read-not-found-ux`（7/7）：skill.read not-found 的可行动 UX
-
-### P3（体验线 / 不阻塞主线）
-- `add-secretary-mode-chat`（5/5）：提供“秘书模式”纯聊天体验（独立路由 + 低噪声）
+### P0（先测后改 / 高优先级评估）
+- `add-toolcalling-reliability-specs`（1/5）：整理工具调用专家建议为 OpenSpec，并增加 XML vs JSON 长文本专项回归测试（先测后改）
 
 ## Snapshot（来自 `openspec list`）
-- `update-task-events-waterfall`：10/10 tasks
-- `update-ux-error-surface`：11/11 tasks
-- `add-secretary-mode-chat`：5/5 tasks
-- `add-mcp-server`：7/7 tasks
-- `add-worktree-attempt-isolation`：8/8 tasks
-- `fix-skill-read-not-found-ux`：7/7 tasks
+- `add-toolcalling-reliability-specs`：1/5 tasks
