@@ -317,7 +317,7 @@ it("shows guided empty state when no task is selected", async () => {
   );
 
   const textarea = wrapper.get('[data-testid="workbench-prompt"]');
-  const focusSpy = vi.spyOn(textarea.element, "focus");
+  const focusSpy = vi.spyOn(textarea.element as HTMLTextAreaElement, "focus");
   await wrapper.get('[data-testid="workbench-empty-focus"]').trigger("click");
 
   expect(focusSpy).toHaveBeenCalled();

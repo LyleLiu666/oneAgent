@@ -41,7 +41,7 @@ it("filters by search and expands event details", async () => {
     },
   });
 
-  expect(wrapper.get('[data-testid="event-viewer-refreshing"]').exists()).toBe(
+  expect(wrapper.find('[data-testid="event-viewer-refreshing"]').exists()).toBe(
     true,
   );
 
@@ -63,7 +63,7 @@ it("filters by search and expands event details", async () => {
 });
 
 it("copies filtered events", async () => {
-  const writeText = vi.fn(async () => {});
+  const writeText = vi.fn(async (_text: string) => {});
   Object.defineProperty(navigator, "clipboard", {
     value: { writeText },
     configurable: true,
@@ -94,4 +94,3 @@ it("copies filtered events", async () => {
 
   wrapper.unmount();
 });
-
