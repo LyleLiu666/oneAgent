@@ -13,7 +13,7 @@
 
 ### P1（强 UX 价值 / 可并行）
 - `update-task-events-waterfall`（10/10）：事件/日志瀑布（Pretty/Raw + filter/search + no-flicker refresh + tail artifacts）
-- `update-ux-error-surface`（3/11）：统一错误披露（安全/可追踪/可操作）+ 逐页修 UX
+- `update-ux-error-surface`（4/11）：统一错误披露（安全/可追踪/可操作）+ 逐页修 UX
 
 ### P2（低成本高收益 / 穿插）
 - `fix-skill-read-not-found-ux`（0/7）：skill.read not-found 的可行动 UX
@@ -23,7 +23,7 @@
 
 ## Snapshot（来自 `openspec list`）
 - `update-task-events-waterfall`：10/10 tasks
-- `update-ux-error-surface`：3/11 tasks
+- `update-ux-error-surface`：4/11 tasks
 - `add-secretary-mode-chat`：0/5 tasks
 - `add-mcp-server`：7/7 tasks
 - `add-worktree-attempt-isolation`：8/8 tasks
