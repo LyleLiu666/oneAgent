@@ -398,6 +398,11 @@ export interface TaskAttempt {
     findings_path?: string
     trace_log_path?: string
     test_report_path?: string
+    project_config_path?: string
+    copy_files_log_path?: string
+    setup_script_log_path?: string
+    test_script_log_path?: string
+    cleanup_script_log_path?: string
     observer?: TaskObserverDecision
     usage?: {
         calls?: number

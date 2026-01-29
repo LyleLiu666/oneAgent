@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/projectcfg"
 	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
@@ -36,6 +37,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 	}
 
 	exec := func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, resumedFrom *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+		var attemptResult taskqueue.AttemptResult
 		userID := strings.TrimSpace(task.UserID)
 		if userID == "" {
 			userID = "local"
@@ -129,6 +131,77 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			maxRuntime = int((6 * time.Hour).Seconds())
 		}
 
+		// Optional workspace project scripts.
+		projectCfg, projectCfgFound, err := projectcfg.Load(task.Workspace)
+		if err != nil {
+			attemptResult.Summary = "project config error: " + err.Error()
+			return attemptResult, err
+		}
+		if projectCfgFound {
+			attemptResult.ProjectConfigPath = filepath.Join(task.Workspace, ".oneagent", "project.json")
+
+			scriptsDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "project_scripts")
+			if err := os.MkdirAll(scriptsDir, 0o700); err != nil {
+				wrap := fmt.Errorf("create attempt project scripts dir: %w", err)
+				attemptResult.Summary = wrap.Error()
+				return attemptResult, wrap
+			}
+
+			if strings.TrimSpace(projectCfg.CleanupScript) != "" {
+				cleanupLogPath := filepath.Join(scriptsDir, "cleanup_script.log")
+				attemptResult.CleanupScriptLogPath = cleanupLogPath
+				defer func() {
+					if err := runProjectScript(toolCtx, handlers, "cleanup_script", projectCfg.CleanupScript, cleanupLogPath); err != nil {
+						_ = rt.Tasks.AppendEvent(taskqueue.Event{
+							TaskID:    task.ID,
+							AttemptID: attempt.ID,
+							Type:      "attempt.cleanup_script.failed",
+							Message:   "cleanup_script failed",
+							Data: map[string]any{
+								"log_path": cleanupLogPath,
+								"error":    err.Error(),
+							},
+						})
+					}
+				}()
+			}
+
+			copyLogPath := filepath.Join(scriptsDir, "copy_files.log")
+			attemptResult.CopyFilesLogPath = copyLogPath
+			if err := runCopyFilesChecks(copyLogPath, task.Workspace, projectCfg.CopyFiles); err != nil {
+				attemptResult.Summary = "copy_files failed: " + err.Error()
+				return attemptResult, err
+			}
+
+			if strings.TrimSpace(projectCfg.SetupScript) != "" {
+				setupLogPath := filepath.Join(scriptsDir, "setup_script.log")
+				attemptResult.SetupScriptLogPath = setupLogPath
+				if err := runProjectScript(toolCtx, handlers, "setup_script", projectCfg.SetupScript, setupLogPath); err != nil {
+					attemptResult.Summary = "setup_script failed: " + err.Error()
+					_ = rt.Tasks.AppendEvent(taskqueue.Event{
+						TaskID:    task.ID,
+						AttemptID: attempt.ID,
+						Type:      "attempt.setup_script.failed",
+						Message:   "setup_script failed",
+						Data: map[string]any{
+							"log_path": setupLogPath,
+							"error":    err.Error(),
+						},
+					})
+					return attemptResult, err
+				}
+				_ = rt.Tasks.AppendEvent(taskqueue.Event{
+					TaskID:    task.ID,
+					AttemptID: attempt.ID,
+					Type:      "attempt.setup_script.succeeded",
+					Message:   "setup_script succeeded",
+					Data: map[string]any{
+						"log_path": setupLogPath,
+					},
+				})
+			}
+		}
+
 		contextSummary := buildResumeContextSummary(resumedFrom)
 		req := subagent.RunRequest{
 			ParentSessionID:   task.ID,
@@ -150,6 +223,11 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 
 		res, runErr := subagent.Run(toolCtx, req)
 		_ = modelName // reserved for future observer/executor tuning
+		attemptResult.RunID = res.RunID
+		attemptResult.Summary = res.Summary
+		attemptResult.FindingsPath = res.FindingsPath
+		attemptResult.TraceLogPath = res.TraceLogPath
+		attemptResult.Usage = res.Usage
 
 		// Best-effort test report generation (evidence), written next to findings/trace when possible.
 		testReportPath := ""
@@ -185,15 +263,50 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 				testReportPath = strings.TrimSpace(report)
 			}
 		}
+		attemptResult.TestReportPath = testReportPath
+
+		// Run project scripts in the finishing phase.
+		if projectCfgFound {
+			scriptsDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "project_scripts")
+			if strings.TrimSpace(projectCfg.TestScript) != "" {
+				testLogPath := filepath.Join(scriptsDir, "test_script.log")
+				attemptResult.TestScriptLogPath = testLogPath
+				if err := runProjectScript(toolCtx, handlers, "test_script", projectCfg.TestScript, testLogPath); err != nil {
+					_ = rt.Tasks.AppendEvent(taskqueue.Event{
+						TaskID:    task.ID,
+						AttemptID: attempt.ID,
+						Type:      "attempt.test_script.failed",
+						Message:   "test_script failed",
+						Data: map[string]any{
+							"log_path": testLogPath,
+							"error":    err.Error(),
+						},
+					})
+					if runErr == nil {
+						attemptResult.Summary = "test_script failed: " + err.Error()
+						runErr = err
+					}
+				} else {
+					_ = rt.Tasks.AppendEvent(taskqueue.Event{
+						TaskID:    task.ID,
+						AttemptID: attempt.ID,
+						Type:      "attempt.test_script.succeeded",
+						Message:   "test_script succeeded",
+						Data: map[string]any{
+							"log_path": testLogPath,
+						},
+					})
+				}
+			}
+		}
 
 		if rt.WorkLedger != nil {
 			summary := strings.TrimSpace(res.Summary)
 			if summary == "" {
-				if runErr != nil {
-					summary = "subagent failed: " + runErr.Error()
-				} else {
-					summary = "subagent finished"
-				}
+				summary = "subagent finished"
+			}
+			if runErr != nil {
+				summary = "attempt failed: " + runErr.Error()
 			}
 			status := workledger.ReceiptStatusSucceeded
 			if runErr != nil {
@@ -226,14 +339,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			})
 		}
 
-		return taskqueue.AttemptResult{
-			RunID:        res.RunID,
-			Summary:      res.Summary,
-			FindingsPath: res.FindingsPath,
-			TraceLogPath: res.TraceLogPath,
-			TestReportPath: testReportPath,
-			Usage:        res.Usage,
-		}, runErr
+		return attemptResult, runErr
 	}
 
 	decideOutcome := func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {

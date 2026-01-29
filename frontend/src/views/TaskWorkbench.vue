@@ -541,6 +541,11 @@ onUnmounted(() => {
                 <div v-if="latestAttempt.findings_path" class="text-xs text-surface-400">findings：{{ latestAttempt.findings_path }}</div>
                 <div v-if="latestAttempt.trace_log_path" class="text-xs text-surface-400">trace：{{ latestAttempt.trace_log_path }}</div>
                 <div v-if="latestAttempt.test_report_path" class="text-xs text-surface-400">测试报告：{{ latestAttempt.test_report_path }}</div>
+                <div v-if="latestAttempt.project_config_path" class="text-xs text-surface-400">project.json：{{ latestAttempt.project_config_path }}</div>
+                <div v-if="latestAttempt.copy_files_log_path" class="text-xs text-surface-400">copy_files：{{ latestAttempt.copy_files_log_path }}</div>
+                <div v-if="latestAttempt.setup_script_log_path" class="text-xs text-surface-400">setup_script：{{ latestAttempt.setup_script_log_path }}</div>
+                <div v-if="latestAttempt.test_script_log_path" class="text-xs text-surface-400">test_script：{{ latestAttempt.test_script_log_path }}</div>
+                <div v-if="latestAttempt.cleanup_script_log_path" class="text-xs text-surface-400">cleanup_script：{{ latestAttempt.cleanup_script_log_path }}</div>
                 <div v-if="latestAttempt.policy_snapshot" class="text-xs text-surface-400">
                   policy:
                   <span class="font-mono text-surface-200">{{ latestAttempt.policy_snapshot.policy?.id }}</span>

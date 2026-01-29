@@ -22,6 +22,13 @@ type AttemptResult struct {
 	FindingsPath string
 	TraceLogPath string
 	TestReportPath string
+
+	ProjectConfigPath    string
+	CopyFilesLogPath     string
+	SetupScriptLogPath   string
+	TestScriptLogPath    string
+	CleanupScriptLogPath string
+
 	Usage        *usage.Totals
 }
 
@@ -367,6 +374,11 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
 	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
 	ranAttempt.TestReportPath = strings.TrimSpace(result.TestReportPath)
+	ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
+	ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
+	ranAttempt.SetupScriptLogPath = strings.TrimSpace(result.SetupScriptLogPath)
+	ranAttempt.TestScriptLogPath = strings.TrimSpace(result.TestScriptLogPath)
+	ranAttempt.CleanupScriptLogPath = strings.TrimSpace(result.CleanupScriptLogPath)
 	ranAttempt.Usage = result.Usage
 
 	finishedAt := Now()

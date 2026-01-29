@@ -410,6 +410,26 @@ onUnmounted(() => {
                                     <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">test_report_path</p>
                                     <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.test_report_path }}</code>
                                 </div>
+                                <div v-if="latestAttempt?.project_config_path" class="text-xs">
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">project_config_path</p>
+                                    <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.project_config_path }}</code>
+                                </div>
+                                <div v-if="latestAttempt?.copy_files_log_path" class="text-xs">
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">copy_files_log_path</p>
+                                    <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.copy_files_log_path }}</code>
+                                </div>
+                                <div v-if="latestAttempt?.setup_script_log_path" class="text-xs">
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">setup_script_log_path</p>
+                                    <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.setup_script_log_path }}</code>
+                                </div>
+                                <div v-if="latestAttempt?.test_script_log_path" class="text-xs">
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">test_script_log_path</p>
+                                    <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.test_script_log_path }}</code>
+                                </div>
+                                <div v-if="latestAttempt?.cleanup_script_log_path" class="text-xs">
+                                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">cleanup_script_log_path</p>
+                                    <code class="text-[11px] text-surface-300 break-all">{{ latestAttempt.cleanup_script_log_path }}</code>
+                                </div>
 
                                 <div class="flex items-center justify-end gap-2 pt-1">
                                     <button

@@ -186,3 +186,62 @@ it('keeps advanced composer fields collapsed by default', async () => {
 
   wrapper.unmount()
 })
+
+it('shows project scripts info in advanced details', async () => {
+  const store = new Map<string, string>([['oneagent-workspace', '/tmp/wsA']])
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  })
+
+  const { default: TaskWorkbench } = await import('@/views/TaskWorkbench.vue')
+
+  ;(apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: 't1',
+      user_id: 'local',
+      workspace: '/tmp/wsA',
+      title: 'A1',
+      prompt: 'do A',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [{ id: 'a1', status: 'failed', created_at: new Date().toISOString() }],
+    },
+  ])
+  ;(apiClient.getTask as any).mockResolvedValueOnce({
+    id: 't1',
+    user_id: 'local',
+    workspace: '/tmp/wsA',
+    title: 'A1',
+    prompt: 'do A',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      {
+        id: 'a1',
+        status: 'failed',
+        created_at: new Date().toISOString(),
+        project_config_path: '/tmp/wsA/.oneagent/project.json',
+        setup_script_log_path: '/tmp/logs/setup_script.log',
+      },
+    ],
+  })
+  ;(apiClient.getTaskEvents as any).mockResolvedValueOnce([])
+
+  const wrapper = shallowMount(TaskWorkbench)
+  await flushPromises()
+
+  await wrapper.get('[data-testid="workbench-task-item"]').trigger('click')
+  await flushPromises()
+
+  await wrapper.get('[data-testid="workbench-details-advanced-toggle"]').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="workbench-details-advanced"]').exists()).toBe(true)
+  expect(wrapper.text()).toContain('/tmp/wsA/.oneagent/project.json')
+  expect(wrapper.text()).toContain('/tmp/logs/setup_script.log')
+
+  wrapper.unmount()
+})

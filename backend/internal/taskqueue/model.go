@@ -53,6 +53,12 @@ type Attempt struct {
 	TraceLogPath string `json:"trace_log_path,omitempty"`
 	TestReportPath string `json:"test_report_path,omitempty"`
 
+	ProjectConfigPath    string `json:"project_config_path,omitempty"`
+	CopyFilesLogPath     string `json:"copy_files_log_path,omitempty"`
+	SetupScriptLogPath   string `json:"setup_script_log_path,omitempty"`
+	TestScriptLogPath    string `json:"test_script_log_path,omitempty"`
+	CleanupScriptLogPath string `json:"cleanup_script_log_path,omitempty"`
+
 	Observer *ObserverDecision `json:"observer,omitempty"`
 
 	Usage *usage.Totals `json:"usage,omitempty"`
