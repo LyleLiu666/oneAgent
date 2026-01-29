@@ -16,7 +16,7 @@
 - `update-ux-error-surface`（11/11）：统一错误披露（安全/可追踪/可操作）+ 逐页修 UX
 
 ### P2（低成本高收益 / 穿插）
-- `fix-skill-read-not-found-ux`（1/7）：skill.read not-found 的可行动 UX
+- `fix-skill-read-not-found-ux`（2/7）：skill.read not-found 的可行动 UX
 
 ### P3（体验线 / 不阻塞主线）
 - `add-secretary-mode-chat`（0/5）：提供“秘书模式”纯聊天体验（独立路由 + 低噪声）
@@ -27,4 +27,4 @@
 - `add-secretary-mode-chat`：0/5 tasks
 - `add-mcp-server`：7/7 tasks
 - `add-worktree-attempt-isolation`：8/8 tasks
-- `fix-skill-read-not-found-ux`：1/7 tasks
+- `fix-skill-read-not-found-ux`：2/7 tasks
