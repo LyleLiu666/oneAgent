@@ -19,12 +19,12 @@
 - `fix-skill-read-not-found-ux`（7/7）：skill.read not-found 的可行动 UX
 
 ### P3（体验线 / 不阻塞主线）
-- `add-secretary-mode-chat`（0/5）：提供“秘书模式”纯聊天体验（独立路由 + 低噪声）
+- `add-secretary-mode-chat`（1/5）：提供“秘书模式”纯聊天体验（独立路由 + 低噪声）
 
 ## Snapshot（来自 `openspec list`）
 - `update-task-events-waterfall`：10/10 tasks
 - `update-ux-error-surface`：11/11 tasks
-- `add-secretary-mode-chat`：0/5 tasks
+- `add-secretary-mode-chat`：1/5 tasks
 - `add-mcp-server`：7/7 tasks
 - `add-worktree-attempt-isolation`：8/8 tasks
 - `fix-skill-read-not-found-ux`：7/7 tasks
