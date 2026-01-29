@@ -14,6 +14,26 @@ import TaskQueuePanel from './TaskQueuePanel.vue'
 
 const chatStore = useChatStore()
 
+type ChatUIMode = 'full' | 'secretary'
+
+const props = defineProps<{
+  initialMode?: ChatUIMode
+}>()
+
+const CHAT_UI_MODE_KEY = 'oneagent-chat-ui-mode'
+
+const normalizeChatUIMode = (raw: any): ChatUIMode | undefined => {
+  const v = String(raw || '').trim().toLowerCase()
+  if (v === 'full' || v === 'secretary') return v
+  return undefined
+}
+
+const chatUIMode = ref<ChatUIMode>(
+  normalizeChatUIMode(props.initialMode) ??
+    normalizeChatUIMode(localStorage.getItem(CHAT_UI_MODE_KEY)) ??
+    'full'
+)
+
 // Local state
 const inputMessage = ref('')
 const inputEl = ref<HTMLTextAreaElement | null>(null)
@@ -22,7 +42,7 @@ const showScrollButton = ref(false)
 const copiedId = ref<number | null>(null)
 const sessionsLoading = ref(false)
 const loadingHistory = ref(false)
-const showHistory = ref(true) // Control visibility of history panel
+const showHistory = ref(chatUIMode.value !== 'secretary') // Control visibility of history panel
 const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
 const toolsLoading = ref(false)
@@ -994,6 +1014,22 @@ watch(
   () => inputMessage.value,
   () => nextTick(adjustTextareaHeight)
 )
+
+watch(
+  () => props.initialMode,
+  (next) => {
+    const normalized = normalizeChatUIMode(next)
+    if (!normalized) return
+    if (chatUIMode.value === normalized) return
+    chatUIMode.value = normalized
+  },
+  { immediate: true }
+)
+
+watch(chatUIMode, (next) => {
+  localStorage.setItem(CHAT_UI_MODE_KEY, next)
+  showHistory.value = next !== 'secretary'
+})
 
 
 const handleWelcomeSelect = (prompt: string) => {

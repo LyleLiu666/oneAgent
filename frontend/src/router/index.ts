@@ -11,6 +11,12 @@ const routes = [
     alias: "/chat",
   },
   {
+    path: "/secretary",
+    name: "Secretary",
+    component: () => import("@/views/Secretary.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/login",
     name: "Login",
     component: () => import("@/views/Login.vue"),
