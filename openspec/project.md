@@ -25,6 +25,24 @@ We also provide **skill recall** for users who want “omniscient assistant” b
 - Keep behavior spec-driven via OpenSpec. Specs are truth; changes are proposals.
 - Favor explicitness and evidence over “looks good” output.
 
+### UX Principles (Simple by default, powerful when needed)
+oneAgent is a “client-like” product: **most users should be able to start work immediately**, without learning complex concepts.
+At the same time, advanced users must be able to find deeper controls when needed.
+
+Principles:
+- **Default simple**: keep primary flows short (choose workspace → describe task → get deliverables).
+- **Beautiful by default**: readable typography, consistent spacing, stable layout, and low visual noise.
+- **Progressive disclosure**: keep low-frequency/advanced controls folded behind clear “Advanced/More” entrypoints.
+- **No copy-as-API**: tests and selectors MUST NOT depend on UI text (use stable `data-testid`).
+- **Localization**: default interaction language is Chinese (unless explicitly configured otherwise).
+
+### Definition of Done (per change)
+When finishing a change (spec or implementation), do a “vision check” in addition to tests:
+- Does the default UI remain simple and low-noise for the primary user path?
+- Are advanced/rare actions discoverable but not forced into the default view?
+- Does the UI still look clean when expanded (no cramped cards / misaligned controls / overflow)?
+- Are tests updated and stable (no text-coupled selectors), and do `openspec validate` + unit tests + E2E pass?
+
 ### Architecture Patterns
 - **Client-first** UX: a “desktop-client experience” even when delivered as a local web UI.
 - **Agentic execution**: long-running tasks, resumable attempts, and clear completion criteria.
