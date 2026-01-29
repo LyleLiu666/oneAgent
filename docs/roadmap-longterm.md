@@ -116,6 +116,20 @@
 
 这不是“排期承诺”，而是依赖关系与建议顺序（做完再滚动更新）。
 
+### 4.0 地基 → 上层（执行顺序与依赖）
+为了保证“先把地基打牢再上楼”，我们把近期主线拆成层级（L0→L3）。  
+**规则**：默认只推进最靠前、且能形成闭环交付的那一层；后续层级的工作必须建立在前一层的稳定性之上。
+
+| 层级 | 目标 | 主要 changes | 依赖/门槛 |
+| --- | --- | --- | --- |
+| **L0** | 项目可运行/可测试（可复现） | `add-project-scripts` | tool permissions 不可绕过；失败留痕完整 |
+| **L1** | 交付可审查（评论→下一轮） | `add-diff-review-loop` | 具备 diff/test evidence 的可打开指针 |
+| **L2** | 执行隔离 + 易回滚 | `add-worktree-attempt-isolation` | git repo 检测稳定；生命周期清理可解释 |
+| **L3** | 对外编排入口 | `add-mcp-server` | local-only + auth/policy；事件流与证据链打通 |
+
+辅助但低风险的“体验修补”（可穿插）：
+- `fix-skill-read-not-found-ux`：不阻塞主线，但每次碰到都值得顺手修掉（减少治理摩擦）。
+
 ### Phase A：把“项目任务”做到默认可用（近期主线）
 1) `add-project-scripts`（进入可运行态 + 日志证据）
 2) `add-diff-review-loop`（可审查交付 + review→follow-up）
@@ -155,4 +169,3 @@
 - 每新增一个 active change：同步更新 `docs/roadmap-next.md`
 - 每完成一个 change：在本文件补充“产出/经验/下一轮迭代点”
 - 每月至少回顾一次：愿景是否变化、北极星是否偏移、哪些指标在退化
-

@@ -39,8 +39,9 @@
 - `copy_files` 必须做路径逃逸校验（防止复制 workspace 外敏感文件）。
 - 失败留痕：stdout/stderr 与可操作错误必须齐全，否则排障成本爆炸。
 
-### P0.2 `fix-skill-read-not-found-ux`（低成本高收益）
-**价值**：减少治理/学习阶段的“读不到 skill 却不知道怎么办”的摩擦，提升可用性。
+### P0.2 `fix-skill-read-not-found-ux`（可穿插：低成本高收益）
+**价值**：减少治理/学习阶段的“读不到 skill 却不知道怎么办”的摩擦，提升可用性。  
+**定位**：不阻塞主线（L0/L1/L2），但每次碰到都值得顺手修掉。
 
 ---
 
@@ -75,7 +76,7 @@
 ---
 
 ## 4) 下一步执行顺序（建议）
-按“收益/依赖/风险”综合排序：
+按“地基 → 上层（L0→L3）”综合排序：
 1) `add-project-scripts`（unblock 环境可复现）
 2) `add-diff-review-loop`（把交付变成可审查）
 3) `add-worktree-attempt-isolation`（把隔离执行变成默认路径）
