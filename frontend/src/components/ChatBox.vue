@@ -156,8 +156,11 @@ const showSkillsHelpHint = computed(() => {
   )
 })
 
+const isSecretaryMode = computed(() => chatUIMode.value === 'secretary')
+
 // Computed
 const workspaceOnboardingBlocking = computed(() => {
+  if (isSecretaryMode.value) return false
   const isNewSession = !chatStore.currentSessionId
   const isEmptyState = !loadingHistory.value && chatStore.messages.length === 0
   return (
@@ -217,6 +220,10 @@ const toolSummary = computed(() => {
   if (selected === total) return `工具（全部）`
   return `工具 (${selected}/${total})`
 })
+
+const toggleChatUIMode = () => {
+  chatUIMode.value = isSecretaryMode.value ? 'full' : 'secretary'
+}
 
 // Methods
 const handleDocumentClick = (event: MouseEvent) => {
@@ -1068,7 +1075,7 @@ onUnmounted(() => {
     
     <!-- History Sidebar -->
     <ChatHistoryList
-      v-show="showHistory"
+      v-if="showHistory"
       :loading="sessionsLoading"
       @select="selectSession"
       @new="startNewSession"
@@ -1088,9 +1095,11 @@ onUnmounted(() => {
       <div class="shrink-0 bg-surface-950/80 backdrop-blur session-header relative z-30">
         <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">会话</p>
+            <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">
+              {{ isSecretaryMode ? '秘书模式' : '会话' }}
+            </p>
             <p class="text-sm text-surface-100 truncate">{{ currentSessionTitle }}</p>
-            <p v-if="sessionPolicyHash" class="text-[11px] text-surface-500 truncate">
+            <p v-if="!isSecretaryMode && sessionPolicyHash" class="text-[11px] text-surface-500 truncate">
               policy={{ sessionPolicyID || '未知' }} · {{ shortSessionPolicyHash }}
               <a href="/governance/tools" class="ml-2 text-primary-400 hover:text-primary-300 underline">
                 工具权限
@@ -1099,118 +1108,130 @@ onUnmounted(() => {
             </p>
           </div>
           <div class="flex items-center gap-2 flex-wrap justify-end">
-            <Cpu class="w-4 h-4 text-surface-400" />
-            <select
-              v-model="selectedModelId"
-              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 max-w-[220px] truncate"
-              :disabled="modelsLoading"
+            <button
+              type="button"
+              data-testid="chat-toggle-mode"
+              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+              :title="isSecretaryMode ? '显示完整聊天面板' : '隐藏低频/高级区域，仅保留对话'"
+              @click="toggleChatUIMode"
             >
-              <option value="">{{ modelsLoading ? '加载中...' : '默认模型' }}</option>
-              <option v-for="model in models" :key="model.id" :value="model.id">
-                {{ model.name || model.model }}{{ model.provider?.name ? ` · ${model.provider.name}` : '' }}
-              </option>
-            </select>
-            <div class="flex items-center gap-2">
-              <Folder class="w-4 h-4 text-surface-400" />
-              <input
-                v-model="workspacePath"
-                data-testid="chat-workspace-path"
-                class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-[220px] max-w-full"
-                placeholder="工作区路径（服务端）"
-                :disabled="Boolean(sessionWorkspace)"
-                :title="
-                  sessionWorkspace
-                    ? '本会话的工作区已锁定；如需修改，请新建会话。'
-                    : '工作区位于服务端机器上；文件工具将限定在该目录内。'
-                "
-              />
-              <button
-                type="button"
-                data-testid="chat-workspace-choose"
-                :class="[
-                  'bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed',
-                  workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
-                ]"
-                :disabled="workspaceChoosing || Boolean(sessionWorkspace)"
-                :title="
-                  sessionWorkspace
-                    ? '本会话的工作区已锁定；如需修改，请新建会话。'
-                    : workspaceChooseError || '选择工作区文件夹（服务端）'
-                "
-                @click="chooseWorkspace"
-              >
-                <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
-                <span v-else>选择文件夹</span>
-              </button>
-            </div>
-            <div v-if="tools.length > 0" ref="toolPickerEl" class="relative flex items-center gap-2">
-              <Sparkles class="w-4 h-4 text-surface-400" />
-              <button
-                type="button"
-                class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-                :disabled="toolsLoading"
-                :title="toolSummary"
-                @click.stop="toolPickerOpen = !toolPickerOpen"
-              >
-                {{ toolSummary }}
-              </button>
-              <div
-                v-if="toolPickerOpen"
-                class="absolute right-0 top-full mt-2 w-[320px] rounded-xl bg-surface-950 border border-surface-800 shadow-xl p-3 z-30"
-                @click.stop
-              >
-                <div class="flex items-center justify-between gap-3">
-                  <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">协议</p>
-                  <select
-                    v-model="selectedToolProtocol"
-                    class="bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-                    title="工具协议"
-                  >
-                    <option value="json">JSON 工具</option>
-                    <option value="xml">XML 工具</option>
-                  </select>
-                </div>
+              {{ isSecretaryMode ? '进入完整模式' : '进入秘书模式' }}
+            </button>
 
-                <div class="mt-3 max-h-60 overflow-y-auto space-y-2 pr-1">
-                  <label
-                    v-for="tool in tools"
-                    :key="tool.id"
-                    class="flex items-center gap-2 text-xs text-surface-300"
-                  >
-                    <input
-                      v-model="selectedToolIds"
-                      type="checkbox"
-                      class="accent-primary-500"
-                      :value="tool.id"
-                      :disabled="toolsLoading"
-                    />
-                    <span class="truncate" :title="tool.description || tool.name">{{ tool.name }}</span>
-                  </label>
-                </div>
+            <template v-if="!isSecretaryMode">
+              <Cpu class="w-4 h-4 text-surface-400" />
+              <select
+                v-model="selectedModelId"
+                class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 max-w-[220px] truncate"
+                :disabled="modelsLoading"
+              >
+                <option value="">{{ modelsLoading ? '加载中...' : '默认模型' }}</option>
+                <option v-for="model in models" :key="model.id" :value="model.id">
+                  {{ model.name || model.model }}{{ model.provider?.name ? ` · ${model.provider.name}` : '' }}
+                </option>
+              </select>
+              <div class="flex items-center gap-2">
+                <Folder class="w-4 h-4 text-surface-400" />
+                <input
+                  v-model="workspacePath"
+                  data-testid="chat-workspace-path"
+                  class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 w-[220px] max-w-full"
+                  placeholder="工作区路径（服务端）"
+                  :disabled="Boolean(sessionWorkspace)"
+                  :title="
+                    sessionWorkspace
+                      ? '本会话的工作区已锁定；如需修改，请新建会话。'
+                      : '工作区位于服务端机器上；文件工具将限定在该目录内。'
+                  "
+                />
+                <button
+                  type="button"
+                  data-testid="chat-workspace-choose"
+                  :class="[
+                    'bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed',
+                    workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
+                  ]"
+                  :disabled="workspaceChoosing || Boolean(sessionWorkspace)"
+                  :title="
+                    sessionWorkspace
+                      ? '本会话的工作区已锁定；如需修改，请新建会话。'
+                      : workspaceChooseError || '选择工作区文件夹（服务端）'
+                  "
+                  @click="chooseWorkspace"
+                >
+                  <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
+                  <span v-else>选择文件夹</span>
+                </button>
+              </div>
+              <div v-if="tools.length > 0" ref="toolPickerEl" class="relative flex items-center gap-2">
+                <Sparkles class="w-4 h-4 text-surface-400" />
+                <button
+                  type="button"
+                  class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                  :disabled="toolsLoading"
+                  :title="toolSummary"
+                  @click.stop="toolPickerOpen = !toolPickerOpen"
+                >
+                  {{ toolSummary }}
+                </button>
+                <div
+                  v-if="toolPickerOpen"
+                  class="absolute right-0 top-full mt-2 w-[320px] rounded-xl bg-surface-950 border border-surface-800 shadow-xl p-3 z-30"
+                  @click.stop
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <p class="text-[10px] uppercase tracking-[0.2em] text-surface-500">协议</p>
+                    <select
+                      v-model="selectedToolProtocol"
+                      class="bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                      title="工具协议"
+                    >
+                      <option value="json">JSON 工具</option>
+                      <option value="xml">XML 工具</option>
+                    </select>
+                  </div>
 
-                <div class="mt-3 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    class="text-xs text-surface-300 hover:text-surface-100"
-                    @click="selectAllTools"
-                  >
-                    全选
-                  </button>
-                  <button
-                    type="button"
-                    class="text-xs text-surface-300 hover:text-surface-100"
-                    @click="clearAllTools"
-                  >
-                    清空
-                  </button>
+                  <div class="mt-3 max-h-60 overflow-y-auto space-y-2 pr-1">
+                    <label
+                      v-for="tool in tools"
+                      :key="tool.id"
+                      class="flex items-center gap-2 text-xs text-surface-300"
+                    >
+                      <input
+                        v-model="selectedToolIds"
+                        type="checkbox"
+                        class="accent-primary-500"
+                        :value="tool.id"
+                        :disabled="toolsLoading"
+                      />
+                      <span class="truncate" :title="tool.description || tool.name">{{ tool.name }}</span>
+                    </label>
+                  </div>
+
+                  <div class="mt-3 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      class="text-xs text-surface-300 hover:text-surface-100"
+                      @click="selectAllTools"
+                    >
+                      全选
+                    </button>
+                    <button
+                      type="button"
+                      class="text-xs text-surface-300 hover:text-surface-100"
+                      @click="clearAllTools"
+                    >
+                      清空
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
           </div>
         </div>
       </div>
 
-      <TaskQueuePanel :workspace="workspacePath" :model-id="selectedModelId" />
+      <TaskQueuePanel v-if="!isSecretaryMode" :workspace="workspacePath" :model-id="selectedModelId" />
 
       <!-- Messages area -->
       <div
@@ -1252,7 +1273,7 @@ onUnmounted(() => {
         >
           <!-- Tool message -->
           <div
-            v-if="message.type === 'tool_call' || message.type === 'tool_result'"
+            v-if="!isSecretaryMode && (message.type === 'tool_call' || message.type === 'tool_result')"
             class="max-w-3xl"
           >
             <ToolMessage :message="message" />
@@ -1367,7 +1388,7 @@ onUnmounted(() => {
               </div>
               
               <!-- Trace Log Component -->
-              <TraceLog :content="message.trace" />
+              <TraceLog v-if="!isSecretaryMode" :content="message.trace" />
 
             </div>
           </div>
