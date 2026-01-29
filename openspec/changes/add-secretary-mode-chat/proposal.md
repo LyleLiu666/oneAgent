@@ -10,9 +10,10 @@
   - 仅保留：消息流 + 输入框 + 必要状态
   - 默认隐藏：历史侧栏、模型/工具选择、trace/工具细节、任务面板等低频内容
   - 允许一键切换回完整模式（不丢功能，只折叠复杂度）
+- 提供独立路由用于直接进入秘书模式（例如 `/secretary`，best-effort）
+- 高级能力不删除：完整模式仍可从全局菜单中进入（best-effort）
 - 模式选择持久化（例如 localStorage），并支持通过 URL/入口快速进入（best-effort）
 
 ## Impact
 - Affected specs: `chat-ux` (new)
 - Affected code (expected): `frontend/src/components/ChatBox.vue`, `frontend/src/router/index.ts` (optional)
-

@@ -14,7 +14,7 @@
 - `fix-skill-read-not-found-ux`：skill.read not-found 的可行动 UX
 - `add-worktree-attempt-isolation`：git worktree 隔离 attempt（执行根目录 + 生命周期管理）
 - `add-mcp-server`：对外暴露 MCP server（local-only + auth/policy + events）
-- `add-secretary-mode-chat`：提供“秘书模式”纯聊天体验（低噪声 + 一键切换回完整模式）
+- `add-secretary-mode-chat`：提供“秘书模式”纯聊天体验（独立路由 + 低噪声 + 菜单可回完整模式）
 
 ### 0.2 已完成（Complete）
 - `add-project-scripts`

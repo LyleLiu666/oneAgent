@@ -68,8 +68,6 @@ const budgetTokens = ref("");
 const budgetCost = ref("");
 const submitting = ref(false);
 const composerAdvancedOpen = ref(false);
-const detailsAdvancedOpen = ref(false);
-const reviewOpen = ref(false);
 
 const reviewLoading = ref(false);
 const reviewError = ref("");
@@ -92,7 +90,7 @@ const detailTabs = [
 
 // Reset tab when task changes
 watch(selectedTaskId, () => {
-  activeDetailTab.value = 'overview';
+  activeDetailTab.value = "overview";
 });
 
 const latestAttempt = computed<TaskAttempt | null>(() => {
@@ -113,8 +111,6 @@ const canResume = computed(() =>
 );
 
 const normalizeWorkspace = (ws: string) => String(ws || "").trim();
-const shortHash = (hash?: string) =>
-  hash && hash.length >= 8 ? hash.slice(0, 8) : hash || "";
 
 const loadManualWorkspaces = () => {
   try {
@@ -261,6 +257,12 @@ const submitReviewComment = async () => {
   }
 };
 
+const toggleReviewTab = async () => {
+  if (!selectedTask.value || !latestAttempt.value) return;
+  activeDetailTab.value =
+    activeDetailTab.value === "review" ? "overview" : "review";
+};
+
 const createFollowUpAttempt = async () => {
   reviewError.value = "";
   const t = selectedTask.value;
@@ -273,7 +275,7 @@ const createFollowUpAttempt = async () => {
     await resumeTask(t.id, { review_notes: notes });
     await refreshSelected();
     await refreshTasks();
-    reviewOpen.value = false;
+    activeDetailTab.value = "overview";
   } catch (e: any) {
     reviewError.value = String(
       e?.data?.error || e?.message || "Failed to create follow-up attempt",
@@ -284,9 +286,9 @@ const createFollowUpAttempt = async () => {
 };
 
 watch(
-  () => [reviewOpen.value, latestAttempt.value?.id, selectedTask.value?.id],
-  async ([open]) => {
-    if (!open) return;
+  () => [activeDetailTab.value, latestAttempt.value?.id, selectedTask.value?.id],
+  async ([tab]) => {
+    if (tab !== "review") return;
     await loadReviewArtifacts();
   },
 );
@@ -775,8 +777,12 @@ onUnmounted(() => {
                   data-testid="workbench-review-toggle"
                   class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
                   :disabled="!latestAttempt"
-                  :class="reviewOpen ? 'bg-indigo-500/20 text-indigo-300' : ''"
-                  @click="reviewOpen = !reviewOpen"
+                  :class="
+                    activeDetailTab === 'review'
+                      ? 'bg-indigo-500/20 text-indigo-300'
+                      : ''
+                  "
+                  @click="toggleReviewTab"
                 >
                   <ListTodo class="w-4 h-4" />
                   审查
@@ -792,6 +798,11 @@ onUnmounted(() => {
               <button
                 v-for="tab in detailTabs"
                 :key="tab.key"
+                :data-testid="
+                  tab.key === 'advanced'
+                    ? 'workbench-details-advanced-toggle'
+                    : undefined
+                "
                 class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
                 :class="
                   activeDetailTab === tab.key
@@ -983,6 +994,7 @@ onUnmounted(() => {
               <!-- Advanced Tab -->
               <div v-else-if="activeDetailTab === 'advanced'" class="space-y-4"
               >
+                <div data-testid="workbench-details-advanced">
                 <div v-if="!latestAttempt" class="text-sm text-surface-500"
                 >暂无尝试记录</div>
                 <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4"
@@ -1000,7 +1012,7 @@ onUnmounted(() => {
                       ['setup_script', latestAttempt.setup_script_log_path],
                       ['test_script', latestAttempt.test_script_log_path],
                       ['cleanup_script', latestAttempt.cleanup_script_log_path],
-                    ].filter(([, v]) => v) as [string, string]"
+                    ].filter(([, v]) => v) as [string, string][]"
                     :key="item[0]"
                     class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3"
                   >
@@ -1009,6 +1021,7 @@ onUnmounted(() => {
                     <div class="text-xs text-surface-300 font-mono break-all"
                     >{{ item[1] }}</div>
                   </div>
+                </div>
                 </div>
               </div>
             </div>
@@ -1020,7 +1033,7 @@ onUnmounted(() => {
             >
               <div class="flex items-center justify-between gap-2">
                 <div class="text-sm text-surface-100 font-semibold">审查</div>
-                <div class="text-xs text-surface-500">{{ latestAttempt.id }}</div>
+                <div class="text-xs text-surface-500">{{ latestAttempt?.id }}</div>
               </div>
 
               <div
@@ -1040,7 +1053,7 @@ onUnmounted(() => {
                   <pre
                     v-if="changedFiles?.content"
                     class="mt-2 max-h-[20vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
-                  >{{ changedFiles.content }}</pre>
+                  >{{ changedFiles?.content }}</pre>
                   <div v-else class="mt-2 text-surface-500">
                     暂无变更文件列表（可能无改动或未生成）。
                   </div>
@@ -1051,7 +1064,7 @@ onUnmounted(() => {
                   <pre
                     v-if="diffPatch?.content"
                     class="mt-2 max-h-[30vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
-                  >{{ diffPatch.content }}</pre>
+                  >{{ diffPatch?.content }}</pre>
                   <div v-else class="mt-2 text-surface-500">
                     暂无 diff patch（可能非 git 或 diff 太大）。
                   </div>

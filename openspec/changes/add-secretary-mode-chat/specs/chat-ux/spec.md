@@ -7,6 +7,7 @@
 - 仍可正常发送消息并接收回复
 - 默认隐藏低频/高级区域（例如历史侧栏、模型/工具选择、trace/工具细节、任务面板等，best-effort）
 - 提供可发现的一键入口切换回完整模式
+- 支持通过独立路由直接进入秘书模式（例如 `/secretary`，best-effort），且完整模式仍可从全局菜单进入（best-effort）
 
 #### Scenario: Secretary mode remains usable for chat
 - **GIVEN** 用户已进入 Chat 的秘书模式
@@ -26,3 +27,8 @@
 - **WHEN** 用户刷新页面或重新打开应用
 - **THEN** Chat 仍以秘书模式呈现（best-effort）
 
+#### Scenario: Secretary mode can be entered via dedicated route
+- **GIVEN** 系统提供秘书模式独立路由（例如 `/secretary`）
+- **WHEN** 用户访问该路由
+- **THEN** 页面以秘书模式呈现（best-effort）
+- **AND** 用户仍能通过全局菜单进入完整模式（best-effort）
