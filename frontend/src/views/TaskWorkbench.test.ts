@@ -9,6 +9,7 @@ vi.mock("@/api/client", () => ({
   listTasks: vi.fn(async () => []),
   createTask: vi.fn(async () => ({})),
   getTask: vi.fn(async () => ({})),
+  getTaskAttemptArtifact: vi.fn(async () => ({})),
   getTaskAttemptDiffPatch: vi.fn(async () => ({})),
   getTaskAttemptChangedFiles: vi.fn(async () => ({})),
   getTaskEvents: vi.fn(async () => []),
@@ -277,6 +278,80 @@ it("shows updates when a task finishes after baseline", async () => {
   expect(wrapper.find('[data-testid=\"task-updates\"]').exists()).toBe(true);
   expect(wrapper.text()).toContain("更新");
   expect(wrapper.text()).toContain("succeeded");
+
+  wrapper.unmount();
+});
+
+it("opens a modal to preview artifact content from advanced tab", async () => {
+  const store = new Map<string, string>([["oneagent-workspace", "/tmp/wsA"]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  (apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "local",
+      workspace: "/tmp/wsA",
+      title: "A1",
+      prompt: "do A",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: "a1", status: "failed", created_at: new Date().toISOString() },
+      ],
+    },
+  ]);
+  (apiClient.getTask as any).mockResolvedValueOnce({
+    id: "t1",
+    user_id: "local",
+    workspace: "/tmp/wsA",
+    title: "A1",
+    prompt: "do A",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      {
+        id: "a1",
+        status: "failed",
+        created_at: new Date().toISOString(),
+        findings_path: "/tmp/wsA/.oneagent/FINDINGS.md",
+      },
+    ],
+  });
+  (apiClient.getTaskEvents as any).mockResolvedValueOnce([]);
+  (apiClient.getTaskAttemptArtifact as any).mockResolvedValueOnce({
+    path: "/tmp/wsA/.oneagent/FINDINGS.md",
+    content: "# Findings\n\nHello\n",
+    truncated: false,
+  });
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  await wrapper.get('[data-testid="workbench-task-item"]').trigger("click");
+  await flushPromises();
+
+  await wrapper
+    .get('[data-testid="workbench-details-advanced-toggle"]')
+    .trigger("click");
+  await flushPromises();
+
+  await wrapper.get('[data-testid="artifact-card-findings"]').trigger("click");
+  await flushPromises();
+
+  expect(apiClient.getTaskAttemptArtifact).toHaveBeenCalledWith(
+    "t1",
+    "a1",
+    "findings",
+  );
+  expect(wrapper.find('[data-testid="artifact-modal"]').exists()).toBe(true);
+  expect(wrapper.text()).toContain("# Findings");
 
   wrapper.unmount();
 });

@@ -13,6 +13,7 @@ import {
   cancelTask,
   createTask,
   getTask,
+  getTaskAttemptArtifact,
   getTaskAttemptChangedFiles,
   getTaskAttemptDiffPatch,
   getTaskEvents,
@@ -78,6 +79,109 @@ const reviewCommentDraft = ref("");
 const followUpNotes = ref("");
 const submittingReviewComment = ref(false);
 const submittingFollowUp = ref(false);
+
+type AttemptArtifactSummary = {
+  kind: string;
+  label: string;
+  path: string;
+};
+
+const advancedArtifacts = computed<AttemptArtifactSummary[]>(() => {
+  const a = latestAttempt.value;
+  if (!a) return [];
+  const items: AttemptArtifactSummary[] = [
+    { kind: "findings", label: "findings", path: String(a.findings_path || "") },
+    { kind: "trace", label: "trace", path: String(a.trace_log_path || "") },
+    {
+      kind: "test_report",
+      label: "测试报告",
+      path: String(a.test_report_path || ""),
+    },
+    {
+      kind: "changed_files",
+      label: "changed_files",
+      path: String(a.changed_files_path || ""),
+    },
+    {
+      kind: "diff_patch",
+      label: "diff_patch",
+      path: String(a.diff_patch_path || ""),
+    },
+    {
+      kind: "review_comments",
+      label: "review_comments",
+      path: String(a.review_comments_path || ""),
+    },
+    {
+      kind: "project_config",
+      label: "project.json",
+      path: String(a.project_config_path || ""),
+    },
+    {
+      kind: "copy_files_log",
+      label: "copy_files",
+      path: String(a.copy_files_log_path || ""),
+    },
+    {
+      kind: "setup_script_log",
+      label: "setup_script",
+      path: String(a.setup_script_log_path || ""),
+    },
+    {
+      kind: "test_script_log",
+      label: "test_script",
+      path: String(a.test_script_log_path || ""),
+    },
+    {
+      kind: "cleanup_script_log",
+      label: "cleanup_script",
+      path: String(a.cleanup_script_log_path || ""),
+    },
+  ];
+  return items.filter((i) => i.path.trim());
+});
+
+const artifactModalOpen = ref(false);
+const artifactModalLoading = ref(false);
+const artifactModalError = ref("");
+const artifactModalLabel = ref("");
+const artifactModalKind = ref("");
+const artifactModalPath = ref("");
+const artifactModalContent = ref<TaskAttemptArtifactContent | null>(null);
+
+let artifactRequestSeq = 0;
+const openArtifactModal = async (artifact: AttemptArtifactSummary) => {
+  const t = selectedTask.value;
+  const a = latestAttempt.value;
+  if (!t || !a) return;
+
+  artifactModalOpen.value = true;
+  artifactModalLoading.value = true;
+  artifactModalError.value = "";
+  artifactModalLabel.value = artifact.label;
+  artifactModalKind.value = artifact.kind;
+  artifactModalPath.value = artifact.path;
+  artifactModalContent.value = null;
+
+  const seq = ++artifactRequestSeq;
+  try {
+    const res = await getTaskAttemptArtifact(t.id, a.id, artifact.kind);
+    if (seq !== artifactRequestSeq) return;
+    artifactModalPath.value = String(res?.path || artifact.path);
+    artifactModalContent.value = res;
+  } catch (e: any) {
+    if (seq !== artifactRequestSeq) return;
+    artifactModalError.value = String(
+      e?.data?.error || e?.message || "Failed to load artifact",
+    );
+  } finally {
+    if (seq === artifactRequestSeq) artifactModalLoading.value = false;
+  }
+};
+
+const closeArtifactModal = () => {
+  artifactModalOpen.value = false;
+};
 
 // Tab navigation for task details
 const activeDetailTab = ref("overview");
@@ -1017,31 +1121,25 @@ onUnmounted(() => {
                 <div data-testid="workbench-details-advanced">
                 <div v-if="!latestAttempt" class="text-sm text-surface-500"
                 >暂无尝试记录</div>
-                <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4"
+                <div v-else-if="advancedArtifacts.length" class="grid grid-cols-1 lg:grid-cols-2 gap-4"
                 >
-                  <div
-                    v-for="item in [
-                      ['findings', latestAttempt.findings_path],
-                      ['trace', latestAttempt.trace_log_path],
-                      ['测试报告', latestAttempt.test_report_path],
-                      ['changed_files', latestAttempt.changed_files_path],
-                      ['diff_patch', latestAttempt.diff_patch_path],
-                      ['review_comments', latestAttempt.review_comments_path],
-                      ['project.json', latestAttempt.project_config_path],
-                      ['copy_files', latestAttempt.copy_files_log_path],
-                      ['setup_script', latestAttempt.setup_script_log_path],
-                      ['test_script', latestAttempt.test_script_log_path],
-                      ['cleanup_script', latestAttempt.cleanup_script_log_path],
-                    ].filter(([, v]) => v) as [string, string][]"
-                    :key="item[0]"
-                    class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3"
+                  <button
+                    v-for="item in advancedArtifacts"
+                    :key="item.kind"
+                    type="button"
+                    class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3 text-left hover:bg-surface-900/40 transition-colors"
+                    :data-testid="`artifact-card-${item.kind}`"
+                    @click="openArtifactModal(item)"
                   >
-                    <div class="text-xs text-surface-500 mb-1"
-                    >{{ item[0] }}</div>
-                    <div class="text-xs text-surface-300 font-mono break-all"
-                    >{{ item[1] }}</div>
-                  </div>
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="text-xs text-surface-500">{{ item.label }}</div>
+                      <div class="text-[11px] text-surface-400">查看</div>
+                    </div>
+                    <div class="mt-1 text-xs text-surface-300 font-mono break-all"
+                    >{{ item.path }}</div>
+                  </button>
                 </div>
+                <div v-else class="text-sm text-surface-500">暂无可预览的文件</div>
                 </div>
               </div>
             </div>
@@ -1153,6 +1251,60 @@ onUnmounted(() => {
               </div>
             </div>
 
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="artifactModalOpen"
+      data-testid="artifact-modal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div
+        class="absolute inset-0 bg-black/60"
+        @click="closeArtifactModal"
+      ></div>
+      <div
+        class="relative w-full max-w-5xl rounded-2xl border border-surface-700/50 bg-surface-950/90 backdrop-blur p-4"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-surface-100 truncate">
+              {{ artifactModalLabel }}
+            </div>
+            <div class="text-xs text-surface-400 font-mono break-all">
+              {{ artifactModalPath }}
+            </div>
+          </div>
+          <button
+            type="button"
+            class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60"
+            @click="closeArtifactModal"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="mt-3">
+          <div v-if="artifactModalLoading" class="text-sm text-surface-500">
+            加载中…
+          </div>
+          <div
+            v-else-if="artifactModalError"
+            class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200"
+          >
+            {{ artifactModalError }}
+          </div>
+          <div v-else class="space-y-2">
+            <div
+              v-if="artifactModalContent?.truncated"
+              class="text-xs text-amber-400"
+            >
+              内容已截断（仅展示前 512KB）
+            </div>
+            <pre
+              class="max-h-[70vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre"
+            >{{ artifactModalContent?.content }}</pre>
           </div>
         </div>
       </div>

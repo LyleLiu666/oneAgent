@@ -75,6 +75,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/tasks/:id/cancel", handler.CancelTask)
 		api.POST("/tasks/:id/resume", handler.ResumeTask)
 		api.GET("/tasks/:id/events", handler.GetTaskEvents)
+		api.GET("/tasks/:id/attempts/:attempt_id/artifacts/:kind", handler.GetTaskAttemptArtifact)
 		api.GET("/tasks/:id/attempts/:attempt_id/diff_patch", handler.GetTaskAttemptDiffPatch)
 		api.GET("/tasks/:id/attempts/:attempt_id/changed_files", handler.GetTaskAttemptChangedFiles)
 		api.GET("/tasks/:id/attempts/:attempt_id/review_comments", handler.ListTaskAttemptReviewComments)

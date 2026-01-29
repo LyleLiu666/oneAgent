@@ -517,6 +517,16 @@ export interface TaskAttemptArtifactContent {
   truncated: boolean;
 }
 
+export async function getTaskAttemptArtifact(
+  taskId: string,
+  attemptId: string,
+  kind: string,
+): Promise<TaskAttemptArtifactContent> {
+  return api(
+    `/api/tasks/${encodeURIComponent(taskId)}/attempts/${encodeURIComponent(attemptId)}/artifacts/${encodeURIComponent(kind)}`,
+  );
+}
+
 export async function getTaskAttemptDiffPatch(
   taskId: string,
   attemptId: string,

@@ -29,6 +29,11 @@ func GetTaskAttemptChangedFiles(c *gin.Context) {
 	getTaskAttemptArtifact(c, "changed_files")
 }
 
+func GetTaskAttemptArtifact(c *gin.Context) {
+	kind := strings.TrimSpace(c.Param("kind"))
+	getTaskAttemptArtifact(c, kind)
+}
+
 func getTaskAttemptArtifact(c *gin.Context, kind string) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Tasks == nil {
@@ -75,6 +80,27 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 		if path == "" && rt.Layout != nil {
 			path = filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "review", "changed_files.txt")
 		}
+	case "review_comments":
+		path = strings.TrimSpace(attempt.ReviewCommentsPath)
+		if path == "" && rt.Layout != nil {
+			path = filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "review", "review_comments.jsonl")
+		}
+	case "findings":
+		path = strings.TrimSpace(attempt.FindingsPath)
+	case "trace":
+		path = strings.TrimSpace(attempt.TraceLogPath)
+	case "test_report":
+		path = strings.TrimSpace(attempt.TestReportPath)
+	case "project_config":
+		path = strings.TrimSpace(attempt.ProjectConfigPath)
+	case "copy_files_log":
+		path = strings.TrimSpace(attempt.CopyFilesLogPath)
+	case "setup_script_log":
+		path = strings.TrimSpace(attempt.SetupScriptLogPath)
+	case "test_script_log":
+		path = strings.TrimSpace(attempt.TestScriptLogPath)
+	case "cleanup_script_log":
+		path = strings.TrimSpace(attempt.CleanupScriptLogPath)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported artifact kind"})
 		return

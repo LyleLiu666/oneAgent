@@ -192,6 +192,23 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 		t.Fatalf("expected changed_files content, got %+v", changedResp)
 	}
 
+	genericArtifactReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/artifacts/changed_files", nil)
+	genericArtifactRes, err := http.DefaultClient.Do(genericArtifactReq)
+	if err != nil {
+		t.Fatalf("GET artifacts/changed_files: %v", err)
+	}
+	defer genericArtifactRes.Body.Close()
+	if genericArtifactRes.StatusCode != http.StatusOK {
+		t.Fatalf("GET artifacts/changed_files status=%d", genericArtifactRes.StatusCode)
+	}
+	var genericChangedResp map[string]any
+	if err := json.NewDecoder(genericArtifactRes.Body).Decode(&genericChangedResp); err != nil {
+		t.Fatalf("decode artifacts/changed_files: %v", err)
+	}
+	if strings.TrimSpace(genericChangedResp["content"].(string)) == "" {
+		t.Fatalf("expected artifacts/changed_files content, got %+v", genericChangedResp)
+	}
+
 	// Review comments (append-only).
 	commentBody := map[string]any{"comment": "looks good, please add one more test"}
 	commentJSON, _ := json.Marshal(commentBody)
