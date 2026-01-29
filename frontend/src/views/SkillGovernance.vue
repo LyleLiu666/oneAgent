@@ -177,6 +177,15 @@ const doArchiveShadowed = async (skillID: string) => {
   }
 }
 
+const effectiveCandidate = (g: SkillDuplicateGroup) => {
+  return g.candidates.find((c) => c.effective) || g.candidates[0] || null
+}
+
+const duplicateGroupTitle = (g: SkillDuplicateGroup) => {
+  const c = effectiveCandidate(g)
+  return (c?.name || '').trim() || g.skill_id
+}
+
 onMounted(async () => {
   await refresh()
 })
@@ -316,21 +325,25 @@ onMounted(async () => {
               <div v-else-if="duplicatesLoading" class="text-sm text-surface-500">加载中…</div>
               <div v-else-if="duplicates.length === 0" class="text-sm text-surface-500">未发现重复项。</div>
               <div v-else class="space-y-3">
-                <div v-for="g in duplicates" :key="g.skill_id" class="glass-card p-4 space-y-3">
-                  <div class="flex items-center justify-between gap-4">
+                <div v-for="g in duplicates" :key="g.skill_id" class="glass-card p-4">
+                  <div class="space-y-3">
                     <div class="min-w-0">
-                      <p class="text-sm text-surface-100 font-semibold truncate">id={{ g.skill_id }}</p>
-                      <p class="text-xs text-surface-500">{{ g.candidates.length }} 个候选 · 第一项 effective=true</p>
+                      <p class="text-sm text-surface-100 font-semibold truncate">{{ duplicateGroupTitle(g) }}</p>
+                      <p class="text-xs text-surface-500 truncate">id={{ g.skill_id }} · {{ g.candidates.length }} 个候选</p>
                     </div>
-                    <div class="shrink-0 flex items-center gap-2">
-                      <label class="text-[11px] text-surface-500 inline-flex items-center gap-2">
+
+                    <div class="flex items-center justify-between gap-2">
+                      <label
+                        class="text-[11px] text-surface-500 inline-flex items-center gap-2 whitespace-nowrap"
+                        title="归档被遮蔽的个人技能"
+                      >
                         <input
                           type="checkbox"
                           class="accent-primary-500"
                           v-model="archiveShadowedBySkillID[g.skill_id]"
                           :disabled="duplicatesActionLoading"
                         />
-                        归档被遮蔽的个人技能
+                        归档遮蔽个人
                       </label>
                       <button
                         data-testid="duplicate-archive-shadowed"
@@ -342,45 +355,51 @@ onMounted(async () => {
                         归档遮蔽项
                       </button>
                     </div>
-                  </div>
 
-                  <div class="space-y-2">
-                    <div
-                      v-for="c in g.candidates"
-                      :key="`${c.skill_id}:${c.source}:${c.path}`"
-                      class="rounded-xl border border-surface-800/70 bg-surface-950/30 p-3 flex items-start justify-between gap-4"
-                    >
-                      <div class="min-w-0">
-                        <p class="text-xs text-surface-200 truncate">
-                          <span class="font-semibold">{{ c.name }}</span>
-                          <span v-if="c.effective" class="ml-2 text-[11px] text-primary-300">生效</span>
-                        </p>
-                        <p class="text-[11px] text-surface-500 truncate">
-                          source={{ c.source }} · rank={{ c.precedence_rank }} · {{ c.path }}
-                        </p>
-                      </div>
-                      <div class="shrink-0">
-                        <button
-                          v-if="c.source !== '.oneagent'"
-                          data-testid="duplicate-pin"
-                          class="px-3 py-2 rounded-xl text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2 mr-2 disabled:opacity-50"
-                          :disabled="duplicatesActionLoading"
-                          @click="doPin(g.skill_id, c)"
-                        >
-                          <Pin class="w-4 h-4" />
-                          固定
-                        </button>
-                        <button
-                          v-if="c.archivable"
-                          data-testid="duplicate-archive"
-                          class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
-                          :disabled="loading"
-                          @click="doArchive(c)"
-                        >
-                          <Archive class="w-4 h-4" />
-                          归档
-                        </button>
-                        <span v-else class="text-xs text-surface-600">—</span>
+                    <div class="rounded-xl border border-surface-800/70 bg-surface-950/20 overflow-hidden divide-y divide-surface-800/60">
+                      <div
+                        v-for="c in g.candidates"
+                        :key="`${c.skill_id}:${c.source}:${c.path}`"
+                        class="px-3 py-2 flex items-start justify-between gap-3"
+                      >
+                        <div class="min-w-0">
+                          <div class="flex items-center gap-2">
+                            <p class="text-xs text-surface-200 font-semibold truncate">{{ c.name }}</p>
+                            <span
+                              v-if="c.effective"
+                              class="text-[11px] px-2 py-0.5 rounded-full bg-primary-500/15 text-primary-200 border border-primary-500/20 shrink-0"
+                            >
+                              生效
+                            </span>
+                          </div>
+                          <p class="text-[11px] text-surface-500 truncate mt-1">
+                            source={{ c.source }} · rank={{ c.precedence_rank }} · {{ c.path }}
+                          </p>
+                        </div>
+
+                        <div class="shrink-0 flex flex-col items-end gap-2">
+                          <button
+                            v-if="c.source !== '.oneagent'"
+                            data-testid="duplicate-pin"
+                            class="px-2 py-1 rounded-lg text-[11px] font-medium bg-primary-500/15 text-primary-200 hover:bg-primary-500/20 inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                            :disabled="duplicatesActionLoading"
+                            @click="doPin(g.skill_id, c)"
+                          >
+                            <Pin class="w-4 h-4" />
+                            固定
+                          </button>
+                          <button
+                            v-if="c.archivable"
+                            data-testid="duplicate-archive"
+                            class="px-2 py-1 rounded-lg text-[11px] font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                            :disabled="loading"
+                            @click="doArchive(c)"
+                          >
+                            <Archive class="w-4 h-4" />
+                            归档
+                          </button>
+                          <span v-else class="text-xs text-surface-600">—</span>
+                        </div>
                       </div>
                     </div>
                   </div>
