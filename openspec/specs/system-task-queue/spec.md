@@ -68,37 +68,36 @@ TBD - created by archiving change add-autonomous-task-queue. Update Purpose afte
 系统必须 (MUST) 使用一个独立于主/子 Agent 对话上下文的 Outcome Observer 来判定任务是否 `succeeded`：
 - Observer 输入至少包含：任务原始描述（用户预期）、workspace 根目录、以及任务产生的产物引用（例如 findings/trace）。
 - Observer 必须 (MUST) 输出 `pass/fail` 与可操作原因，并尽可能引用证据（例如相关文件路径/关键变更）。
+- 当 `pass=false` 时，Observer 必须 (MUST) 同时输出 `next_steps`（下一步可执行方案），用于指导系统继续交付（见下述自动 follow-up 要求）。
+- Observer 应该 (SHOULD) 尽量回答/消化执行过程中的“反问/不确定点”，避免把可由证据推断的决策留给用户。
+- 仅当确实需要用户偏好或外部信息时，Observer 才可以 (MAY) 输出 `questions_for_user`（并清晰说明为什么需要）。
 - Observer 不得 (MUST NOT) 仅以 “plan/todo 是否完整” 作为成功判定依据（因为 todo 可能不全或不存在）。
 - Observer 必须 (MUST) 为只读验收：不得执行命令（例如 `go test`），仅可通过读取文件/列目录/搜索等只读方式获取证据。
 
-#### Scenario: 无 plan 仍可由 Observer 判定任务成功
-- **GIVEN** 任务未创建 PLAN.md 或 todo 不完整
-- **WHEN** 任务执行结束并进入“待判定”阶段
-- **THEN** Observer 仍能基于用户预期与交付产物判定 `succeeded/failed`
-
-#### Scenario: plan 未覆盖全部工作但仍可成功
-- **GIVEN** 任务存在 PLAN.md，但 todo 仅覆盖部分工作项
-- **WHEN** 任务执行结束并进入“待判定”阶段
-- **THEN** Observer 不得因为“存在未列出的 todo”而直接判失败
-- **THEN** Observer 以用户预期是否满足为准给出判定与原因
-
-#### Scenario: 通过测试报告等文件证据完成只读判定
-- **GIVEN** 任务需要 `go test` 等命令验收
-- **WHEN** 主/子 agent 在执行阶段生成一个可读的测试报告文件并将其作为任务产物引用
-- **THEN** Outcome Observer 仅通过读取该测试报告与相关文件进行判定（不执行命令）
+#### Scenario: Observer fail includes next_steps
+- **GIVEN** attempt 的交付产物不足以满足用户预期
+- **WHEN** Outcome Observer 判定 `pass=false`
+- **THEN** Observer 输出包含 `reason/evidence`
+- **AND** 输出包含可执行的 `next_steps`（可以直接写入下一轮 attempt 的 review_notes）
 
 ### Requirement: 任务失败后支持断点接续（Resume）
-系统必须 (MUST) 支持对失败/中断类终态的任务进行断点接续：当任务的最近一次 attempt 处于 `failed` / `timed_out` / `interrupted` 时，系统必须 (MUST) 允许用户发起一次 resume，并创建一个新的 attempt 继续推进任务。
+系统必须 (MUST) 支持对终态任务创建新的 attempt 继续推进（包括“失败后的断点接续”以及“成功后的 review follow-up”）：
+- 当任务的最近一次 attempt 处于终态（`succeeded`/`failed`/`timed_out`/`interrupted`/`canceled` 等）时，系统必须 (MUST) 允许用户发起一次 resume/follow-up 并创建新的 attempt。
+- 新 attempt 必须 (MUST) 继承原任务的关键上下文（至少包含：原始任务描述、workspace、以及上一次 attempt 的 summary + findings/trace 引用）。
+- 当用户在 follow-up 时提供 `review_notes`（或等价字段）时，系统必须 (MUST) 将其注入新 attempt 的上下文，并在 events 中记录来源（便于审计）。
+- 系统必须 (MUST) 保留被 resume 的历史 attempt（其 events/产物引用不可丢失），并在新 attempt 的 events 中记录“由哪个 attempt resume 而来”的关联信息。
 
-resume 的新 attempt 必须 (MUST) 继承原任务的关键上下文（至少包含：原始任务描述、workspace、以及上一次 attempt 的 summary + findings/trace 引用），以最大化复用已完成工作并避免从零开始。
-
-系统必须 (MUST) 保留被 resume 的历史 attempt（其 events/产物引用不可丢失），并在新 attempt 的 events 中记录“由哪个 attempt resume 而来”的关联信息。
-
-#### Scenario: failed 任务 resume 后创建新的 attempt
-- **GIVEN** 任务最近一次 attempt 状态为 `failed`
-- **WHEN** 用户对该任务发起 resume
+#### Scenario: succeeded 任务也可创建 follow-up attempt
+- **GIVEN** 任务最近一次 attempt 状态为 `succeeded`
+- **WHEN** 用户对该任务发起 resume/follow-up
 - **THEN** 系统创建一个新的 attempt 并进入 `queued`（随后可进入 `running`）
 - **THEN** 任务历史 attempts 仍可被查询与回溯
+
+#### Scenario: follow-up 携带 review_notes 注入新 attempt
+- **GIVEN** 任务最近一次 attempt 处于终态
+- **WHEN** 用户发起 follow-up 并提供 `review_notes="请按 review 修复边界条件，并补充测试"`
+- **THEN** 新 attempt 上下文包含该 `review_notes`
+- **AND** 新 attempt 的 events 记录该 follow-up 由上一轮 attempt 派生且包含 review_notes 的引用（best-effort）
 
 ### Requirement: Task 可取消（Cancel）
 系统必须 (MUST) 支持用户取消一个任务。
@@ -126,12 +125,22 @@ resume 的新 attempt 必须 (MUST) 继承原任务的关键上下文（至少�
 ### Requirement: TaskQueue Workbench UI
 系统必须 (MUST) 提供一个 TaskQueue 工作台，用于在多 workspace 场景下可视化任务队列与运行状态。
 
+系统必须 (MUST) 在该工作台 UI 中使用渐进式披露（progressive disclosure）：
+- 默认仅展示高频入口：workspace 选择、任务入队、任务列表、任务详情（含状态/摘要）与 cancel/resume
+- 将低频/高级内容（例如可选预算、证据路径、policy snapshot、事件列表等）默认折叠，并提供可发现的展开入口
+
 #### Scenario: 用户在一个页面管理多个 workspace 的任务
 - **GIVEN** 用户有多个 workspace
 - **WHEN** 用户打开 TaskQueue Workbench
 - **THEN** 用户可以看到每个 workspace 的任务列表（含 `queued/running/terminal`）
 - **AND** 用户可以对任务执行 `cancel/resume`
 - **AND** 用户可以查看 task attempt history 与 events
+
+#### Scenario: Advanced sections are collapsed by default
+- **GIVEN** 用户打开 TaskQueue Workbench
+- **WHEN** 页面首次渲染完成
+- **THEN** 高级区域默认处于折叠状态（best-effort）
+- **AND** 页面仍可完成任务入队与 cancel/resume 等高频操作
 
 ### Requirement: 条件写入（OCC Preconditions）
 系统必须 (MUST) 支持在文件写入/编辑工具中携带 preconditions，并在不满足时拒绝写入，以避免“基于旧版本探索的修改落到新版本”。
@@ -208,4 +217,134 @@ resume 的新 attempt 必须 (MUST) 继承原任务的关键上下文（至少�
 - **WHEN** Observer 对该 attempt 做 outcome 判定
 - **THEN** Observer 只读取该文件内容用于判定
 - **AND** 系统不产生任何“执行测试命令”的 tool call/trace 记录
+
+### Requirement: Mutating attempts MUST have a rollback boundary
+系统必须 (MUST) 为任何可能修改用户资产的 task attempt 建立一个“可回退边界”（rollback boundary），以满足“可修改资产必须可回退”的底线。
+
+该边界至少应覆盖 workspace 内的文件系统改动，并满足：
+- attempt 开始时生成可恢复的 checkpoint（例如 worktree/base commit、git snapshot、或等价机制）
+- attempt 终态后用户可触发 rollback，将 workspace 恢复到 checkpoint 状态（best-effort）
+- rollback 不得删除该 attempt 的证据链（trace/findings/diff artifacts 仍需保留用于复盘）
+
+#### Scenario: User rolls back a failed attempt and workspace is restored
+- **GIVEN** 一个 attempt 产生了 workspace 文件改动并最终 `failed`
+- **WHEN** 用户对该 attempt 触发 rollback
+- **THEN** workspace 文件状态被恢复到该 attempt 开始前的 checkpoint（best-effort）
+- **AND** 该 attempt 的 artifacts/trace 仍可被查询与打开
+
+### Requirement: Rollback MUST be auditable and idempotent
+系统必须 (MUST) 将 rollback 作为一等事件记录到审计证据链，并确保重复触发不会产生额外破坏：
+- rollback 事件记录包含 `attempt_id`、checkpoint 引用、操作者（单用户可为 implicit principal）、时间、以及结果（success/fail + reason）
+- 对同一 attempt 重复触发 rollback 时，系统应返回“已回退”或等价的幂等结果（best-effort）
+
+#### Scenario: Repeated rollback is idempotent
+- **GIVEN** 用户已成功对某 attempt 执行过一次 rollback
+- **WHEN** 用户再次对同一 attempt 触发 rollback
+- **THEN** 系统返回幂等结果（不再次破坏 workspace）
+- **AND** 事件日志包含一次可解释的重复触发记录（best-effort）
+
+### Requirement: Observer fail MUST trigger bounded auto follow-up attempt
+当一个 attempt 的执行结束且 Outcome Observer 判定 `pass=false` 时，系统必须 (MUST) 自动创建一个 follow-up attempt 并继续执行，以逼近用户预期交付（best-effort）。
+
+自动 follow-up 必须 (MUST) 满足：
+- follow-up attempt 的 `review_notes` 由 Observer 的 `next_steps` 自动填充（可附带简短上下文）
+- 系统记录可审计事件（例如 `attempt.queued` data 标注 `source=observer`）
+- 自动 follow-up 受 `limits.max_auto_attempts` 约束；达到上限后不得继续自动创建 attempt
+- 达到上限后，系统必须 (MUST) 向用户清晰呈现最后一次 Observer 的 `reason + evidence + next_steps`（便于用户手动接管）
+
+#### Scenario: Observer fail auto-enqueues follow-up attempt
+- **GIVEN** attempt 执行结束且 Observer 判定 `pass=false`
+- **WHEN** 该 task 仍未达到 `limits.max_auto_attempts`
+- **THEN** 系统自动创建一个新的 attempt（`status=queued`）
+- **AND** 该 attempt 的 `review_notes` 包含 Observer `next_steps`
+- **AND** 该 task 被重新入队并继续执行
+
+#### Scenario: Auto follow-up stops after max_auto_attempts
+- **GIVEN** 某 task 已自动创建了 `limits.max_auto_attempts` 次 follow-up attempt
+- **WHEN** 最新 attempt 再次被 Observer 判定为 `pass=false`
+- **THEN** 系统不再自动创建新的 attempt
+- **AND** UI/接口返回可解释的失败信息（包含 `next_steps` 供用户接管）
+
+### Requirement: Task attempts MUST produce reviewable change evidence (diff artifacts)
+系统必须 (MUST) 为每个 attempt best-effort 产出可审查的“变更证据”，并将其作为 artifacts 指针暴露，以支持 UI diff review 与 outcome 验收（只读）。
+
+当 workspace 是 git repo 时，系统应该 (SHOULD) 优先生成基于 `git diff` 的 patch；当无法生成（非 git / 权限不足 / diff 过大）时，系统必须 (MUST) 至少提供变更文件列表或等价摘要，并在 receipt/trace 中写入可解释原因（best-effort）。
+
+#### Scenario: git workspace attempt 产生 diff patch artifact
+- **GIVEN** workspace 是 git repo 且 attempt 产生文件改动
+- **WHEN** attempt 进入终态并持久化产物
+- **THEN** artifacts 包含 `diff_patch_path`（或等价字段）
+- **AND** `diff_patch_path` 指向的文件存在且可读
+
+#### Scenario: 非 git workspace 仍提供变更摘要并解释原因
+- **GIVEN** workspace 不是 git repo
+- **WHEN** attempt 进入终态并持久化产物
+- **THEN** artifacts MAY 不包含 `diff_patch_path`
+- **AND** artifacts 包含 `changed_files_path`（或等价摘要）
+- **AND** receipt/trace 中包含“无法生成 git diff”的可解释原因（best-effort）
+
+### Requirement: Task attempt MUST run project scripts (best-effort) with evidence
+系统必须 (MUST) 在 workspace 存在 `.oneagent/project.json` 时，在 task attempt 生命周期中 best-effort 执行项目脚本，并将输出作为 evidence 纳入产物。
+
+支持的脚本字段（均为可选）：
+- `setup_script`：attempt 启动前执行
+- `test_script`：attempt 收尾阶段执行（用于生成 test evidence）
+- `cleanup_script`：attempt 结束后执行（清理临时文件等）
+
+系统必须 (MUST) 保证脚本执行遵循当前 attempt 的 tool permissions policy（不得绕过策略直接执行）。
+
+当 project config 声明 `copy_files` 时，系统必须 (MUST) 在执行 `setup_script` 之前 best-effort 处理文件复制：
+- 复制源必须位于 workspace root 内（不得允许绝对路径或逃逸路径）
+- 复制目标为 attempt 的执行目录（默认等于 workspace root；在 worktree/隔离执行场景下可能不同）
+- 若任一条目无法复制（源不存在/无权限/目标不可写），系统必须 (MUST) 让 attempt 失败并返回可操作原因（避免后续隐性失败）
+
+#### Scenario: setup_script 执行成功并留下日志
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `setup_script`
+- **WHEN** 系统启动一个新的 task attempt
+- **THEN** 系统执行 `setup_script`
+- **AND** 将 stdout/stderr 写入 attempt artifacts（或等价可追溯路径）
+
+#### Scenario: setup_script 失败导致 attempt 进入失败并保留证据
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `setup_script`
+- **AND** `setup_script` 退出码非 0
+- **WHEN** 系统启动一个新的 task attempt
+- **THEN** attempt 进入失败终态（例如 `failed`）
+- **AND** attempt summary/receipt 中包含可解释原因（best-effort）
+- **AND** 失败时仍保存 stdout/stderr 作为证据
+
+#### Scenario: copy_files 在 setup_script 前被复制到执行目录
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `copy_files=[".env"]`
+- **AND** workspace root 中存在 `.env`
+- **WHEN** 系统启动一个新的 task attempt
+- **THEN** 系统在执行 `setup_script` 之前将 `.env` 复制到 attempt 执行目录（best-effort）
+- **AND** 复制过程遵循 tool permissions policy（不得绕过）
+
+#### Scenario: copy_files 源不存在导致 attempt 失败并返回可操作错误
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `copy_files=[".env"]`
+- **AND** workspace root 中不存在 `.env`
+- **WHEN** 系统启动一个新的 task attempt
+- **THEN** attempt 进入失败终态（例如 `failed`）
+- **AND** summary/receipt 中包含“copy_files 缺失”的可操作原因（指出缺失文件路径）
+
+#### Scenario: test_script 执行并留下测试证据
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `test_script`
+- **WHEN** 一个 task attempt 的主流程执行完成并进入收尾阶段
+- **THEN** 系统执行 `test_script`（best-effort）
+- **AND** 将 stdout/stderr 写入 attempt artifacts（或等价可追溯路径）
+- **AND** 系统在可得时将测试报告引用写入 receipt（例如 `test_report_path`）
+
+#### Scenario: test_script 失败使 attempt 判定为 failed 并可 resume
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `test_script`
+- **AND** `test_script` 退出码非 0
+- **WHEN** 系统执行 attempt 的收尾阶段
+- **THEN** attempt 进入失败终态（例如 `failed`）
+- **AND** summary/receipt 中包含“测试失败”的可解释原因与证据引用（best-effort）
+- **AND** 用户仍可通过 resume 创建新 attempt 继续（不应阻断恢复路径）
+
+#### Scenario: cleanup_script 在 attempt 终态后执行且不改变终态
+- **GIVEN** workspace 的 `.oneagent/project.json` 包含 `cleanup_script`
+- **WHEN** attempt 已进入终态（succeeded/failed/canceled/...）
+- **THEN** 系统执行 `cleanup_script`（best-effort）
+- **AND** 将 stdout/stderr 写入 attempt artifacts（或等价可追溯路径）
+- **AND** `cleanup_script` 的失败不得 (MUST NOT) 覆盖 attempt 的终态（但必须记录原因）
 

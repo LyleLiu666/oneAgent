@@ -136,3 +136,65 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **THEN** 系统只归档 personal 范围内被 shadow 的版本
 - **AND** 不会尝试修改不可写来源（例如 `~/.claude`）
 
+### Requirement: Skill governance UI MUST use progressive disclosure
+系统必须 (MUST) 在技能治理 UI 中使用渐进式披露，默认仅展示高频入口，并将低频/高级操作折叠起来。
+
+高频入口至少包含：
+- 技能列表与选择
+- 个人技能的保存/归档（当可用时）
+
+低频/高级内容（例如 duplicates/pin/archive-shadowed、路径/sha 等诊断信息）必须 (MUST) 默认折叠，并提供可发现的展开入口。
+
+#### Scenario: Advanced governance actions are collapsed by default
+- **GIVEN** 用户打开技能治理页面
+- **WHEN** 页面首次渲染完成
+- **THEN** 高级区域默认处于折叠状态
+- **AND** 页面仍可完成技能查看/编辑/归档等高频操作
+
+#### Scenario: User can expand advanced section to manage duplicates
+- **GIVEN** 页面存在 duplicates 治理能力
+- **WHEN** 用户展开高级区域
+- **THEN** 用户可以执行 pin/archive-shadowed 等低频治理操作（best-effort）
+
+### Requirement: Skill governance workbench MUST support listing and archiving
+系统必须 (MUST) 提供一个治理入口，用于列出当前可用技能，并支持对个人技能执行归档操作。
+
+#### Scenario: 列出 skills
+- **WHEN** 用户打开 skill 治理页面
+- **THEN** 系统返回可发现的 skills 列表（至少包含 id/name/description/source/path）
+
+#### Scenario: 归档 oneAgent personal skill
+- **GIVEN** 某 skill 来源为 oneAgent personal skills
+- **WHEN** 用户执行 archive
+- **THEN** skill 被移动到 archived 位置
+- **AND** 后续列出 skills 时不再包含该 skill
+
+### Requirement: Skill governance MUST expose duplicates candidates
+系统必须 (MUST) 提供一个治理 API，用于列出“同名冲突”的 skill candidates，并标记每组中最终生效版本。
+
+#### Scenario: 列出 duplicates
+- **GIVEN** 同一 `skill_id` 在不同来源存在多个版本
+- **WHEN** 客户端请求 `GET /api/skills/duplicates`
+- **THEN** 响应按 `skill_id` 分组返回 candidates
+- **AND** 每个 candidate 至少包含 `source/path/archivable/effective`
+
+#### Scenario: effective 选择与 Discover 一致
+- **GIVEN** `<workspace>/.oneagent/skills/foo` 与 `ONEAGENT_HOME/.oneagent/skills/foo` 同时存在
+- **WHEN** 客户端请求 `GET /api/skills/duplicates`
+- **THEN** `<workspace>/.oneagent` 版本标记为 `effective=true`
+- **AND** 其他版本标记为 `effective=false`
+
+### Requirement: Personal skills MUST be viewable and editable via API
+系统必须 (MUST) 为 oneAgent personal skills 提供“查看与编辑 SKILL.md”的能力，作为治理工作台的基础。
+
+#### Scenario: 获取 skill 详情包含 SKILL.md 与 sha
+- **GIVEN** 某 skill 为 oneAgent personal skills
+- **WHEN** 客户端请求 `GET /api/skills/:id`
+- **THEN** 响应包含 `skill_md`（完整 SKILL.md 原文）与 `sha256`（用于 OCC）
+
+#### Scenario: 使用 OCC 更新 SKILL.md
+- **GIVEN** 客户端已读取到 `sha256`
+- **WHEN** 客户端请求 `PUT /api/skills/:id` 并携带 `expected_sha256`
+- **THEN** 当文件未变化时更新成功
+- **AND** 当文件已变化时必须拒绝并返回明确错误
+

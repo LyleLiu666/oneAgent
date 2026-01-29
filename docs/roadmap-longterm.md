@@ -18,12 +18,13 @@
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
+- [ ] `update-ux-error-surface`（0/11 tasks）：统一错误披露（安全/可追踪/可操作）+ 按 `docs/ux_critique.md` 逐步修 UX
 - [ ] `add-worktree-attempt-isolation`（2/8 tasks）：git worktree 隔离 attempt（执行根目录 + 生命周期管理）
 - [ ] `add-mcp-server`（2/7 tasks）：对外暴露 MCP server（local-only + auth/policy + events）
 - [ ] `add-secretary-mode-chat`（0/5 tasks）：提供“秘书模式”纯聊天体验（独立路由 + 低噪声 + 菜单可回完整模式）
 - [ ] `fix-skill-read-not-found-ux`（0/7 tasks）：skill.read not-found 的可行动 UX
 
-### 0.2 Done（已交付）
+### 0.2 Done（已交付，且已归档到 `openspec/changes/archive/`）
 - [x] `add-project-scripts`
 - [x] `add-diff-review-loop`
 - [x] `add-observer-remediation-loop`
@@ -161,6 +162,7 @@
 辅助但低风险的“体验修补”（可穿插）：
 - `add-secretary-mode-chat`：不阻塞主线（L0/L1/L2/L3），但能显著降低“只想对话委托”的噪声。
 - `fix-skill-read-not-found-ux`：不阻塞主线，但每次碰到都值得顺手修掉（减少治理摩擦）。
+- `update-ux-error-surface`：分两段走（先错误披露契约与统一错误组件，再逐页修 UX），不阻塞 L2/L3，但会显著提升“可信度与可操作性”。
 
 ### Phase A：把“项目任务”做到默认可用（地基主线）
 1) `add-project-scripts`（已完成：进入可运行态 + 日志证据）
@@ -168,11 +170,12 @@
 3) `add-worktree-attempt-isolation`（隔离执行 + 可回滚边界）
 
 ### Phase A2：体验线（可与地基并行推进）
-4) `add-secretary-mode-chat`（低噪声纯对话入口）
-5) `fix-skill-read-not-found-ux`（小而关键的摩擦修复）
+4) `update-ux-error-surface`（安全错误面 + 渐进式披露 + 按 UX critique 修补）
+5) `add-secretary-mode-chat`（低噪声纯对话入口）
+6) `fix-skill-read-not-found-ux`（小而关键的摩擦修复）
 
 ### Phase B：把“运行时”开放出去（集成主线）
-6) `add-mcp-server`（local-only + auth/policy + events）
+7) `add-mcp-server`（local-only + auth/policy + events）
 
 ### Phase C：把“挂机收割”做到极致（留存主线）
 7) Digest/通知/批处理的体验增强（按需拆 change）
@@ -194,6 +197,14 @@
 - Windows 文件占用/路径长度：worktree 清理与回收要足够鲁棒。
 - 非 git workspace：必须给出明确错误或按配置退化（不得 silent fallback）。
 - 生命周期：孤儿 worktree 的识别与清理需要证据与可操作提示。
+
+##### `update-ux-error-surface`（安全错误面 + 统一错误展示 + 逐步修 UX）
+**价值**：把“报错直出/不可操作/信息暴露风险”系统性解决；同时把 `docs/ux_critique.md` 落到可验收的最小改动集（逐页推进）。
+
+**关键坑**
+- 默认必须“安全且可操作”：不把内部 `err.Error()` 直接塞给用户；必须有 `request_id` 以便定位 trace。
+- 渐进式披露要一致：默认只展示安全文案，细节必须显式展开（避免 UI 到处漏出技术串）。
+- 变更范围要可控：先做错误契约与公共组件，再按页面逐个验收（避免一次性大重构）。
 
 ##### `fix-skill-read-not-found-ux`（可穿插：低成本高收益）
 **价值**：减少治理/学习阶段的“读不到 skill 却不知道怎么办”的摩擦，提升可用性。  
@@ -221,9 +232,10 @@
 #### 执行顺序（建议）
 按“地基 → 上层（L0→L3）”综合排序：
 1) `add-worktree-attempt-isolation`
-2) `add-mcp-server`（建议先只读，逐步扩展）
-3) `add-secretary-mode-chat`（体验线：可并行推进）
-4) `fix-skill-read-not-found-ux`（穿插做，随时可落地）
+2) `update-ux-error-surface`（先做错误披露契约与统一组件，再逐页修 UX）
+3) `add-mcp-server`（建议先只读，逐步扩展）
+4) `add-secretary-mode-chat`（体验线：可并行推进）
+5) `fix-skill-read-not-found-ux`（穿插做，随时可落地）
 
 ---
 
