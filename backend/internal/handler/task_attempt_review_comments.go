@@ -17,11 +17,11 @@ import (
 )
 
 type reviewCommentRecord struct {
-	TS         time.Time `json:"ts"`
-	PrincipalID string   `json:"principal_id"`
-	TaskID     string    `json:"task_id"`
-	AttemptID  string    `json:"attempt_id"`
-	Comment    string    `json:"comment"`
+	TS          time.Time `json:"ts"`
+	PrincipalID string    `json:"principal_id"`
+	TaskID      string    `json:"task_id"`
+	AttemptID   string    `json:"attempt_id"`
+	Comment     string    `json:"comment"`
 }
 
 type postReviewCommentRequest struct {
@@ -47,7 +47,7 @@ func PostTaskAttemptReviewComment(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -88,7 +88,7 @@ func PostTaskAttemptReviewComment(c *gin.Context) {
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -104,17 +104,17 @@ func PostTaskAttemptReviewComment(c *gin.Context) {
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	_, writeErr := f.Write(line)
 	closeErr := f.Close()
 	if writeErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": writeErr.Error()})
+		RespondError(c, http.StatusInternalServerError, writeErr)
 		return
 	}
 	if closeErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": closeErr.Error()})
+		RespondError(c, http.StatusInternalServerError, closeErr)
 		return
 	}
 
@@ -150,7 +150,7 @@ func ListTaskAttemptReviewComments(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -181,7 +181,7 @@ func ListTaskAttemptReviewComments(c *gin.Context) {
 			c.JSON(http.StatusOK, []reviewCommentRecord{})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	defer f.Close()
@@ -201,7 +201,7 @@ func ListTaskAttemptReviewComments(c *gin.Context) {
 		out = append(out, rec)
 	}
 	if err := scanner.Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -220,4 +220,3 @@ func findAttempt(attempts []taskqueue.Attempt, attemptID string) *taskqueue.Atte
 	}
 	return nil
 }
-

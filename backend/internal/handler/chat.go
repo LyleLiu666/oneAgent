@@ -177,7 +177,7 @@ func NewChatHandler(rt *oneruntime.Runtime) *ChatHandler {
 func (h *ChatHandler) StreamChat(c *gin.Context) {
 	var req ChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -189,7 +189,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	policySnap, err := h.rt.ResolveToolPolicySnapshot(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	if workspaceValue != "" {
 		normalized, err := scope.NormalizeWorkspaceRoot(workspaceValue)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusBadRequest, err)
 			return
 		}
 		workspaceRoot = normalized
@@ -271,7 +271,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 	resolvedModel, err := h.resolveModel(c.Request.Context(), userID, selectedModelID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	if resolvedModel.SafetyTier != safetyTierHigh && userID != "local" {
@@ -286,7 +286,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 	toolDefs, err := tool.MountWithSnapshot(selectedToolIDs, policySnap)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
@@ -300,7 +300,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		ToolNames:    toolNames,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	systemPrompt = assembled.StablePrefix
@@ -1166,7 +1166,7 @@ func (h *ChatHandler) TruncateSession(c *gin.Context) {
 
 	var req TruncateSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 

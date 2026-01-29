@@ -160,7 +160,7 @@ func CreateProvider(c *gin.Context) {
 
 	var req createProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -200,7 +200,7 @@ func UpdateProvider(c *gin.Context) {
 
 	var req updateProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -308,7 +308,7 @@ func CreateModel(c *gin.Context) {
 
 	var req createModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -324,13 +324,13 @@ func CreateModel(c *gin.Context) {
 
 	tier, err := normalizeSafetyTier("")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	if req.SafetyTier != nil {
 		gotTier, err := normalizeSafetyTier(*req.SafetyTier)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusBadRequest, err)
 			return
 		}
 		tier = gotTier
@@ -365,7 +365,7 @@ func UpdateModel(c *gin.Context) {
 
 	var req updateModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -385,7 +385,7 @@ func UpdateModel(c *gin.Context) {
 	if req.SafetyTier != nil {
 		tier, err := normalizeSafetyTier(*req.SafetyTier)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusBadRequest, err)
 			return
 		}
 		existing, err := rt.Settings.GetModel(c.Request.Context(), userID, modelID)

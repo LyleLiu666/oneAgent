@@ -47,12 +47,12 @@ func CreateTask(c *gin.Context) {
 	limits := taskqueue.ResolveLimits(req.Limits)
 	task, err := rt.Tasks.CreateTask(userID, req.Workspace, title, req.Prompt, req.ModelID, limits)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	if err := rt.TaskRunner.Enqueue(task.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -74,7 +74,7 @@ func ListTasks(c *gin.Context) {
 	workspace := strings.TrimSpace(c.Query("workspace"))
 	tasks, err := rt.Tasks.ListTasks(userID, workspace)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, tasks)
@@ -99,7 +99,7 @@ func GetTask(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -128,7 +128,7 @@ func CancelTask(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -138,7 +138,7 @@ func CancelTask(c *gin.Context) {
 
 	updated, err := rt.TaskRunner.Cancel(taskID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, updated)
@@ -171,7 +171,7 @@ func ResumeTask(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -181,7 +181,7 @@ func ResumeTask(c *gin.Context) {
 
 	updated, err := rt.TaskRunner.Resume(taskID, req.ReviewNotes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, updated)
@@ -206,7 +206,7 @@ func GetTaskEvents(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -216,7 +216,7 @@ func GetTaskEvents(c *gin.Context) {
 
 	evs, err := rt.Tasks.ReadEvents(taskID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, evs)

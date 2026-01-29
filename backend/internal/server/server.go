@@ -30,11 +30,12 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 
 	router := gin.Default()
 	router.Use(middleware.InjectRuntime(rt))
+	router.Use(middleware.RequestID())
 
 	// Configure CORS.
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowOrigins = []string{"*"}
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Authorization"}
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Authorization", "X-Request-ID"}
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	corsConfig.AllowCredentials = true
 	router.Use(cors.New(corsConfig))
@@ -50,7 +51,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 	router.GET("/health", func(c *gin.Context) {
 		health, err := rt.Health(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			handler.RespondError(c, http.StatusInternalServerError, err)
 			return
 		}
 		c.JSON(http.StatusOK, health)

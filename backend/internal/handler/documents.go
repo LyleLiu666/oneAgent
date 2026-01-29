@@ -14,11 +14,11 @@ import (
 )
 
 type exportDocumentRequest struct {
-	Workspace     string `json:"workspace"`
-	InputPath     string `json:"input_path"`
-	Format        string `json:"format"`
-	OutputPath    string `json:"output_path,omitempty"`
-	TemplatePath  string `json:"template_path,omitempty"`
+	Workspace    string `json:"workspace"`
+	InputPath    string `json:"input_path"`
+	Format       string `json:"format"`
+	OutputPath   string `json:"output_path,omitempty"`
+	TemplatePath string `json:"template_path,omitempty"`
 }
 
 func ExportDocument(c *gin.Context) {
@@ -46,13 +46,13 @@ func ExportDocument(c *gin.Context) {
 	}
 	normalized, err := scope.NormalizeWorkspaceRoot(workspaceRoot)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	policySnap, err := rt.ResolveToolPolicySnapshot(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -61,7 +61,7 @@ func ExportDocument(c *gin.Context) {
 		if err == nil {
 			err = os.ErrNotExist
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -80,7 +80,7 @@ func ExportDocument(c *gin.Context) {
 	})
 	out, err := defs[0].Handler(toolCtx, raw)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, out)

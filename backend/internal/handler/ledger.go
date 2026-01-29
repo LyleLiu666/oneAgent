@@ -45,7 +45,7 @@ func ListReceipts(c *gin.Context) {
 		Limit:       limit,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -71,7 +71,7 @@ func GetReceipt(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "receipt not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if strings.TrimSpace(r.PrincipalID) != principal {
@@ -112,7 +112,7 @@ func GetDigestByParam(c *gin.Context, dayKey string) {
 	refresh := strings.TrimSpace(c.Query("refresh")) == "1"
 	d, err := rt.WorkLedger.GetOrCreateDigest(principal, day, refresh)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

@@ -41,7 +41,7 @@ func ListSkills(c *gin.Context) {
 
 	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -87,7 +87,7 @@ func ListSkillDuplicates(c *gin.Context) {
 	workspaceRoot := strings.TrimSpace(c.Query("workspace"))
 	candidates, err := skill.DiscoverCandidates(c.Request.Context(), skill.DiscoverOptions{WorkspaceRoot: workspaceRoot})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -163,7 +163,7 @@ func GetSkill(c *gin.Context) {
 
 	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	s, ok := cat.ByID(id)
@@ -177,7 +177,7 @@ func GetSkill(c *gin.Context) {
 
 	files, err := listSkillFiles(c.Request.Context(), s)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -187,7 +187,7 @@ func GetSkill(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	sum := sha256.Sum256(data)
@@ -239,7 +239,7 @@ func ReadSkillFile(c *gin.Context) {
 
 	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	s, ok := cat.ByID(id)
@@ -254,7 +254,7 @@ func ReadSkillFile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	if !utf8.Valid(data) {
@@ -464,7 +464,7 @@ func UpdateSkill(c *gin.Context) {
 
 	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	s, ok := cat.ByID(id)
@@ -485,7 +485,7 @@ func UpdateSkill(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	curSum := sha256.Sum256(current)
@@ -496,7 +496,7 @@ func UpdateSkill(c *gin.Context) {
 	}
 
 	if err := fsutil.AtomicWriteFile(s.Path, []byte(req.SkillMD), 0o644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -536,7 +536,7 @@ func ArchiveSkill(c *gin.Context) {
 
 	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -556,7 +556,7 @@ func ArchiveSkill(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -676,7 +676,7 @@ func PinSkillCandidate(c *gin.Context) {
 
 	candidates, err := skill.DiscoverCandidates(c.Request.Context(), skill.DiscoverOptions{WorkspaceRoot: strings.TrimSpace(req.WorkspaceRoot)})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -699,18 +699,18 @@ func PinSkillCandidate(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "candidate not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
 	canonicalDir := filepath.Join(home, ".oneagent", "skills", skillID)
 	canonicalPath := filepath.Join(canonicalDir, "SKILL.md")
 	if err := os.MkdirAll(canonicalDir, 0o700); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if err := fsutil.AtomicWriteFile(canonicalPath, data, 0o644); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -719,7 +719,7 @@ func PinSkillCandidate(c *gin.Context) {
 	if req.ArchiveShadowed {
 		archived, shadowed, err = archiveShadowedPersonalDuplicates(c.Request.Context(), home, skillID, canonicalPath)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusBadRequest, err)
 			return
 		}
 	}
@@ -766,7 +766,7 @@ func ArchiveShadowedPersonalDuplicates(c *gin.Context) {
 	canonicalPath := filepath.Join(home, ".oneagent", "skills", skillID, "SKILL.md")
 	archived, _, err := archiveShadowedPersonalDuplicates(c.Request.Context(), home, skillID, canonicalPath)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 

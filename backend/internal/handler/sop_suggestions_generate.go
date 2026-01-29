@@ -38,7 +38,7 @@ func GenerateSuggestions(c *gin.Context) {
 		Count:        req.Count,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, created)

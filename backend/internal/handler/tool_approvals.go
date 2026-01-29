@@ -45,7 +45,7 @@ func ApproveToolApproval(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "approval not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -80,7 +80,7 @@ func DenyToolApproval(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "approval not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

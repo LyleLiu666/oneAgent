@@ -28,7 +28,12 @@ type authTokenResponse struct {
 
 func requireLocalAdmin(c *gin.Context) bool {
 	if middleware.GetUserID(c) != "local" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+		RespondError(c, http.StatusForbidden, &PublicError{
+			Status: http.StatusForbidden,
+			Code:   "admin_access_required",
+			Public: "需要本地管理员权限",
+			Hint:   "请使用 local 账户或在本地环境访问该页面",
+		})
 		return false
 	}
 	return true
@@ -37,7 +42,12 @@ func requireLocalAdmin(c *gin.Context) bool {
 func CreateAuthToken(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Settings == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		RespondError(c, http.StatusServiceUnavailable, &PublicError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "runtime_not_initialized",
+			Public: "服务未就绪",
+			Hint:   "请稍后重试",
+		})
 		return
 	}
 	if !requireLocalAdmin(c) {
@@ -46,7 +56,13 @@ func CreateAuthToken(c *gin.Context) {
 
 	var req createAuthTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "invalid_json",
+			Public: "请求 JSON 格式不正确",
+			Hint:   "请检查 JSON 字段与语法",
+			Err:    err,
+		})
 		return
 	}
 	principalID := strings.TrimSpace(req.PrincipalID)
@@ -56,7 +72,7 @@ func CreateAuthToken(c *gin.Context) {
 
 	token, err := rt.Settings.CreateAuthToken(c.Request.Context(), principalID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, authTokenResponse{
@@ -69,7 +85,12 @@ func CreateAuthToken(c *gin.Context) {
 func ListAuthTokens(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Settings == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		RespondError(c, http.StatusServiceUnavailable, &PublicError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "runtime_not_initialized",
+			Public: "服务未就绪",
+			Hint:   "请稍后重试",
+		})
 		return
 	}
 	if !requireLocalAdmin(c) {
@@ -78,7 +99,7 @@ func ListAuthTokens(c *gin.Context) {
 
 	list, err := rt.Settings.ListAuthTokens(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	out := make([]authTokenResponse, 0, len(list))
@@ -101,7 +122,12 @@ func ListAuthTokens(c *gin.Context) {
 func RevokeAuthToken(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Settings == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		RespondError(c, http.StatusServiceUnavailable, &PublicError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "runtime_not_initialized",
+			Public: "服务未就绪",
+			Hint:   "请稍后重试",
+		})
 		return
 	}
 	if !requireLocalAdmin(c) {
@@ -110,16 +136,26 @@ func RevokeAuthToken(c *gin.Context) {
 
 	var req revokeAuthTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "invalid_json",
+			Public: "请求 JSON 格式不正确",
+			Hint:   "请检查 JSON 字段与语法",
+			Err:    err,
+		})
 		return
 	}
 	token := strings.TrimSpace(req.Token)
 	if token == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "missing_token",
+			Public: "token 是必填项",
+		})
 		return
 	}
 	if err := rt.Settings.RevokeAuthToken(c.Request.Context(), token); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -135,7 +171,12 @@ type toolPolicyResponse struct {
 func GetToolPolicy(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Settings == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		RespondError(c, http.StatusServiceUnavailable, &PublicError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "runtime_not_initialized",
+			Public: "服务未就绪",
+			Hint:   "请稍后重试",
+		})
 		return
 	}
 	if !requireLocalAdmin(c) {
@@ -144,17 +185,21 @@ func GetToolPolicy(c *gin.Context) {
 
 	principalID := strings.TrimSpace(c.Param("principal_id"))
 	if principalID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "principal_id is required"})
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "missing_principal_id",
+			Public: "principal_id 是必填项",
+		})
 		return
 	}
 	policy, exists, err := rt.Settings.GetToolPolicy(c.Request.Context(), principalID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	snap, err := rt.ResolveToolPolicySnapshot(c.Request.Context(), principalID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, toolPolicyResponse{
@@ -168,7 +213,12 @@ func GetToolPolicy(c *gin.Context) {
 func SetToolPolicy(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Settings == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		RespondError(c, http.StatusServiceUnavailable, &PublicError{
+			Status: http.StatusServiceUnavailable,
+			Code:   "runtime_not_initialized",
+			Public: "服务未就绪",
+			Hint:   "请稍后重试",
+		})
 		return
 	}
 	if !requireLocalAdmin(c) {
@@ -177,13 +227,23 @@ func SetToolPolicy(c *gin.Context) {
 
 	principalID := strings.TrimSpace(c.Param("principal_id"))
 	if principalID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "principal_id is required"})
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "missing_principal_id",
+			Public: "principal_id 是必填项",
+		})
 		return
 	}
 
 	var policy permissions.Policy
 	if err := c.ShouldBindJSON(&policy); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "invalid_json",
+			Public: "请求 JSON 格式不正确",
+			Hint:   "请检查 JSON 字段与语法",
+			Err:    err,
+		})
 		return
 	}
 	if strings.TrimSpace(policy.ID) == "" {
@@ -191,26 +251,38 @@ func SetToolPolicy(c *gin.Context) {
 	}
 	for _, rule := range policy.Rules {
 		if strings.TrimSpace(rule.ID) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "policy rule id is required"})
+			RespondError(c, http.StatusBadRequest, &PublicError{
+				Status: http.StatusBadRequest,
+				Code:   "missing_rule_id",
+				Public: "policy rule id 是必填项",
+			})
 			return
 		}
 		if strings.TrimSpace(rule.ToolID) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "policy rule tool_id is required"})
+			RespondError(c, http.StatusBadRequest, &PublicError{
+				Status: http.StatusBadRequest,
+				Code:   "missing_rule_tool_id",
+				Public: "policy rule tool_id 是必填项",
+			})
 			return
 		}
 		if rule.Effect != permissions.EffectAllow && rule.Effect != permissions.EffectDeny {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "policy rule effect must be allow|deny"})
+			RespondError(c, http.StatusBadRequest, &PublicError{
+				Status: http.StatusBadRequest,
+				Code:   "invalid_rule_effect",
+				Public: "policy rule effect 必须为 allow|deny",
+			})
 			return
 		}
 	}
 
 	if err := rt.Settings.SetToolPolicy(c.Request.Context(), principalID, policy); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	snap, err := rt.ResolveToolPolicySnapshot(c.Request.Context(), principalID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, toolPolicyResponse{

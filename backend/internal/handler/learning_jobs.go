@@ -33,7 +33,7 @@ func GetLearningJobToday(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, job)
@@ -55,7 +55,14 @@ func RunLearningJobToday(c *gin.Context) {
 	job, err := learning.RunDailyJobWithEvaluator(c.Request.Context(), rt.WorkLedger, principal, time.Now(), eval)
 	// Return the job even if it failed, so users can inspect status/evidence.
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"job": job, "error": err.Error()})
+		code, msg, hint := classifyAPIError(http.StatusInternalServerError, err)
+		c.JSON(http.StatusOK, gin.H{
+			"job":        job,
+			"error":      msg,
+			"code":       code,
+			"request_id": strings.TrimSpace(middleware.GetRequestID(c)),
+			"hint":       hint,
+		})
 		return
 	}
 	c.JSON(http.StatusOK, job)

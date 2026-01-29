@@ -33,7 +33,7 @@ func CreatePairingCode(c *gin.Context) {
 
 	var req createPairingCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -49,7 +49,7 @@ func CreatePairingCode(c *gin.Context) {
 
 	pc, err := rt.Pairing.Create(principalID, ttl)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -86,13 +86,13 @@ func ExchangePairingCode(c *gin.Context) {
 	code := strings.TrimSpace(req.Code)
 	pc, err := rt.Pairing.Exchange(code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
 	token, err := rt.Settings.CreateAuthToken(c.Request.Context(), pc.PrincipalID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -102,4 +102,3 @@ func ExchangePairingCode(c *gin.Context) {
 		CreatedAt:   token.CreatedAt.UTC().Format(time.RFC3339),
 	})
 }
-

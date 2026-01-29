@@ -64,7 +64,7 @@ func CreateSuggestion(c *gin.Context) {
 		Meta:               workledger.SuggestionMeta{DayKey: dayKey},
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func ListSuggestions(c *gin.Context) {
 		Limit:         limit,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, list)
@@ -127,7 +127,7 @@ func GetSuggestion(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if strings.TrimSpace(sug.PrincipalID) != principal {
@@ -163,7 +163,7 @@ func UpdateSuggestion(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if strings.TrimSpace(current.PrincipalID) != principal {
@@ -216,7 +216,7 @@ func UpdateSuggestion(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	_ = rt.WorkLedger.ApplyInboxCap(principal, updated.Meta.DayKey, 10)
@@ -247,7 +247,7 @@ func UpdateSuggestionStatus(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if strings.TrimSpace(current.PrincipalID) != principal {
@@ -274,7 +274,7 @@ func UpdateSuggestionStatus(c *gin.Context) {
 		}
 		merged, _, err := rt.WorkLedger.MergeSuggestions(id, intoID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusBadRequest, err)
 			return
 		}
 		c.JSON(http.StatusOK, merged)
@@ -286,7 +286,7 @@ func UpdateSuggestionStatus(c *gin.Context) {
 		if strings.TrimSpace(current.Meta.MaterializedSkillID) == "" || strings.TrimSpace(current.Meta.MaterializedSkillPath) == "" {
 			m, err := sopskill.MaterializeSuggestion(rt.Config.Home, current)
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				RespondError(c, http.StatusBadRequest, err)
 				return
 			}
 			updated, err := rt.WorkLedger.UpdateSuggestion(id, func(sug *workledger.Suggestion) error {
@@ -297,7 +297,7 @@ func UpdateSuggestionStatus(c *gin.Context) {
 				return nil
 			})
 			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				RespondError(c, http.StatusBadRequest, err)
 				return
 			}
 			c.JSON(http.StatusOK, updated)
@@ -309,7 +309,7 @@ func UpdateSuggestionStatus(c *gin.Context) {
 			return nil
 		})
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusBadRequest, err)
 			return
 		}
 		c.JSON(http.StatusOK, updated)
@@ -318,7 +318,7 @@ func UpdateSuggestionStatus(c *gin.Context) {
 
 	updated, err := rt.WorkLedger.UpdateSuggestionStatus(id, status, "")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, updated)
@@ -351,7 +351,7 @@ func LoadMoreSuggestions(c *gin.Context) {
 
 	list, err := rt.WorkLedger.LoadMoreParked(principal, dayKey, req.Count)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 	c.JSON(http.StatusOK, list)

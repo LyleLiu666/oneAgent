@@ -53,7 +53,7 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -111,13 +111,22 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 		return
 	}
 
-	content, truncated, err := readFileLimited(path, maxArtifactBytes)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+	tail := strings.TrimSpace(c.Query("tail"))
+	useTail := tail == "1" || strings.EqualFold(tail, "true")
+	var content string
+	var truncated bool
+	var readErr error
+	if useTail {
+		content, truncated, readErr = readFileTailLimited(path, maxArtifactBytes)
+	} else {
+		content, truncated, readErr = readFileLimited(path, maxArtifactBytes)
+	}
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "artifact not available"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, readErr)
 		return
 	}
 
@@ -151,6 +160,44 @@ func readFileLimited(path string, maxBytes int64) (string, bool, error) {
 			return "", false, readErr
 		}
 		return string(buf[:n]), true, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, err
+	}
+	return string(data), false, nil
+}
+
+func readFileTailLimited(path string, maxBytes int64) (string, bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false, errors.New("path is required")
+	}
+	if maxBytes <= 0 {
+		maxBytes = maxArtifactBytes
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false, err
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err == nil && info.Size() > maxBytes {
+		offset := info.Size() - maxBytes
+		if offset < 0 {
+			offset = 0
+		}
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return "", false, err
+		}
+		data, err := io.ReadAll(io.LimitReader(f, maxBytes))
+		if err != nil {
+			return "", false, err
+		}
+		return string(data), true, nil
 	}
 
 	data, err := os.ReadFile(path)

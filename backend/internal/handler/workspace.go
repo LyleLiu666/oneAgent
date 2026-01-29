@@ -21,10 +21,10 @@ func ChooseWorkspace(c *gin.Context) {
 	selected, canceled, err := chooseWorkspaceDir(c.Request.Context())
 	if err != nil {
 		if errors.Is(err, ErrWorkspaceChooserNotSupported) {
-			c.JSON(http.StatusNotImplemented, gin.H{"error": err.Error()})
+			RespondError(c, http.StatusNotImplemented, err)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -35,7 +35,7 @@ func ChooseWorkspace(c *gin.Context) {
 
 	normalized, err := scope.NormalizeWorkspaceRoot(selected)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
 

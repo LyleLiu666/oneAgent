@@ -43,7 +43,7 @@ func RollbackTaskAttempt(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if task.UserID != userID {
@@ -102,7 +102,7 @@ func RollbackTaskAttempt(c *gin.Context) {
 				"error":           restoreErr.Error(),
 			},
 		})
-		c.JSON(http.StatusInternalServerError, gin.H{"error": restoreErr.Error()})
+		RespondError(c, http.StatusInternalServerError, restoreErr)
 		return
 	}
 

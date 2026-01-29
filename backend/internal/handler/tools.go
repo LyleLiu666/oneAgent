@@ -19,7 +19,7 @@ func ListTools(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	snap, err := rt.ResolveToolPolicySnapshot(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	c.JSON(http.StatusOK, tool.InfosWithSnapshot(snap))

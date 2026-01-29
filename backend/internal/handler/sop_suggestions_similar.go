@@ -40,7 +40,7 @@ func GetSimilarSuggestions(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "suggestion not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 	if strings.TrimSpace(current.PrincipalID) != principal {
@@ -71,7 +71,7 @@ func GetSimilarSuggestions(c *gin.Context) {
 		Limit:         200,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		RespondError(c, http.StatusInternalServerError, err)
 		return
 	}
 
