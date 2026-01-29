@@ -136,6 +136,24 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 );
 `,
 		`CREATE INDEX IF NOT EXISTS idx_auth_tokens_principal_id ON auth_tokens(principal_id);`,
+		`
+CREATE TABLE IF NOT EXISTS tool_approvals (
+  id TEXT PRIMARY KEY,
+  principal_id TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  tool_id TEXT NOT NULL,
+  args_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  requested_at_ms INTEGER NOT NULL,
+  approved_at_ms INTEGER,
+  denied_at_ms INTEGER,
+  consumed_at_ms INTEGER,
+  decision_reason TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_approvals_lookup ON tool_approvals(principal_id, scope_id, tool_id, args_hash, status);`,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

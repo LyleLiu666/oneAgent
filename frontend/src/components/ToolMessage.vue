@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { Cpu, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { ChatMessage } from '@/stores/chat'
+import { approveToolApproval, denyToolApproval } from '@/api/client'
 
 const props = defineProps<{
   message: ChatMessage
@@ -51,6 +52,75 @@ const toggle = () => {
   isExpanded.value = !isExpanded.value
 }
 
+type ApprovalInfo =
+  | { kind: 'required'; approvalId: string }
+  | { kind: 'denied'; approvalId: string; reason?: string }
+
+const tryParseJsonObject = (raw: any): any | undefined => {
+  if (typeof raw !== 'string') return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (parsed && typeof parsed === 'object') return parsed
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+const approvalInfo = computed<ApprovalInfo | null>(() => {
+  if (!isToolResult.value) return null
+  const raw = String(props.message.tool?.output || props.message.content || '')
+  const parsed = tryParseJsonObject(raw)
+  if (!parsed) return null
+
+  const approvalId = String((parsed as any).approval_id || '').trim()
+  if (!approvalId) return null
+
+  if ((parsed as any).approval_required === true || String((parsed as any).error || '') === 'approval_required') {
+    return { kind: 'required', approvalId }
+  }
+  if ((parsed as any).approval_denied === true || String((parsed as any).error || '') === 'approval_denied') {
+    const reason = String((parsed as any).reason || '').trim()
+    return { kind: 'denied', approvalId, reason: reason || undefined }
+  }
+  return null
+})
+
+const approvalBusy = ref(false)
+
+const onApprove = async () => {
+  const info = approvalInfo.value
+  if (!info || info.kind !== 'required') return
+  if (approvalBusy.value) return
+  approvalBusy.value = true
+  try {
+    const reason = window.prompt('审批原因（可选）', '') ?? ''
+    await approveToolApproval(info.approvalId, reason)
+    alert('已批准。请让 Agent 重试该操作。')
+  } catch (e) {
+    alert(String(e))
+  } finally {
+    approvalBusy.value = false
+  }
+}
+
+const onDeny = async () => {
+  const info = approvalInfo.value
+  if (!info || info.kind !== 'required') return
+  if (approvalBusy.value) return
+  approvalBusy.value = true
+  try {
+    const reason = window.prompt('拒绝原因（可选）', '') ?? ''
+    await denyToolApproval(info.approvalId, reason)
+    alert('已拒绝。')
+  } catch (e) {
+    alert(String(e))
+  } finally {
+    approvalBusy.value = false
+  }
+}
 
 const formatMaybeJson = (raw: string): string => {
   const trimmed = (raw ?? '').trim()
@@ -144,6 +214,42 @@ const formatMaybeJson = (raw: string): string => {
             <div v-if="message.tool?.arguments" class="space-y-1 mb-3">
               <div class="text-[11px] text-surface-500">arguments</div>
               <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.arguments) }}</pre>
+            </div>
+
+            <div
+              v-if="approvalInfo"
+              class="p-3 mb-3 rounded-md border border-surface-700/40 bg-surface-900/40"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-xs text-surface-300">
+                    <span v-if="approvalInfo.kind === 'required'">需要审批</span>
+                    <span v-else>审批已拒绝</span>
+                  </div>
+                  <div class="mt-1 text-[11px] text-surface-500 font-mono break-all">
+                    {{ approvalInfo.approvalId }}
+                  </div>
+                </div>
+                <div v-if="approvalInfo.kind === 'required'" class="flex gap-2 flex-shrink-0">
+                  <button
+                    class="px-3 py-1 rounded-md bg-primary-600 hover:bg-primary-500 text-white text-xs disabled:opacity-50"
+                    :disabled="approvalBusy"
+                    @click="onApprove"
+                  >
+                    批准
+                  </button>
+                  <button
+                    class="px-3 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-200 text-xs disabled:opacity-50"
+                    :disabled="approvalBusy"
+                    @click="onDeny"
+                  >
+                    拒绝
+                  </button>
+                </div>
+              </div>
+              <div v-if="approvalInfo.kind === 'denied' && approvalInfo.reason" class="mt-2 text-xs text-red-400">
+                拒绝原因：{{ approvalInfo.reason }}
+              </div>
             </div>
 
             <div

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/checkpoint"
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
@@ -261,6 +262,92 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 	}
 	if len(evs) == 0 {
 		t.Fatalf("expected events")
+	}
+
+	// Rollback endpoint (best-effort): create a checkpoint, mutate workspace, restore.
+	if err := os.WriteFile(filepath.Join(workspace, "a.txt"), []byte("before\n"), 0o600); err != nil {
+		t.Fatalf("write a.txt baseline: %v", err)
+	}
+
+	checkpointDir := filepath.Join(rt.Layout.TasksDir, created.ID, "attempts", latest.ID, "checkpoint_test")
+	cp, err := checkpoint.CreateWorkspaceCheckpoint(context.Background(), workspace, checkpointDir)
+	if err != nil {
+		t.Fatalf("create checkpoint: %v", err)
+	}
+	_, _ = rt.Tasks.UpdateTask(created.ID, func(tk *taskqueue.Task) error {
+		a := tk.LatestAttempt()
+		if a == nil || a.ID != latest.ID {
+			return nil
+		}
+		a.CheckpointPath = cp.ArchivePath
+		return nil
+	})
+
+	if err := os.WriteFile(filepath.Join(workspace, "a.txt"), []byte("after\n"), 0o600); err != nil {
+		t.Fatalf("mutate a.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "new.txt"), []byte("new\n"), 0o600); err != nil {
+		t.Fatalf("write new.txt: %v", err)
+	}
+
+	rollbackReq, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/rollback", nil)
+	rollbackRes, err := http.DefaultClient.Do(rollbackReq)
+	if err != nil {
+		t.Fatalf("POST rollback: %v", err)
+	}
+	defer rollbackRes.Body.Close()
+	if rollbackRes.StatusCode != http.StatusOK {
+		t.Fatalf("POST rollback status=%d", rollbackRes.StatusCode)
+	}
+
+	gotA, err := os.ReadFile(filepath.Join(workspace, "a.txt"))
+	if err != nil {
+		t.Fatalf("read restored a.txt: %v", err)
+	}
+	if string(gotA) != "before\n" {
+		t.Fatalf("expected workspace restored by checkpoint, got a.txt=%q", string(gotA))
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "new.txt")); err == nil {
+		t.Fatalf("expected new.txt to be removed on rollback")
+	}
+
+	rollbackReq2, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/rollback", nil)
+	rollbackRes2, err := http.DefaultClient.Do(rollbackReq2)
+	if err != nil {
+		t.Fatalf("POST rollback (idempotent): %v", err)
+	}
+	defer rollbackRes2.Body.Close()
+	if rollbackRes2.StatusCode != http.StatusOK {
+		t.Fatalf("POST rollback (idempotent) status=%d", rollbackRes2.StatusCode)
+	}
+
+	eventsAfterRollbackReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID+"/events", nil)
+	eventsAfterRollbackRes, err := http.DefaultClient.Do(eventsAfterRollbackReq)
+	if err != nil {
+		t.Fatalf("GET events after rollback: %v", err)
+	}
+	defer eventsAfterRollbackRes.Body.Close()
+	if eventsAfterRollbackRes.StatusCode != http.StatusOK {
+		t.Fatalf("GET events after rollback status=%d", eventsAfterRollbackRes.StatusCode)
+	}
+	var eventsAfterRollback []taskqueue.Event
+	if err := json.NewDecoder(eventsAfterRollbackRes.Body).Decode(&eventsAfterRollback); err != nil {
+		t.Fatalf("decode events after rollback: %v", err)
+	}
+	var sawRollback, sawRepeat bool
+	for _, ev := range eventsAfterRollback {
+		if ev.AttemptID != latest.ID {
+			continue
+		}
+		switch ev.Type {
+		case "attempt.rollback.succeeded":
+			sawRollback = true
+		case "attempt.rollback.repeat":
+			sawRepeat = true
+		}
+	}
+	if !sawRollback || !sawRepeat {
+		t.Fatalf("expected rollback audit events, got rollback=%t repeat=%t", sawRollback, sawRepeat)
 	}
 
 	// Create task with explicit budgets.

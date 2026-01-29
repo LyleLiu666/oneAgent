@@ -290,8 +290,31 @@ func RunLoop(
 				if recordFailure != nil {
 					recordFailure(toolName, toolCallID, formatFailureArgs(call.Raw, argsString), handlerErr)
 				}
-				payload = map[string]string{
-					"error": fmt.Sprintf("Tool execution failed: %v", handlerErr),
+				var approvalRequired *tool.ApprovalRequiredError
+				var approvalDenied *tool.ApprovalDeniedError
+				if errors.As(handlerErr, &approvalRequired) {
+					payload = map[string]any{
+						"error":             "approval_required",
+						"approval_required": true,
+						"approval_id":       approvalRequired.ApprovalID,
+						"tool_id":           approvalRequired.ToolID,
+						"scope_id":          approvalRequired.ScopeID,
+						"arguments":         argsString,
+					}
+				} else if errors.As(handlerErr, &approvalDenied) {
+					payload = map[string]any{
+						"error":           "approval_denied",
+						"approval_denied": true,
+						"approval_id":     approvalDenied.ApprovalID,
+						"tool_id":         approvalDenied.ToolID,
+						"scope_id":        approvalDenied.ScopeID,
+						"reason":          approvalDenied.Reason,
+						"arguments":       argsString,
+					}
+				} else {
+					payload = map[string]string{
+						"error": fmt.Sprintf("Tool execution failed: %v", handlerErr),
+					}
 				}
 			}
 

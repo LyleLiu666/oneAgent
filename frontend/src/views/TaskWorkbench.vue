@@ -520,198 +520,213 @@ onUnmounted(() => {
         {{ tasksError }}
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <!-- Workspaces -->
-        <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
-          <div class="px-5 py-4 border-b border-surface-700/50">
-            <p class="text-sm font-semibold text-surface-100">工作区</p>
-            <p class="text-xs text-surface-500 mt-1">
-              每个工作区按 FIFO（L0）串行执行任务
-            </p>
-          </div>
-
-          <div class="p-4 border-b border-surface-700/50">
-            <div class="flex gap-2">
-              <input
-                data-testid="workspace-add-input"
-                v-model="workspaceNew"
-                class="flex-1 px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                placeholder="/path/to/workspace"
-              />
-              <button
-                data-testid="workspace-add"
-                class="px-3 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 inline-flex items-center gap-2"
-                @click="addWorkspace"
-              >
-                <Plus class="w-4 h-4" />
-              </button>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- Left column: Workspaces + Task list -->
+        <div class="space-y-4">
+          <!-- Workspaces -->
+          <div class="glass rounded-2xl overflow-hidden">
+            <div class="px-5 py-4 border-b border-surface-700/50">
+              <p class="text-sm font-semibold text-surface-100">工作区</p>
+              <p class="text-xs text-surface-500 mt-1">
+                每个工作区按 FIFO（L0）串行执行任务
+              </p>
             </div>
-          </div>
 
-          <div class="max-h-[60vh] overflow-y-auto">
-            <button
-              v-for="ws in allWorkspaces"
-              :key="ws"
-              data-testid="workspace-item"
-              class="w-full text-left px-4 py-3 border-b border-surface-700/30 hover:bg-surface-900/40"
-              :class="workspaceSelected === ws ? 'bg-primary-500/10' : ''"
-              @click="selectWorkspace(ws)"
-            >
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2 text-sm text-surface-100">
-                    <Folder class="w-4 h-4 text-surface-400" />
-                    <span class="truncate">{{ ws }}</span>
-                  </div>
-                  <div class="text-xs text-surface-500 mt-1">
-                    <span
-                      v-if="workspaceSummaries.find((s) => s.workspace === ws)"
-                    >
-                      {{
-                        (() => {
-                          const s = workspaceSummaries.find(
-                            (x) => x.workspace === ws,
-                          );
-                          if (!s) return "";
-                          return `总计 ${s.total} · 排队 ${s.queued} · 运行中 ${s.running} · 失败 ${s.failed}`;
-                        })()
-                      }}
-                    </span>
-                    <span v-else>暂无任务</span>
+            <div class="p-4 border-b border-surface-700/50">
+              <div class="flex gap-2">
+                <input
+                  data-testid="workspace-add-input"
+                  v-model="workspaceNew"
+                  class="flex-1 px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                  placeholder="/path/to/workspace"
+                />
+                <button
+                  data-testid="workspace-add"
+                  class="px-3 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 inline-flex items-center gap-2"
+                  @click="addWorkspace"
+                >
+                  <Plus class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div class="max-h-[30vh] overflow-y-auto">
+              <button
+                v-for="ws in allWorkspaces"
+                :key="ws"
+                data-testid="workspace-item"
+                class="w-full text-left px-4 py-3 border-b border-surface-700/30 hover:bg-surface-900/40"
+                :class="workspaceSelected === ws ? 'bg-primary-500/10' : ''"
+                @click="selectWorkspace(ws)"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 text-sm text-surface-100">
+                      <Folder class="w-4 h-4 text-surface-400" />
+                      <span class="truncate">{{ ws }}</span>
+                    </div>
+                    <div class="text-xs text-surface-500 mt-1">
+                      <span
+                        v-if="workspaceSummaries.find((s) => s.workspace === ws)"
+                      >
+                        {{
+                          (() => {
+                            const s = workspaceSummaries.find(
+                              (x) => x.workspace === ws,
+                            );
+                            if (!s) return "";
+                            return `总计 ${s.total} · 排队 ${s.queued} · 运行中 ${s.running} · 失败 ${s.failed}`;
+                          })()
+                        }}
+                      </span>
+                      <span v-else>暂无任务</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </button>
-            <div
-              v-if="allWorkspaces.length === 0"
-              class="p-6 text-sm text-surface-500"
-            >
-              暂无工作区。
-            </div>
-          </div>
-        </div>
-
-        <!-- Tasks list + composer -->
-        <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
-          <div
-            class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between"
-          >
-            <p class="text-sm font-semibold text-surface-100">任务</p>
-            <div
-              class="inline-flex items-center gap-2 text-xs text-surface-500"
-            >
-              <ListTodo class="w-4 h-4" />
-              {{ filteredTasks.length }}
-            </div>
-          </div>
-
-          <div class="p-4 border-b border-surface-700/50">
-            <div class="grid grid-cols-1 gap-2">
-              <textarea
-                data-testid="workbench-prompt"
-                v-model="prompt"
-                rows="4"
-                class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                placeholder="描述你希望完成的内容..."
-              />
-              <button
-                data-testid="workbench-queue"
-                class="px-4 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 disabled:opacity-50"
-                :disabled="submitting || !workspaceSelected || !prompt.trim()"
-                @click="queueTask"
-              >
-                入队任务
-              </button>
-              <button
-                type="button"
-                data-testid="workbench-composer-advanced-toggle"
-                class="text-xs text-surface-400 hover:text-surface-200 text-left"
-                @click="composerAdvancedOpen = !composerAdvancedOpen"
-              >
-                {{
-                  composerAdvancedOpen
-                    ? "收起高级设置"
-                    : "展开高级设置（标题/预算）"
-                }}
               </button>
               <div
-                v-if="composerAdvancedOpen"
-                data-testid="workbench-composer-advanced"
-                class="grid grid-cols-1 gap-2"
+                v-if="allWorkspaces.length === 0"
+                class="p-6 text-sm text-surface-500"
               >
-                <input
-                  v-model="title"
-                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                  placeholder="可选标题"
-                />
-                <div class="grid grid-cols-2 gap-2">
-                  <input
-                    v-model="budgetTokens"
-                    inputmode="numeric"
-                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                    placeholder="Token 预算（可选）"
-                  />
-                  <input
-                    v-model="budgetCost"
-                    inputmode="decimal"
-                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
-                    placeholder="成本预算 USD（可选）"
-                  />
-                </div>
+                暂无工作区。
               </div>
             </div>
           </div>
 
-          <div class="max-h-[50vh] overflow-y-auto">
-            <button
-              v-for="t in filteredTasks"
-              :key="t.id"
-              data-testid="workbench-task-item"
-              class="w-full text-left px-4 py-3 border-b border-surface-700/30 hover:bg-surface-900/40"
-              :class="selectedTaskId === t.id ? 'bg-primary-500/10' : ''"
-              @click="
-                selectedTaskId = t.id;
-                refreshSelected();
-              "
-            >
-              <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <div class="text-sm text-surface-100 truncate">
-                    {{ t.title || t.id }}
-                  </div>
-                  <div class="text-xs text-surface-500 mt-1 truncate">
-                    {{ t.prompt }}
-                  </div>
-                </div>
-                <div class="text-xs text-surface-400">
-                  <span
-                    class="inline-flex items-center rounded-full px-2 py-0.5 border border-surface-700/40 bg-surface-900/40"
-                  >
-                    {{
-                      t.attempts?.length
-                        ? t.attempts[t.attempts.length - 1].status
-                        : "queued"
-                    }}
-                  </span>
-                </div>
-              </div>
-            </button>
+          <!-- Tasks list -->
+          <div class="glass rounded-2xl overflow-hidden">
             <div
-              v-if="filteredTasks.length === 0"
-              class="p-6 text-sm text-surface-500"
+              class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between"
             >
-              该工作区暂无任务。
+              <p class="text-sm font-semibold text-surface-100">任务</p>
+              <div
+                class="inline-flex items-center gap-2 text-xs text-surface-500"
+              >
+                <ListTodo class="w-4 h-4" />
+                {{ filteredTasks.length }}
+              </div>
+            </div>
+
+            <div class="overflow-y-auto">
+              <button
+                v-for="t in filteredTasks"
+                :key="t.id"
+                data-testid="workbench-task-item"
+                class="w-full text-left px-4 py-3 border-b border-surface-700/30 hover:bg-surface-900/40"
+                :class="selectedTaskId === t.id ? 'bg-primary-500/10' : ''"
+                @click="
+                  selectedTaskId = t.id;
+                  refreshSelected();
+                "
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="text-sm text-surface-100 truncate">
+                      {{ t.title || t.id }}
+                    </div>
+                    <div class="text-xs text-surface-500 mt-1 truncate">
+                      {{ t.prompt }}
+                    </div>
+                  </div>
+                  <div class="text-xs text-surface-400">
+                    <span
+                      class="inline-flex items-center rounded-full px-2 py-0.5 border border-surface-700/40 bg-surface-900/40"
+                    >
+                      {{
+                        t.attempts?.length
+                          ? t.attempts[t.attempts.length - 1].status
+                          : "queued"
+                      }}
+                    </span>
+                  </div>
+                </div>
+              </button>
+              <div
+                v-if="filteredTasks.length === 0"
+                class="p-6 text-sm text-surface-500"
+              >
+                该工作区暂无任务。
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Task details -->
-        <div class="glass rounded-2xl overflow-hidden lg:col-span-1">
-          <div
-            class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2"
-          >
-            <p class="text-sm font-semibold text-surface-100">详情</p>
-            <div class="inline-flex gap-2">
+        <!-- Right column: Composer + Task details -->
+        <div class="space-y-4">
+          <!-- Composer -->
+          <div class="glass rounded-2xl overflow-hidden">
+            <div class="px-5 py-4 border-b border-surface-700/50">
+              <p class="text-sm font-semibold text-surface-100">新建任务</p>
+              <p class="text-xs text-surface-500 mt-1">
+                在当前选中的工作区创建新任务
+              </p>
+            </div>
+
+            <div class="p-4">
+              <div class="grid grid-cols-1 gap-2">
+                <textarea
+                  data-testid="workbench-prompt"
+                  v-model="prompt"
+                  rows="4"
+                  class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                  placeholder="描述你希望完成的内容..."
+                />
+                <button
+                  data-testid="workbench-queue"
+                  class="px-4 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 disabled:opacity-50"
+                  :disabled="submitting || !workspaceSelected || !prompt.trim()"
+                  @click="queueTask"
+                >
+                  入队任务
+                </button>
+                <button
+                  type="button"
+                  data-testid="workbench-composer-advanced-toggle"
+                  class="text-xs text-surface-400 hover:text-surface-200 text-left"
+                  @click="composerAdvancedOpen = !composerAdvancedOpen"
+                >
+                  {{
+                    composerAdvancedOpen
+                      ? "收起高级设置"
+                      : "展开高级设置（标题/预算）"
+                  }}
+                </button>
+                <div
+                  v-if="composerAdvancedOpen"
+                  data-testid="workbench-composer-advanced"
+                  class="grid grid-cols-1 gap-2"
+                >
+                  <input
+                    v-model="title"
+                    class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                    placeholder="可选标题"
+                  />
+                  <div class="grid grid-cols-2 gap-2">
+                    <input
+                      v-model="budgetTokens"
+                      inputmode="numeric"
+                      class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                      placeholder="Token 预算（可选）"
+                    />
+                    <input
+                      v-model="budgetCost"
+                      inputmode="decimal"
+                      class="px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm"
+                      placeholder="成本预算 USD（可选）"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Task details -->
+          <div class="glass rounded-2xl overflow-hidden">
+            <div
+              class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2"
+            >
+              <p class="text-sm font-semibold text-surface-100">详情</p>
+              <div class="inline-flex gap-2">
               <button
                 data-testid="workbench-cancel"
                 class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
@@ -1052,6 +1067,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>

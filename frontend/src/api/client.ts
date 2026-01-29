@@ -239,6 +239,26 @@ export async function truncateSession(
   });
 }
 
+export async function approveToolApproval(approvalId: string, reason: string = "") {
+  const id = String(approvalId || "").trim();
+  if (!id) throw new Error("approvalId is required");
+  const body = String(reason || "").trim() ? { reason } : undefined;
+  return api(`/api/approvals/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function denyToolApproval(approvalId: string, reason: string = "") {
+  const id = String(approvalId || "").trim();
+  if (!id) throw new Error("approvalId is required");
+  const body = String(reason || "").trim() ? { reason } : undefined;
+  return api(`/api/approvals/${encodeURIComponent(id)}/deny`, {
+    method: "POST",
+    body,
+  });
+}
+
 export async function getProviders() {
   return api("/api/llm/providers");
 }

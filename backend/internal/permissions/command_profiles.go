@@ -18,12 +18,12 @@ func AllowedCommands(profile string) map[string]struct{} {
 			"grep": {},
 			"pwd":  {},
 			"echo": {},
+			"sleep": {},
 			"head": {},
 			"tail": {},
 			"wc":   {},
 			"sort": {},
 			"uniq": {},
-			"sleep": {},
 		}
 	case "dev":
 		return map[string]struct{}{

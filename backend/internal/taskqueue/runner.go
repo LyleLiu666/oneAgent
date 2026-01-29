@@ -295,8 +295,8 @@ func (r *TaskRunner) enqueueAttempt(taskID string, reviewNotes string, source st
 
 	data := map[string]any{
 		"resumed_from_attempt_id": fromAttempt,
-		"source":                 strings.TrimSpace(source),
-		"auto":                   auto,
+		"source":                  strings.TrimSpace(source),
+		"auto":                    auto,
 	}
 	if strings.TrimSpace(normalizedNotes) != "" {
 		data["review_notes"] = normalizedNotes
@@ -471,7 +471,13 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 		if a == nil || a.ID != attemptID {
 			return nil
 		}
+		checkpointPath := a.CheckpointPath
+		rolledBackAt := a.RolledBackAt
+		rollbackError := a.RollbackError
 		*a = ranAttempt
+		a.CheckpointPath = checkpointPath
+		a.RolledBackAt = rolledBackAt
+		a.RollbackError = rollbackError
 		return nil
 	})
 	if err != nil {

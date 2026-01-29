@@ -46,10 +46,14 @@ type Attempt struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	ResumedFromAttemptID string `json:"resumed_from_attempt_id,omitempty"`
-	Auto                bool   `json:"auto,omitempty"`
+	Auto                 bool   `json:"auto,omitempty"`
 
 	PrincipalID    string                `json:"principal_id,omitempty"`
 	PolicySnapshot *permissions.Snapshot `json:"policy_snapshot,omitempty"`
+
+	CheckpointPath string     `json:"checkpoint_path,omitempty"`
+	RolledBackAt   *time.Time `json:"rolled_back_at,omitempty"`
+	RollbackError  string     `json:"rollback_error,omitempty"`
 
 	RunID              string `json:"run_id,omitempty"`
 	Summary            string `json:"summary,omitempty"`

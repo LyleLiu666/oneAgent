@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/checkpoint"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/projectcfg"
 	"github.com/liu_y/oneAgent/backend/internal/prompt"
@@ -80,6 +81,43 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			})
 		}
 
+		// Rollback boundary: snapshot workspace at attempt start (best-effort, fail-closed).
+		checkpointDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "checkpoint")
+		cp, err := checkpoint.CreateWorkspaceCheckpoint(ctx, task.Workspace, checkpointDir)
+		if err != nil {
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
+				Type:      "attempt.checkpoint.failed",
+				Message:   "checkpoint creation failed",
+				Data: map[string]any{
+					"error": err.Error(),
+				},
+			})
+			attemptResult.Summary = "checkpoint failed: " + err.Error()
+			return attemptResult, err
+		}
+		if strings.TrimSpace(cp.ArchivePath) != "" && rt.Tasks != nil {
+			cpPath := cp.ArchivePath
+			_, _ = rt.Tasks.UpdateTask(task.ID, func(tk *taskqueue.Task) error {
+				a := tk.LatestAttempt()
+				if a == nil || a.ID != attempt.ID {
+					return nil
+				}
+				a.CheckpointPath = strings.TrimSpace(cpPath)
+				return nil
+			})
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
+				Type:      "attempt.checkpoint.created",
+				Message:   "checkpoint created",
+				Data: map[string]any{
+					"checkpoint_path": cpPath,
+				},
+			})
+		}
+
 		toolIDs := make([]string, 0, 16)
 		for _, def := range tool.All() {
 			if def.ID == tool.ToolIDSubagent {
@@ -110,6 +148,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 
 		toolCtx := ctx
 		toolCtx = tool.ContextWithUserID(toolCtx, userID)
+		toolCtx = tool.ContextWithAttemptID(toolCtx, attempt.ID)
 		toolCtx = tool.ContextWithPolicySnapshot(toolCtx, policySnap)
 		toolCtx = tool.ContextWithSettingsDB(toolCtx, rt.Settings)
 		toolCtx = tool.ContextWithSkillManager(toolCtx, rt.Skills)

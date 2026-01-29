@@ -1519,15 +1519,40 @@ func runToolLoop(
 
 				payload, toolErr = handler(ctx, json.RawMessage(call.Function.Arguments))
 				if toolErr != nil {
-					broadcaster.Broadcast(StreamEvent{
-						Type: "error",
-						Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, toolErr),
-					})
-					recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
+					var approvalRequired *tool.ApprovalRequiredError
+					var approvalDenied *tool.ApprovalDeniedError
+					if errors.As(toolErr, &approvalRequired) {
+						payload = map[string]any{
+							"error":             "approval_required",
+							"approval_required": true,
+							"approval_id":       approvalRequired.ApprovalID,
+							"tool_id":           approvalRequired.ToolID,
+							"scope_id":          approvalRequired.ScopeID,
+							"arguments":         call.Function.Arguments,
+						}
+						toolErr = nil
+					} else if errors.As(toolErr, &approvalDenied) {
+						payload = map[string]any{
+							"error":           "approval_denied",
+							"approval_denied": true,
+							"approval_id":     approvalDenied.ApprovalID,
+							"tool_id":         approvalDenied.ToolID,
+							"scope_id":        approvalDenied.ScopeID,
+							"reason":          approvalDenied.Reason,
+							"arguments":       call.Function.Arguments,
+						}
+						toolErr = nil
+					} else {
+						broadcaster.Broadcast(StreamEvent{
+							Type: "error",
+							Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, toolErr),
+						})
+						recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
 
-					// FEEDBACK: Return error to LLM so it can retry
-					payload = map[string]string{
-						"error": fmt.Sprintf("Tool execution failed: %v", toolErr),
+						// FEEDBACK: Return error to LLM so it can retry
+						payload = map[string]string{
+							"error": fmt.Sprintf("Tool execution failed: %v", toolErr),
+						}
 					}
 				}
 			}

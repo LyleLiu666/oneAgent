@@ -29,6 +29,7 @@ type Constraints struct {
 	CommandProfile       string   `json:"command_profile,omitempty"`
 	Allowlist            []string `json:"allowlist,omitempty"`
 	SandboxMode          string   `json:"sandbox_mode,omitempty"`
+	Approval             string   `json:"approval,omitempty"`
 }
 
 type Policy struct {

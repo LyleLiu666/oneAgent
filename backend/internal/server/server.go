@@ -79,6 +79,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/tasks/:id/attempts/:attempt_id/changed_files", handler.GetTaskAttemptChangedFiles)
 		api.GET("/tasks/:id/attempts/:attempt_id/review_comments", handler.ListTaskAttemptReviewComments)
 		api.POST("/tasks/:id/attempts/:attempt_id/review_comments", handler.PostTaskAttemptReviewComment)
+		api.POST("/tasks/:id/attempts/:attempt_id/rollback", handler.RollbackTaskAttempt)
 
 		// Work ledger.
 		api.GET("/ledger/receipts", handler.ListReceipts)
@@ -111,6 +112,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 
 		// Tool metadata.
 		api.GET("/tools", handler.ListTools)
+		api.POST("/approvals/:id/approve", handler.ApproveToolApproval)
+		api.POST("/approvals/:id/deny", handler.DenyToolApproval)
 
 		// Document export (pandoc).
 		api.POST("/documents/export", handler.ExportDocument)

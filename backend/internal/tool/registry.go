@@ -59,9 +59,11 @@ type Definition struct {
 }
 
 type Info struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description,omitempty"`
+	Effect        string `json:"effect"`
+	Reversibility string `json:"reversibility"`
 }
 
 func newDefinition(id string, spec llm.Tool, handler Handler) Definition {
@@ -74,23 +76,23 @@ func newDefinition(id string, spec llm.Tool, handler Handler) Definition {
 }
 
 var registry = map[string]Definition{
-	ToolIDBash:       bashDefinition(),
-	ToolIDDocumentExport: documentExportDefinition(),
-	ToolIDEdit:       smartEditDefinition(),
-	ToolIDEditV2:     editV2Definition(),
-	ToolIDGlob:       globDefinition(),
+	ToolIDBash:             bashDefinition(),
+	ToolIDDocumentExport:   documentExportDefinition(),
+	ToolIDEdit:             smartEditDefinition(),
+	ToolIDEditV2:           editV2Definition(),
+	ToolIDGlob:             globDefinition(),
 	ToolIDLSPDefinition:    lspDefinitionDefinition(),
 	ToolIDLSPReferences:    lspReferencesDefinition(),
 	ToolIDLSPRenamePreview: lspRenamePreviewDefinition(),
-	ToolIDLs:         lsDefinition(),
-	ToolIDMultiEdit:  multiEditDefinition(),
-	ToolIDPlan:       planDefinition(),
-	ToolIDRg:         rgDefinition(),
-	ToolIDSearch:     searchDefinition(),
-	ToolIDRunCommand: runCommandDefinition(),
-	ToolIDSkillRead:  skillReadDefinition(),
-	ToolIDReadFile:   readFileDefinition(),
-	ToolIDWriteFile:  writeFileDefinition(),
+	ToolIDLs:               lsDefinition(),
+	ToolIDMultiEdit:        multiEditDefinition(),
+	ToolIDPlan:             planDefinition(),
+	ToolIDRg:               rgDefinition(),
+	ToolIDSearch:           searchDefinition(),
+	ToolIDRunCommand:       runCommandDefinition(),
+	ToolIDSkillRead:        skillReadDefinition(),
+	ToolIDReadFile:         readFileDefinition(),
+	ToolIDWriteFile:        writeFileDefinition(),
 }
 
 func init() {
@@ -194,10 +196,13 @@ func Infos() []Info {
 		if isToolDisabledByEnv(def.ID) {
 			continue
 		}
+		safety := SafetyForToolID(def.ID)
 		out = append(out, Info{
-			ID:          def.ID,
-			Name:        def.Spec.Function.Name,
-			Description: def.Spec.Function.Description,
+			ID:            def.ID,
+			Name:          def.Spec.Function.Name,
+			Description:   def.Spec.Function.Description,
+			Effect:        safety.Effect,
+			Reversibility: safety.Reversibility,
 		})
 	}
 	return out
@@ -218,10 +223,13 @@ func InfosWithSnapshot(snap permissions.Snapshot) []Info {
 		if dec := permissions.Evaluate(policy, def.ID); !dec.Allowed {
 			continue
 		}
+		safety := SafetyForToolID(def.ID)
 		out = append(out, Info{
-			ID:          def.ID,
-			Name:        def.Spec.Function.Name,
-			Description: def.Spec.Function.Description,
+			ID:            def.ID,
+			Name:          def.Spec.Function.Name,
+			Description:   def.Spec.Function.Description,
+			Effect:        safety.Effect,
+			Reversibility: safety.Reversibility,
 		})
 	}
 	return out
@@ -248,6 +256,9 @@ func wrapWithSnapshot(def Definition, snap permissions.Snapshot) Definition {
 	def.Handler = func(ctx context.Context, raw json.RawMessage) (any, error) {
 		if _, ok := PolicySnapshotFromContext(ctx); !ok {
 			ctx = ContextWithPolicySnapshot(ctx, snap)
+		}
+		if err := requireToolApprovalIfNeeded(ctx, def.ID, raw); err != nil {
+			return nil, err
 		}
 		return orig(ctx, raw)
 	}
