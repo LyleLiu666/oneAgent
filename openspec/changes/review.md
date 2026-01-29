@@ -8,7 +8,7 @@
 ## Priority（高 → 低）
 
 ### P0（先测后改 / 高优先级评估）
-- `add-toolcalling-reliability-specs`（1/5）：整理工具调用专家建议为 OpenSpec，并增加 XML vs JSON 长文本专项回归测试（先测后改）
+- `add-toolcalling-reliability-specs`（2/5）：整理工具调用专家建议为 OpenSpec，并增加 XML vs JSON 长文本专项回归测试（先测后改）
 
 ## Snapshot（来自 `openspec list`）
-- `add-toolcalling-reliability-specs`：1/5 tasks
+- `add-toolcalling-reliability-specs`：2/5 tasks
