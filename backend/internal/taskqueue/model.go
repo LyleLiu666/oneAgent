@@ -10,19 +10,19 @@ import (
 type AttemptStatus string
 
 const (
-	AttemptQueued      AttemptStatus = "queued"
-	AttemptRunning     AttemptStatus = "running"
-	AttemptSucceeded   AttemptStatus = "succeeded"
-	AttemptFailed      AttemptStatus = "failed"
+	AttemptQueued        AttemptStatus = "queued"
+	AttemptRunning       AttemptStatus = "running"
+	AttemptSucceeded     AttemptStatus = "succeeded"
+	AttemptFailed        AttemptStatus = "failed"
 	AttemptLimitExceeded AttemptStatus = "limit_exceeded"
-	AttemptCanceled    AttemptStatus = "canceled"
-	AttemptTimedOut    AttemptStatus = "timed_out"
-	AttemptInterrupted AttemptStatus = "interrupted"
+	AttemptCanceled      AttemptStatus = "canceled"
+	AttemptTimedOut      AttemptStatus = "timed_out"
+	AttemptInterrupted   AttemptStatus = "interrupted"
 )
 
 type Limits struct {
-	MaxSteps          int `json:"max_steps,omitempty"`
-	MaxRuntimeSeconds int `json:"max_runtime_seconds,omitempty"`
+	MaxSteps          int     `json:"max_steps,omitempty"`
+	MaxRuntimeSeconds int     `json:"max_runtime_seconds,omitempty"`
 	MaxTotalTokens    int     `json:"max_total_tokens,omitempty"`
 	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
 }
@@ -47,11 +47,16 @@ type Attempt struct {
 	PrincipalID    string                `json:"principal_id,omitempty"`
 	PolicySnapshot *permissions.Snapshot `json:"policy_snapshot,omitempty"`
 
-	RunID        string `json:"run_id,omitempty"`
-	Summary      string `json:"summary,omitempty"`
-	FindingsPath string `json:"findings_path,omitempty"`
-	TraceLogPath string `json:"trace_log_path,omitempty"`
-	TestReportPath string `json:"test_report_path,omitempty"`
+	RunID              string `json:"run_id,omitempty"`
+	Summary            string `json:"summary,omitempty"`
+	FindingsPath       string `json:"findings_path,omitempty"`
+	TraceLogPath       string `json:"trace_log_path,omitempty"`
+	TestReportPath     string `json:"test_report_path,omitempty"`
+	DiffPatchPath      string `json:"diff_patch_path,omitempty"`
+	ChangedFilesPath   string `json:"changed_files_path,omitempty"`
+	ReviewCommentsPath string `json:"review_comments_path,omitempty"`
+
+	ReviewNotes string `json:"review_notes,omitempty"`
 
 	ProjectConfigPath    string `json:"project_config_path,omitempty"`
 	CopyFilesLogPath     string `json:"copy_files_log_path,omitempty"`

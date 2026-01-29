@@ -75,6 +75,10 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/tasks/:id/cancel", handler.CancelTask)
 		api.POST("/tasks/:id/resume", handler.ResumeTask)
 		api.GET("/tasks/:id/events", handler.GetTaskEvents)
+		api.GET("/tasks/:id/attempts/:attempt_id/diff_patch", handler.GetTaskAttemptDiffPatch)
+		api.GET("/tasks/:id/attempts/:attempt_id/changed_files", handler.GetTaskAttemptChangedFiles)
+		api.GET("/tasks/:id/attempts/:attempt_id/review_comments", handler.ListTaskAttemptReviewComments)
+		api.POST("/tasks/:id/attempts/:attempt_id/review_comments", handler.PostTaskAttemptReviewComment)
 
 		// Work ledger.
 		api.GET("/ledger/receipts", handler.ListReceipts)
@@ -123,6 +127,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/skills", handler.ListSkills)
 		api.GET("/skills/duplicates", handler.ListSkillDuplicates)
 		api.GET("/skills/:id", handler.GetSkill)
+		api.GET("/skills/:id/file", handler.ReadSkillFile)
 		api.PUT("/skills/:id", handler.UpdateSkill)
 		api.POST("/skills/:id/archive", handler.ArchiveSkill)
 		api.POST("/skills/:id/pin", handler.PinSkillCandidate)

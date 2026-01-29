@@ -203,6 +203,13 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		}
 
 		contextSummary := buildResumeContextSummary(resumedFrom)
+		if strings.TrimSpace(attempt.ReviewNotes) != "" {
+			if contextSummary != "" {
+				contextSummary += "\n\n"
+			}
+			contextSummary += "## Review notes\n"
+			contextSummary += strings.TrimSpace(attempt.ReviewNotes)
+		}
 		req := subagent.RunRequest{
 			ParentSessionID:   task.ID,
 			UserID:            userID,
@@ -300,6 +307,42 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			}
 		}
 
+		// Best-effort diff artifacts for review: changed files + git patch when possible.
+		reviewDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "review")
+		attemptResult.ReviewCommentsPath = filepath.Join(reviewDir, "review_comments.jsonl")
+		// Pre-create the review comments file so the UI can reliably display/open it.
+		if err := os.MkdirAll(filepath.Dir(attemptResult.ReviewCommentsPath), 0o700); err == nil {
+			if f, err := os.OpenFile(attemptResult.ReviewCommentsPath, os.O_CREATE, 0o600); err == nil {
+				_ = f.Close()
+			}
+		}
+		if diff, err := generateDiffArtifacts(toolCtx, task.Workspace, res.FindingsPath, reviewDir); err != nil {
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
+				Type:      "attempt.diff_artifacts.failed",
+				Message:   "diff artifacts generation failed",
+				Data: map[string]any{
+					"error": err.Error(),
+				},
+			})
+		} else {
+			attemptResult.DiffPatchPath = diff.DiffPatchPath
+			attemptResult.ChangedFilesPath = diff.ChangedFilesPath
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
+				Type:      "attempt.diff_artifacts.created",
+				Message:   "diff artifacts generated",
+				Data: map[string]any{
+					"git_workspace":      diff.IsGitWorkspace,
+					"diff_patch_path":    diff.DiffPatchPath,
+					"changed_files_path": diff.ChangedFilesPath,
+					"note":               diff.Reason,
+				},
+			})
+		}
+
 		if rt.WorkLedger != nil {
 			summary := strings.TrimSpace(res.Summary)
 			if summary == "" {
@@ -331,9 +374,12 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 				FinishedAt:    finished,
 				Summary:       summary,
 				Artifacts: workledger.ReceiptArtifacts{
-					FindingsPath: strings.TrimSpace(res.FindingsPath),
-					TraceLogPath: strings.TrimSpace(res.TraceLogPath),
-					TestReportPath: strings.TrimSpace(testReportPath),
+					FindingsPath:       strings.TrimSpace(res.FindingsPath),
+					TraceLogPath:       strings.TrimSpace(res.TraceLogPath),
+					TestReportPath:     strings.TrimSpace(testReportPath),
+					DiffPatchPath:      strings.TrimSpace(attemptResult.DiffPatchPath),
+					ChangedFilesPath:   strings.TrimSpace(attemptResult.ChangedFilesPath),
+					ReviewCommentsPath: strings.TrimSpace(attemptResult.ReviewCommentsPath),
 				},
 				Signals: signals,
 			})
@@ -358,13 +404,13 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		}
 
 		return observer.Decide(ctx, taskqueue.ObserveInput{
-			TaskID:        task.ID,
-			AttemptID:     attempt.ID,
-			WorkspaceRoot: task.Workspace,
-			Prompt:        task.Prompt,
-			Summary:       attempt.Summary,
-			FindingsPath:  attempt.FindingsPath,
-			TraceLogPath:  attempt.TraceLogPath,
+			TaskID:         task.ID,
+			AttemptID:      attempt.ID,
+			WorkspaceRoot:  task.Workspace,
+			Prompt:         task.Prompt,
+			Summary:        attempt.Summary,
+			FindingsPath:   attempt.FindingsPath,
+			TraceLogPath:   attempt.TraceLogPath,
 			TestReportPath: attempt.TestReportPath,
 		})
 	}

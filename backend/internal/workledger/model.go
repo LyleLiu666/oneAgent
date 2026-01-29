@@ -19,10 +19,13 @@ const (
 )
 
 type ReceiptArtifacts struct {
-	FindingsPath   string `json:"findings_path,omitempty"`
-	TraceLogPath   string `json:"trace_log_path,omitempty"`
-	TestReportPath string `json:"test_report_path,omitempty"`
-	DiffRef        string `json:"diff_ref,omitempty"`
+	FindingsPath       string `json:"findings_path,omitempty"`
+	TraceLogPath       string `json:"trace_log_path,omitempty"`
+	TestReportPath     string `json:"test_report_path,omitempty"`
+	DiffPatchPath      string `json:"diff_patch_path,omitempty"`
+	ChangedFilesPath   string `json:"changed_files_path,omitempty"`
+	ReviewCommentsPath string `json:"review_comments_path,omitempty"`
+	DiffRef            string `json:"diff_ref,omitempty"`
 }
 
 type ReceiptSignals struct {
@@ -47,7 +50,7 @@ type Receipt struct {
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at"`
 
-	Summary   string          `json:"summary"`
+	Summary   string           `json:"summary"`
 	Artifacts ReceiptArtifacts `json:"artifacts,omitempty"`
 	Signals   ReceiptSignals   `json:"signals,omitempty"`
 }

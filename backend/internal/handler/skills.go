@@ -5,15 +5,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/liu_y/oneAgent/backend/internal/builtinskills"
 	"github.com/liu_y/oneAgent/backend/internal/fsutil"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
@@ -138,6 +142,8 @@ type getSkillResult struct {
 	Path        string       `json:"path"`
 	Archivable  bool         `json:"archivable"`
 
+	Files []string `json:"files,omitempty"`
+
 	SHA256  string `json:"sha256"`
 	SkillMD string `json:"skill_md"`
 }
@@ -169,24 +175,15 @@ func GetSkill(c *gin.Context) {
 	home := strings.TrimSpace(rt.Config.Home)
 	archivable := canArchiveSkill(home, s)
 
-	if !archivable {
-		// For now, only expose raw SKILL.md for personal skills to avoid widening read scope.
-		c.JSON(http.StatusOK, getSkillResult{
-			SkillID:     s.ID,
-			Name:        s.Name,
-			Description: s.Description,
-			Source:      s.Source,
-			Path:        s.Path,
-			Archivable:  false,
-			SHA256:      "",
-			SkillMD:     "",
-		})
+	files, err := listSkillFiles(c.Request.Context(), s)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	data, err := os.ReadFile(s.Path)
+	data, err := skill.ReadSkillFile(s.Path, 512*1024)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
 			return
 		}
@@ -201,10 +198,240 @@ func GetSkill(c *gin.Context) {
 		Description: s.Description,
 		Source:      s.Source,
 		Path:        s.Path,
-		Archivable:  true,
+		Archivable:  archivable,
+		Files:       files,
 		SHA256:      hex.EncodeToString(sum[:]),
 		SkillMD:     string(data),
 	})
+}
+
+type readSkillFileResult struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	// Content is UTF-8 decoded file contents.
+	Content string `json:"content"`
+}
+
+func ReadSkillFile(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "skill id is required"})
+		return
+	}
+
+	rel := strings.TrimSpace(c.Query("path"))
+	if rel == "" {
+		rel = "SKILL.md"
+	}
+	rel = strings.TrimPrefix(rel, "/")
+	rel = strings.TrimPrefix(rel, "./")
+	rel = path.Clean(rel)
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+
+	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	s, ok := cat.ByID(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill not found"})
+		return
+	}
+
+	data, err := readSkillFileRelative(c.Request.Context(), s, rel, 512*1024)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, fs.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !utf8.Valid(data) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is not valid UTF-8"})
+		return
+	}
+	sum := sha256.Sum256(data)
+
+	c.JSON(http.StatusOK, readSkillFileResult{
+		Path:    rel,
+		SHA256:  hex.EncodeToString(sum[:]),
+		Content: string(data),
+	})
+}
+
+func listSkillFiles(ctx context.Context, s skill.Skill) ([]string, error) {
+	const maxFiles = 2000
+
+	p := strings.TrimSpace(s.Path)
+	if strings.HasPrefix(p, "builtin:") {
+		rel := strings.TrimPrefix(p, "builtin:")
+		rel = strings.TrimPrefix(rel, "/")
+		rel = strings.TrimPrefix(rel, "./")
+		rel = path.Clean(rel)
+		if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+			return nil, errors.New("invalid builtin skill path")
+		}
+
+		root := path.Dir(rel)
+		files := make([]string, 0, 8)
+		err := fs.WalkDir(builtinskills.FS, root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if d == nil || d.IsDir() {
+				return nil
+			}
+			if d.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			p = path.Clean(p)
+			rootPrefix := root + "/"
+			if !strings.HasPrefix(p, rootPrefix) {
+				return nil
+			}
+			r := strings.TrimPrefix(p, rootPrefix)
+			r = path.Clean(r)
+			if r == "" || r == "." || strings.HasPrefix(r, "..") {
+				return nil
+			}
+			files = append(files, r)
+			if len(files) > maxFiles {
+				return errors.New("too many files in skill")
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(files)
+		return files, nil
+	}
+
+	root := filepath.Clean(filepath.Dir(p))
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("skill root is not a directory")
+	}
+
+	files := make([]string, 0, 16)
+	err = filepath.WalkDir(root, func(full string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if d == nil || d.IsDir() {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		r, err := filepath.Rel(root, full)
+		if err != nil {
+			return err
+		}
+		r = filepath.ToSlash(filepath.Clean(r))
+		if r == "" || r == "." || strings.HasPrefix(r, "..") {
+			return nil
+		}
+		files = append(files, r)
+		if len(files) > maxFiles {
+			return errors.New("too many files in skill")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func readSkillFileRelative(ctx context.Context, s skill.Skill, rel string, maxBytes int64) ([]byte, error) {
+	_ = ctx
+	rel = strings.TrimSpace(rel)
+	rel = strings.TrimPrefix(rel, "/")
+	rel = strings.TrimPrefix(rel, "./")
+	rel = path.Clean(rel)
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+		return nil, errors.New("invalid path")
+	}
+
+	p := strings.TrimSpace(s.Path)
+	if strings.HasPrefix(p, "builtin:") {
+		base := strings.TrimPrefix(p, "builtin:")
+		base = strings.TrimPrefix(base, "/")
+		base = strings.TrimPrefix(base, "./")
+		base = path.Clean(base)
+		if base == "" || base == "." || strings.HasPrefix(base, "..") {
+			return nil, errors.New("invalid builtin skill path")
+		}
+		root := path.Dir(base)
+		full := path.Join(root, rel)
+		full = path.Clean(full)
+		if full == "" || full == "." || strings.HasPrefix(full, "..") {
+			return nil, errors.New("invalid path")
+		}
+		return skill.ReadSkillFile("builtin:"+full, maxBytes)
+	}
+
+	root := filepath.Clean(filepath.Dir(p))
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("skill root is not a directory")
+	}
+
+	rootReal := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && strings.TrimSpace(resolved) != "" {
+		rootReal = filepath.Clean(resolved)
+	}
+
+	candidate := filepath.Clean(filepath.Join(root, filepath.FromSlash(rel)))
+	rootPrefix := root + string(os.PathSeparator)
+	if !strings.HasPrefix(candidate+string(os.PathSeparator), rootPrefix) {
+		return nil, errors.New("path escapes skill root")
+	}
+
+	target := candidate
+	if fi, err := os.Lstat(candidate); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err != nil || strings.TrimSpace(resolved) == "" {
+			return nil, errors.New("failed to resolve symlink")
+		}
+		target = filepath.Clean(resolved)
+	}
+
+	rootRealPrefix := rootReal + string(os.PathSeparator)
+	if !strings.HasPrefix(target+string(os.PathSeparator), rootRealPrefix) {
+		return nil, errors.New("path escapes skill root")
+	}
+
+	return skill.ReadSkillFile(candidate, maxBytes)
 }
 
 type updateSkillRequest struct {

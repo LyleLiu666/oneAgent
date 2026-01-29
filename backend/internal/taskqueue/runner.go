@@ -17,11 +17,14 @@ type DecisionMaker interface {
 }
 
 type AttemptResult struct {
-	RunID        string
-	Summary      string
-	FindingsPath string
-	TraceLogPath string
-	TestReportPath string
+	RunID              string
+	Summary            string
+	FindingsPath       string
+	TraceLogPath       string
+	TestReportPath     string
+	DiffPatchPath      string
+	ChangedFilesPath   string
+	ReviewCommentsPath string
 
 	ProjectConfigPath    string
 	CopyFilesLogPath     string
@@ -29,7 +32,7 @@ type AttemptResult struct {
 	TestScriptLogPath    string
 	CleanupScriptLogPath string
 
-	Usage        *usage.Totals
+	Usage *usage.Totals
 }
 
 type ExecuteAttemptFunc func(ctx context.Context, task Task, attempt Attempt, resumedFrom *Attempt) (AttemptResult, error)
@@ -231,7 +234,7 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 	}
 }
 
-func (r *TaskRunner) Resume(taskID string) (Task, error) {
+func (r *TaskRunner) Resume(taskID string, reviewNotes string) (Task, error) {
 	if r == nil || r.Store == nil {
 		return Task{}, errors.New("runner not initialized")
 	}
@@ -247,7 +250,10 @@ func (r *TaskRunner) Resume(taskID string) (Task, error) {
 			return errors.New("task has no attempts")
 		}
 		switch latest.Status {
-		case AttemptFailed, AttemptTimedOut, AttemptInterrupted, AttemptLimitExceeded:
+		case AttemptSucceeded, AttemptFailed, AttemptCanceled, AttemptTimedOut, AttemptInterrupted, AttemptLimitExceeded:
+			// ok
+		case AttemptQueued, AttemptRunning:
+			return fmt.Errorf("resume not allowed from status %q", latest.Status)
 		default:
 			return fmt.Errorf("resume not allowed from status %q", latest.Status)
 		}
@@ -261,6 +267,7 @@ func (r *TaskRunner) Resume(taskID string) (Task, error) {
 			CreatedAt:            now,
 			ResumedFromAttemptID: latest.ID,
 			PrincipalID:          tk.UserID,
+			ReviewNotes:          strings.TrimSpace(reviewNotes),
 		})
 		return nil
 	})
@@ -268,14 +275,24 @@ func (r *TaskRunner) Resume(taskID string) (Task, error) {
 		return Task{}, err
 	}
 
+	notes := strings.TrimSpace(reviewNotes)
+	if len([]rune(notes)) > 2000 {
+		notes = string([]rune(notes)[:2000]) + "…"
+	}
+
+	data := map[string]any{
+		"resumed_from_attempt_id": fromAttempt,
+	}
+	if strings.TrimSpace(notes) != "" {
+		data["review_notes"] = notes
+	}
+
 	_ = r.Store.AppendEvent(Event{
 		TaskID:    taskID,
 		AttemptID: newAttemptID,
 		Type:      "attempt.queued",
 		Message:   "Attempt queued via resume",
-		Data: map[string]any{
-			"resumed_from_attempt_id": fromAttempt,
-		},
+		Data:      data,
 	})
 
 	_ = r.Enqueue(taskID)
@@ -374,6 +391,9 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
 	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
 	ranAttempt.TestReportPath = strings.TrimSpace(result.TestReportPath)
+	ranAttempt.DiffPatchPath = strings.TrimSpace(result.DiffPatchPath)
+	ranAttempt.ChangedFilesPath = strings.TrimSpace(result.ChangedFilesPath)
+	ranAttempt.ReviewCommentsPath = strings.TrimSpace(result.ReviewCommentsPath)
 	ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
 	ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
 	ranAttempt.SetupScriptLogPath = strings.TrimSpace(result.SetupScriptLogPath)

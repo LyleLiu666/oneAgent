@@ -18,8 +18,8 @@ import (
 type Store struct {
 	baseDir string
 
-	mu         sync.Mutex
-	receiptMux map[string]*sync.Mutex
+	mu            sync.Mutex
+	receiptMux    map[string]*sync.Mutex
 	suggestionMux map[string]*sync.Mutex
 }
 
@@ -31,8 +31,8 @@ func NewStore(baseDir string) (*Store, error) {
 		return nil, fmt.Errorf("create baseDir: %w", err)
 	}
 	return &Store{
-		baseDir:    baseDir,
-		receiptMux: make(map[string]*sync.Mutex),
+		baseDir:       baseDir,
+		receiptMux:    make(map[string]*sync.Mutex),
 		suggestionMux: make(map[string]*sync.Mutex),
 	}, nil
 }
@@ -336,7 +336,7 @@ func buildReceiptMarkdown(r Receipt) string {
 	b.WriteString(strings.TrimSpace(r.Summary))
 	b.WriteString("\n\n")
 
-	if strings.TrimSpace(r.Artifacts.FindingsPath) != "" || strings.TrimSpace(r.Artifacts.TraceLogPath) != "" || strings.TrimSpace(r.Artifacts.TestReportPath) != "" || strings.TrimSpace(r.Artifacts.DiffRef) != "" {
+	if strings.TrimSpace(r.Artifacts.FindingsPath) != "" || strings.TrimSpace(r.Artifacts.TraceLogPath) != "" || strings.TrimSpace(r.Artifacts.TestReportPath) != "" || strings.TrimSpace(r.Artifacts.DiffPatchPath) != "" || strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" || strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" || strings.TrimSpace(r.Artifacts.DiffRef) != "" {
 		b.WriteString("## Artifacts\n\n")
 		if strings.TrimSpace(r.Artifacts.FindingsPath) != "" {
 			b.WriteString("- findings_path: ")
@@ -351,6 +351,21 @@ func buildReceiptMarkdown(r Receipt) string {
 		if strings.TrimSpace(r.Artifacts.TestReportPath) != "" {
 			b.WriteString("- test_report_path: ")
 			b.WriteString(strings.TrimSpace(r.Artifacts.TestReportPath))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.DiffPatchPath) != "" {
+			b.WriteString("- diff_patch_path: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.DiffPatchPath))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" {
+			b.WriteString("- changed_files_path: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.ChangedFilesPath))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" {
+			b.WriteString("- review_comments_path: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.ReviewCommentsPath))
 			b.WriteString("\n")
 		}
 		if strings.TrimSpace(r.Artifacts.DiffRef) != "" {

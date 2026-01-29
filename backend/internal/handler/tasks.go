@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -13,10 +14,10 @@ import (
 )
 
 type createTaskRequest struct {
-	Workspace string          `json:"workspace"`
-	Title     string          `json:"title,omitempty"`
-	Prompt    string          `json:"prompt"`
-	ModelID   string          `json:"model_id,omitempty"`
+	Workspace string           `json:"workspace"`
+	Title     string           `json:"title,omitempty"`
+	Prompt    string           `json:"prompt"`
+	ModelID   string           `json:"model_id,omitempty"`
 	Limits    taskqueue.Limits `json:"limits,omitempty"`
 }
 
@@ -155,6 +156,14 @@ func ResumeTask(c *gin.Context) {
 		userID = "local"
 	}
 
+	var req struct {
+		ReviewNotes string `json:"review_notes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
 	taskID := strings.TrimSpace(c.Param("id"))
 	task, err := rt.Tasks.GetTask(taskID)
 	if err != nil {
@@ -170,7 +179,7 @@ func ResumeTask(c *gin.Context) {
 		return
 	}
 
-	updated, err := rt.TaskRunner.Resume(taskID)
+	updated, err := rt.TaskRunner.Resume(taskID, req.ReviewNotes)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

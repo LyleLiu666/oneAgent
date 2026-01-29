@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/url"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,10 +60,10 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 				return taskqueue.AttemptResult{}, err
 			}
 			return taskqueue.AttemptResult{
-				RunID:        "run-" + attempt.ID,
-				Summary:      "done",
-				FindingsPath: findings,
-				TraceLogPath: trace,
+				RunID:          "run-" + attempt.ID,
+				Summary:        "done",
+				FindingsPath:   findings,
+				TraceLogPath:   trace,
 				TestReportPath: testReport,
 			}, nil
 		},
@@ -137,6 +137,94 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 	}
 	if strings.TrimSpace(last.LatestAttempt().TestReportPath) == "" {
 		t.Fatalf("expected test_report_path after attempt finished, got %+v", last.LatestAttempt())
+	}
+
+	latest := last.LatestAttempt()
+	if latest == nil {
+		t.Fatalf("expected latest attempt")
+	}
+
+	// Seed diff artifacts so the artifact endpoints can serve content (stub runner does not generate them).
+	reviewDir := filepath.Join(rt.Layout.TasksDir, created.ID, "attempts", latest.ID, "review")
+	if err := os.MkdirAll(reviewDir, 0o700); err != nil {
+		t.Fatalf("mkdir reviewDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewDir, "diff.patch"), []byte("diff --git a/a b/a\n"), 0o600); err != nil {
+		t.Fatalf("write diff.patch: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewDir, "changed_files.txt"), []byte("a\n"), 0o600); err != nil {
+		t.Fatalf("write changed_files.txt: %v", err)
+	}
+
+	// Artifact endpoints.
+	artifactReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/diff_patch", nil)
+	artifactRes, err := http.DefaultClient.Do(artifactReq)
+	if err != nil {
+		t.Fatalf("GET diff_patch: %v", err)
+	}
+	defer artifactRes.Body.Close()
+	if artifactRes.StatusCode != http.StatusOK {
+		t.Fatalf("GET diff_patch status=%d", artifactRes.StatusCode)
+	}
+	var diffResp map[string]any
+	if err := json.NewDecoder(artifactRes.Body).Decode(&diffResp); err != nil {
+		t.Fatalf("decode diff_patch: %v", err)
+	}
+	if !strings.Contains(diffResp["content"].(string), "diff --git") {
+		t.Fatalf("unexpected diff_patch content: %+v", diffResp)
+	}
+
+	changedReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/changed_files", nil)
+	changedRes, err := http.DefaultClient.Do(changedReq)
+	if err != nil {
+		t.Fatalf("GET changed_files: %v", err)
+	}
+	defer changedRes.Body.Close()
+	if changedRes.StatusCode != http.StatusOK {
+		t.Fatalf("GET changed_files status=%d", changedRes.StatusCode)
+	}
+	var changedResp map[string]any
+	if err := json.NewDecoder(changedRes.Body).Decode(&changedResp); err != nil {
+		t.Fatalf("decode changed_files: %v", err)
+	}
+	if strings.TrimSpace(changedResp["content"].(string)) == "" {
+		t.Fatalf("expected changed_files content, got %+v", changedResp)
+	}
+
+	// Review comments (append-only).
+	commentBody := map[string]any{"comment": "looks good, please add one more test"}
+	commentJSON, _ := json.Marshal(commentBody)
+	res, err = http.Post(srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/review_comments", "application/json", bytes.NewReader(commentJSON))
+	if err != nil {
+		t.Fatalf("POST review_comments: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST review_comments status=%d", res.StatusCode)
+	}
+	var posted map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&posted); err != nil {
+		t.Fatalf("decode posted review comment: %v", err)
+	}
+	if strings.TrimSpace(posted["comment"].(string)) == "" {
+		t.Fatalf("expected comment in response, got %+v", posted)
+	}
+
+	commentsReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/review_comments", nil)
+	res, err = http.DefaultClient.Do(commentsReq)
+	if err != nil {
+		t.Fatalf("GET review_comments: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET review_comments status=%d", res.StatusCode)
+	}
+	var comments []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&comments); err != nil {
+		t.Fatalf("decode review comments: %v", err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 review comment, got %d", len(comments))
 	}
 
 	// List by workspace.

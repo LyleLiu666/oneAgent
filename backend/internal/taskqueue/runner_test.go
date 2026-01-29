@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -392,8 +393,8 @@ func TestTaskRunner_ResumeCreatesNewAttempt(t *testing.T) {
 	}
 
 	exec := &execStub{
-		t:             t,
-		artifactsDir:  t.TempDir(),
+		t:              t,
+		artifactsDir:   t.TempDir(),
 		failIfNoResume: true,
 	}
 
@@ -412,7 +413,7 @@ func TestTaskRunner_ResumeCreatesNewAttempt(t *testing.T) {
 	_ = runner.Enqueue(task.ID)
 	waitForStatus(t, store, task.ID, AttemptFailed, 2*time.Second)
 
-	updated, err := runner.Resume(task.ID)
+	updated, err := runner.Resume(task.ID, "")
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
@@ -424,6 +425,80 @@ func TestTaskRunner_ResumeCreatesNewAttempt(t *testing.T) {
 	}
 
 	waitForStatus(t, store, task.ID, AttemptSucceeded, 2*time.Second)
+}
+
+func TestTaskRunner_Resume_AllowsSucceeded_WithReviewNotes(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	// Mark initial attempt as succeeded so we can create a follow-up attempt.
+	now := Now()
+	_, err = store.UpdateTask(task.ID, func(tk *Task) error {
+		a := tk.LatestAttempt()
+		if a == nil {
+			return errors.New("missing attempt")
+		}
+		a.Status = AttemptSucceeded
+		a.StartedAt = &now
+		a.FinishedAt = &now
+		a.Summary = "ok"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	exec := &execStub{
+		t:            t,
+		artifactsDir: t.TempDir(),
+	}
+
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+		ExecuteAttempt: exec.Execute,
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	updated, err := runner.Resume(task.ID, "请根据 review 修复边界条件，并补充测试")
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if len(updated.Attempts) != 2 {
+		t.Fatalf("expected 2 attempts after follow-up, got %d", len(updated.Attempts))
+	}
+	if strings.TrimSpace(updated.Attempts[1].ReviewNotes) == "" {
+		t.Fatalf("expected review_notes on new attempt")
+	}
+
+	evs, err := store.ReadEvents(task.ID)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	found := false
+	for _, ev := range evs {
+		if ev.AttemptID == updated.Attempts[1].ID && ev.Type == "attempt.queued" {
+			if v, ok := ev.Data["review_notes"]; ok && strings.TrimSpace(v.(string)) != "" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected attempt.queued event to include review_notes")
+	}
 }
 
 func TestTaskRunner_BudgetExceeded_IsTerminalAndResumable(t *testing.T) {
@@ -439,7 +514,7 @@ func TestTaskRunner_BudgetExceeded_IsTerminalAndResumable(t *testing.T) {
 	}
 
 	exec := &execStub{
-		t:           t,
+		t:            t,
 		artifactsDir: t.TempDir(),
 	}
 
@@ -467,7 +542,7 @@ func TestTaskRunner_BudgetExceeded_IsTerminalAndResumable(t *testing.T) {
 	_ = runner.Enqueue(task.ID)
 	waitForStatus(t, store, task.ID, AttemptLimitExceeded, 2*time.Second)
 
-	updated, err := runner.Resume(task.ID)
+	updated, err := runner.Resume(task.ID, "")
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
@@ -475,6 +550,71 @@ func TestTaskRunner_BudgetExceeded_IsTerminalAndResumable(t *testing.T) {
 		t.Fatalf("expected 2 attempts after resume, got %d", len(updated.Attempts))
 	}
 	waitForStatus(t, store, task.ID, AttemptSucceeded, 2*time.Second)
+}
+
+func TestTaskRunner_AttemptResult_DiffArtifactsPropagate(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	artifactsDir := t.TempDir()
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+		ExecuteAttempt: func(ctx context.Context, task Task, attempt Attempt, _ *Attempt) (AttemptResult, error) {
+			dir := filepath.Join(artifactsDir, task.ID, attempt.ID)
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return AttemptResult{}, err
+			}
+			findings := filepath.Join(dir, "FINDINGS.md")
+			trace := filepath.Join(dir, "trace.jsonl")
+			diffPatch := filepath.Join(dir, "diff.patch")
+			changedFiles := filepath.Join(dir, "changed_files.txt")
+			reviewComments := filepath.Join(dir, "review_comments.jsonl")
+			_ = os.WriteFile(findings, []byte("# Findings\n- ok\n"), 0o600)
+			_ = os.WriteFile(trace, []byte("{\"type\":\"complete\"}\n"), 0o600)
+			_ = os.WriteFile(diffPatch, []byte("diff --git a/a b/a\n"), 0o600)
+			_ = os.WriteFile(changedFiles, []byte("a\n"), 0o600)
+			_ = os.WriteFile(reviewComments, []byte(""), 0o600)
+			return AttemptResult{
+				RunID:              "run-" + attempt.ID,
+				Summary:            "done",
+				FindingsPath:       findings,
+				TraceLogPath:       trace,
+				DiffPatchPath:      diffPatch,
+				ChangedFilesPath:   changedFiles,
+				ReviewCommentsPath: reviewComments,
+			}, nil
+		},
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	_ = runner.Enqueue(task.ID)
+	waitForStatus(t, store, task.ID, AttemptSucceeded, 2*time.Second)
+
+	final, err := store.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	a := final.LatestAttempt()
+	if a == nil {
+		t.Fatalf("missing attempt")
+	}
+	if strings.TrimSpace(a.DiffPatchPath) == "" || strings.TrimSpace(a.ChangedFilesPath) == "" || strings.TrimSpace(a.ReviewCommentsPath) == "" {
+		t.Fatalf("expected diff/review artifacts to propagate, got %+v", a)
+	}
 }
 
 func TestTaskRunner_Start_MarksRunningAsInterrupted(t *testing.T) {
