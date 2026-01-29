@@ -5,4 +5,4 @@
 - [x] 1.4 Backend: inject "技能帮助" TurnContext when user asks about available skills
 - [x] 1.5 Backend tests: add e2e test for skills help injection trigger
 - [x] 1.6 (Optional) Frontend: chat UI hints/link to `/governance/skills` when user asks about skills
-- [ ] 1.7 Run `openspec validate fix-skill-read-not-found-ux --strict --no-interactive` and keep tests green
+- [x] 1.7 Run `openspec validate fix-skill-read-not-found-ux --strict --no-interactive` and keep tests green
