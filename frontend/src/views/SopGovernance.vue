@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ListChecks, RefreshCw, Wand2 } from 'lucide-vue-next'
 
+import ErrorBanner from '@/components/ErrorBanner.vue'
 import {
   getSimilarSopSuggestions,
   listSopSuggestions,
@@ -12,9 +13,10 @@ import {
   type Suggestion,
   type SuggestionStatus,
 } from '@/api/client'
+import { parseApiError, type ParsedApiError } from '@/lib/apiError'
 
 const loading = ref(false)
-const error = ref('')
+const error = ref<ParsedApiError | null>(null)
 const items = ref<Suggestion[]>([])
 
 const statusFilter = ref<SuggestionStatus>('proposed')
@@ -28,7 +30,7 @@ const similarLoading = ref<Record<string, boolean>>({})
 const similarByID = ref<Record<string, SimilarSuggestion[]>>({})
 
 const loadList = async () => {
-  error.value = ''
+  error.value = null
   loading.value = true
   try {
     const list = await listSopSuggestions({
@@ -39,7 +41,7 @@ const loadList = async () => {
     items.value = Array.isArray(list) ? list : []
   } catch (e: any) {
     items.value = []
-    error.value = String(e?.data?.error || e?.message || 'Failed to load SOP suggestions')
+    error.value = parseApiError(e, '加载 SOP 建议失败')
   } finally {
     loading.value = false
   }
@@ -66,27 +68,27 @@ const toggleEdit = (s: Suggestion) => {
 const saveEdit = async (s: Suggestion) => {
   const d = editDraft.value[s.suggestion_id]
   if (!d) return
-  error.value = ''
+  error.value = null
   loading.value = true
   try {
     await updateSopSuggestion(s.suggestion_id, { title: d.title, draft_skill: d.draft_skill })
     editOpen.value[s.suggestion_id] = false
     await loadList()
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to save')
+    error.value = parseApiError(e, '保存失败')
   } finally {
     loading.value = false
   }
 }
 
 const setStatus = async (id: string, status: SuggestionStatus, mergedInto?: string) => {
-  error.value = ''
+  error.value = null
   loading.value = true
   try {
     await updateSopSuggestionStatus(id, { status, merged_into_suggestion_id: mergedInto })
     await loadList()
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to update status')
+    error.value = parseApiError(e, '更新状态失败')
   } finally {
     loading.value = false
   }
@@ -105,13 +107,13 @@ const loadSimilar = async (s: Suggestion) => {
 }
 
 const loadMore = async () => {
-  error.value = ''
+  error.value = null
   loading.value = true
   try {
     await loadMoreSopSuggestions({ count: 10 })
     await loadList()
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to load more')
+    error.value = parseApiError(e, '加载更多失败')
   } finally {
     loading.value = false
   }
@@ -178,9 +180,7 @@ onMounted(async () => {
         </div>
 
         <div class="p-5 space-y-3">
-          <div v-if="error" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-            {{ error }}
-          </div>
+          <ErrorBanner v-if="error" :error="error" title="操作失败" />
           <div v-if="loading" class="text-sm text-surface-500">加载中…</div>
           <div v-else-if="sortedItems.length === 0" class="text-sm text-surface-500">暂无建议。</div>
 

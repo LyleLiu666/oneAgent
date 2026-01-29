@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-vue-next";
 
+import ErrorBanner from "@/components/ErrorBanner.vue";
 import {
   archiveShadowedPersonalDuplicates,
   archiveSkill,
@@ -25,22 +26,23 @@ import {
   type SkillCandidateInfo,
   type SkillInfo,
 } from "@/api/client";
+import { parseApiError, type ParsedApiError } from "@/lib/apiError";
 
 const loading = ref(false);
-const error = ref("");
+const error = ref<ParsedApiError | null>(null);
 const skills = ref<SkillInfo[]>([]);
 
 const duplicatesLoading = ref(false);
-const duplicatesError = ref("");
+const duplicatesError = ref<ParsedApiError | null>(null);
 const duplicates = ref<SkillDuplicateGroup[]>([]);
 const duplicatesActionLoading = ref(false);
-const duplicatesActionError = ref("");
+const duplicatesActionError = ref<ParsedApiError | null>(null);
 const archiveShadowedBySkillID = ref<Record<string, boolean>>({});
 const advancedOpen = ref(false);
 
 const selectedID = ref("");
 const selectedLoading = ref(false);
-const selectedError = ref("");
+const selectedError = ref<ParsedApiError | null>(null);
 const selected = ref<
   (SkillInfo & { sha256?: string; skill_md?: string; files?: string[] }) | null
 >(null);
@@ -59,18 +61,16 @@ const workspaceRoot = computed(() => {
 });
 
 const refresh = async () => {
-  error.value = "";
-  duplicatesError.value = "";
-  duplicatesActionError.value = "";
+  error.value = null;
+  duplicatesError.value = null;
+  duplicatesActionError.value = null;
   loading.value = true;
   try {
     const list = await listSkills();
     skills.value = Array.isArray(list) ? list : [];
   } catch (e: any) {
     skills.value = [];
-    error.value = String(
-      e?.data?.error || e?.message || "Failed to load skills",
-    );
+    error.value = parseApiError(e, "加载技能失败");
   } finally {
     loading.value = false;
   }
@@ -88,16 +88,14 @@ const refresh = async () => {
     }
   } catch (e: any) {
     duplicates.value = [];
-    duplicatesError.value = String(
-      e?.data?.error || e?.message || "Failed to load duplicates",
-    );
+    duplicatesError.value = parseApiError(e, "加载重复项失败");
   } finally {
     duplicatesLoading.value = false;
   }
 };
 
 const loadSelected = async () => {
-  selectedError.value = "";
+  selectedError.value = null;
   const id = String(selectedID.value || "").trim();
   if (!id) {
     selected.value = null;
@@ -119,9 +117,7 @@ const loadSelected = async () => {
     editMD.value = "";
     editSHA.value = "";
     activeFile.value = "SKILL.md";
-    selectedError.value = String(
-      e?.data?.error || e?.message || "Failed to load skill",
-    );
+    selectedError.value = parseApiError(e, "加载技能失败");
   } finally {
     selectedLoading.value = false;
   }
@@ -159,7 +155,7 @@ const loadActiveFile = async () => {
   const id = String(selected.value.skill_id || "").trim();
   if (!id) return;
 
-  selectedError.value = "";
+  selectedError.value = null;
   selectedLoading.value = true;
   try {
     if (activeFile.value === "SKILL.md") {
@@ -171,9 +167,7 @@ const loadActiveFile = async () => {
     const res = await readSkillFile(id, activeFile.value);
     editMD.value = String(res?.content || "");
   } catch (e: any) {
-    selectedError.value = String(
-      e?.data?.error || e?.message || "Failed to load file",
-    );
+    selectedError.value = parseApiError(e, "加载文件失败");
   } finally {
     selectedLoading.value = false;
   }
@@ -186,7 +180,7 @@ watch(activeFile, () => {
 const saveSelected = async () => {
   if (!selected.value) return;
   if (!canEditSelected.value) return;
-  selectedError.value = "";
+  selectedError.value = null;
   selectedLoading.value = true;
   try {
     const res = await updateSkill({
@@ -199,9 +193,7 @@ const saveSelected = async () => {
     editSHA.value = String(res.sha256 || "");
     await refresh();
   } catch (e: any) {
-    selectedError.value = String(
-      e?.data?.error || e?.message || "Failed to save skill",
-    );
+    selectedError.value = parseApiError(e, "保存失败");
   } finally {
     selectedLoading.value = false;
   }
@@ -209,22 +201,20 @@ const saveSelected = async () => {
 
 const doArchive = async (s: SkillInfo) => {
   if (!s.archivable) return;
-  error.value = "";
+  error.value = null;
   loading.value = true;
   try {
     await archiveSkill(s.skill_id);
     await refresh();
   } catch (e: any) {
-    error.value = String(
-      e?.data?.error || e?.message || "Failed to archive skill",
-    );
+    error.value = parseApiError(e, "归档失败");
   } finally {
     loading.value = false;
   }
 };
 
 const doPin = async (skillID: string, c: SkillCandidateInfo) => {
-  duplicatesActionError.value = "";
+  duplicatesActionError.value = null;
   duplicatesActionLoading.value = true;
   try {
     await pinSkillCandidate(skillID, {
@@ -237,24 +227,20 @@ const doPin = async (skillID: string, c: SkillCandidateInfo) => {
     });
     await refresh();
   } catch (e: any) {
-    duplicatesActionError.value = String(
-      e?.data?.error || e?.message || "Failed to pin skill",
-    );
+    duplicatesActionError.value = parseApiError(e, "Pin 失败");
   } finally {
     duplicatesActionLoading.value = false;
   }
 };
 
 const doArchiveShadowed = async (skillID: string) => {
-  duplicatesActionError.value = "";
+  duplicatesActionError.value = null;
   duplicatesActionLoading.value = true;
   try {
     await archiveShadowedPersonalDuplicates(skillID);
     await refresh();
   } catch (e: any) {
-    duplicatesActionError.value = String(
-      e?.data?.error || e?.message || "Failed to archive shadowed duplicates",
-    );
+    duplicatesActionError.value = parseApiError(e, "归档重复项失败");
   } finally {
     duplicatesActionLoading.value = false;
   }
@@ -295,12 +281,7 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div
-        v-if="error"
-        class="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-      >
-        {{ error }}
-      </div>
+      <ErrorBanner v-if="error" :error="error" title="加载失败" />
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div class="glass rounded-2xl overflow-hidden lg:col-span-2">
@@ -380,12 +361,7 @@ onMounted(async () => {
               </button>
             </div>
 
-            <div
-              v-if="selectedError"
-              class="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-            >
-              {{ selectedError }}
-            </div>
+            <ErrorBanner v-if="selectedError" class="m-4" :error="selectedError" title="操作失败" />
 
             <div v-if="!selected" class="p-6 text-sm text-surface-500">
               选择技能查看/编辑。
@@ -471,18 +447,8 @@ onMounted(async () => {
               data-testid="skill-governance-advanced"
               class="p-5"
             >
-              <div
-                v-if="duplicatesActionError"
-                class="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-              >
-                {{ duplicatesActionError }}
-              </div>
-              <div
-                v-if="duplicatesError"
-                class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-              >
-                {{ duplicatesError }}
-              </div>
+              <ErrorBanner v-if="duplicatesActionError" class="mb-4" :error="duplicatesActionError" title="操作失败" />
+              <ErrorBanner v-if="duplicatesError" :error="duplicatesError" title="加载失败" />
               <div
                 v-else-if="duplicatesLoading"
                 class="text-sm text-surface-500"

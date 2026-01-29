@@ -2,7 +2,9 @@
 import { computed, ref } from 'vue'
 import { Download, FolderOpen } from 'lucide-vue-next'
 
+import ErrorBanner from '@/components/ErrorBanner.vue'
 import { chooseWorkspaceDir, exportDocument, type DocumentExportFormat } from '@/api/client'
+import { parseApiError, type ParsedApiError } from '@/lib/apiError'
 
 const workspace = ref(String(globalThis?.localStorage?.getItem?.('oneagent-workspace') || '').trim())
 const inputPath = ref('report.md')
@@ -12,13 +14,13 @@ const templatePath = ref('')
 
 const running = ref(false)
 const choosing = ref(false)
-const error = ref('')
+const error = ref<ParsedApiError | null>(null)
 const result = ref<any>(null)
 
 const canRun = computed(() => workspace.value.trim() && inputPath.value.trim() && format.value)
 
 const chooseWorkspace = async () => {
-  error.value = ''
+  error.value = null
   choosing.value = true
   try {
     const res: any = await chooseWorkspaceDir()
@@ -28,14 +30,14 @@ const chooseWorkspace = async () => {
       localStorage.setItem('oneagent-workspace', p)
     }
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to choose workspace')
+    error.value = parseApiError(e, '选择工作区失败')
   } finally {
     choosing.value = false
   }
 }
 
 const run = async () => {
-  error.value = ''
+  error.value = null
   result.value = null
   const ws = workspace.value.trim()
   const inPath = inputPath.value.trim()
@@ -53,7 +55,7 @@ const run = async () => {
     const res = await exportDocument(payload)
     result.value = res
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Export failed')
+    error.value = parseApiError(e, '导出失败')
   } finally {
     running.value = false
   }
@@ -70,9 +72,7 @@ const run = async () => {
         </div>
       </div>
 
-      <div v-if="error" class="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-        {{ error }}
-      </div>
+      <ErrorBanner v-if="error" :error="error" title="导出失败" />
 
       <div class="glass rounded-2xl overflow-hidden">
         <div class="px-5 py-4 border-b border-surface-700/50 flex items-center gap-3">

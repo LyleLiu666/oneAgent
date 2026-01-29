@@ -3,7 +3,7 @@
 - [x] 1.2 Backend: implement centralized error responder (code/message/hint + redaction)
 - [x] 1.3 Backend: replace direct `err.Error()` JSON responses in `backend/internal/handler/*`
 - [x] 1.4 Frontend: add shared error parsing + `ErrorBanner` component with optional details + copy `request_id`
-- [ ] 1.5 Frontend: apply unified error UX to `/tasks`, `/governance/*`, `/documents/export`, `/ledger`
+- [x] 1.5 Frontend: apply unified error UX to `/tasks`, `/governance/*`, `/documents/export`, `/ledger`
 - [ ] 1.6 Frontend: implement page-scoped UX fixes per spec (empty states, density, editor usability)
 
 ## 2. Tests

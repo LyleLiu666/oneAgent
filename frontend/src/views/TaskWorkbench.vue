@@ -9,6 +9,7 @@ import {
   Plus,
 } from "lucide-vue-next";
 
+import ErrorBanner from "@/components/ErrorBanner.vue";
 import EventLogViewer from "@/components/EventLogViewer.vue";
 
 import {
@@ -35,6 +36,7 @@ import {
   type TaskSnapshot,
   type TaskUpdate,
 } from "@/lib/taskUpdates";
+import { parseApiError, type ParsedApiError } from "@/lib/apiError";
 
 type WorkspaceSummary = {
   workspace: string;
@@ -48,7 +50,7 @@ const STORAGE_KEY = "oneagent-workspaces";
 const TASK_SNAPSHOT_KEY = "oneagent-task-snapshots";
 
 const tasksLoading = ref(false);
-const tasksError = ref("");
+const tasksError = ref<ParsedApiError | null>(null);
 const tasks = ref<Task[]>([]);
 
 const notifyInitialized = ref(false);
@@ -63,7 +65,7 @@ const selectedTaskId = ref("");
 const selectedTask = ref<Task | null>(null);
 const selectedEvents = ref<TaskEvent[]>([]);
 const selectedLoading = ref(false);
-const selectedError = ref("");
+const selectedError = ref<ParsedApiError | null>(null);
 
 const title = ref("");
 const prompt = ref("");
@@ -73,7 +75,7 @@ const submitting = ref(false);
 const composerAdvancedOpen = ref(false);
 
 const reviewLoading = ref(false);
-const reviewError = ref("");
+const reviewError = ref<ParsedApiError | null>(null);
 const diffPatch = ref<TaskAttemptArtifactContent | null>(null);
 const changedFiles = ref<TaskAttemptArtifactContent | null>(null);
 const reviewComments = ref<TaskAttemptReviewComment[]>([]);
@@ -145,7 +147,7 @@ const advancedArtifacts = computed<AttemptArtifactSummary[]>(() => {
 
 const artifactModalOpen = ref(false);
 const artifactModalLoading = ref(false);
-const artifactModalError = ref("");
+const artifactModalError = ref<ParsedApiError | null>(null);
 const artifactModalLabel = ref("");
 const artifactModalKind = ref("");
 const artifactModalPath = ref("");
@@ -159,7 +161,7 @@ const openArtifactModal = async (artifact: AttemptArtifactSummary) => {
 
   artifactModalOpen.value = true;
   artifactModalLoading.value = true;
-  artifactModalError.value = "";
+  artifactModalError.value = null;
   artifactModalLabel.value = artifact.label;
   artifactModalKind.value = artifact.kind;
   artifactModalPath.value = artifact.path;
@@ -173,9 +175,7 @@ const openArtifactModal = async (artifact: AttemptArtifactSummary) => {
     artifactModalContent.value = res;
   } catch (e: any) {
     if (seq !== artifactRequestSeq) return;
-    artifactModalError.value = String(
-      e?.data?.error || e?.message || "Failed to load artifact",
-    );
+    artifactModalError.value = parseApiError(e, "加载产物失败");
   } finally {
     if (seq === artifactRequestSeq) artifactModalLoading.value = false;
   }
@@ -251,7 +251,7 @@ const saveManualWorkspaces = () => {
 };
 
 const refreshTasks = async () => {
-  tasksError.value = "";
+  tasksError.value = null;
   tasksLoading.value = true;
   try {
     const list = await listTasks();
@@ -285,9 +285,7 @@ const refreshTasks = async () => {
 
     tasks.value = nextTasks;
   } catch (e: any) {
-    tasksError.value = String(
-      e?.data?.error || e?.message || "Failed to load tasks",
-    );
+    tasksError.value = parseApiError(e, "加载任务失败");
     tasks.value = [];
   } finally {
     tasksLoading.value = false;
@@ -299,7 +297,7 @@ const clearTaskUpdates = () => {
 };
 
 const refreshSelected = async () => {
-  selectedError.value = "";
+  selectedError.value = null;
   const id = normalizeWorkspace(selectedTaskId.value);
   if (!id) {
     selectedTask.value = null;
@@ -313,9 +311,7 @@ const refreshSelected = async () => {
     selectedTask.value = t;
     selectedEvents.value = Array.isArray(evs) ? sortTaskEventsNewestFirst(evs) : [];
   } catch (e: any) {
-    selectedError.value = String(
-      e?.data?.error || e?.message || "Failed to load task",
-    );
+    selectedError.value = parseApiError(e, "加载任务失败");
     selectedTask.value = null;
     selectedEvents.value = [];
   } finally {
@@ -324,7 +320,7 @@ const refreshSelected = async () => {
 };
 
 const loadReviewArtifacts = async () => {
-  reviewError.value = "";
+  reviewError.value = null;
   diffPatch.value = null;
   changedFiles.value = null;
   reviewComments.value = [];
@@ -344,16 +340,14 @@ const loadReviewArtifacts = async () => {
     changedFiles.value = changed;
     reviewComments.value = Array.isArray(comments) ? comments : [];
   } catch (e: any) {
-    reviewError.value = String(
-      e?.data?.error || e?.message || "Failed to load review artifacts",
-    );
+    reviewError.value = parseApiError(e, "加载审查信息失败");
   } finally {
     reviewLoading.value = false;
   }
 };
 
 const submitReviewComment = async () => {
-  reviewError.value = "";
+  reviewError.value = null;
   const t = selectedTask.value;
   const a = latestAttempt.value;
   const text = String(reviewCommentDraft.value || "").trim();
@@ -367,9 +361,7 @@ const submitReviewComment = async () => {
     reviewCommentDraft.value = "";
     reviewComments.value = [created, ...reviewComments.value].slice(0, 10);
   } catch (e: any) {
-    reviewError.value = String(
-      e?.data?.error || e?.message || "Failed to submit review comment",
-    );
+    reviewError.value = parseApiError(e, "提交评论失败");
   } finally {
     submittingReviewComment.value = false;
   }
@@ -382,7 +374,7 @@ const toggleReviewTab = async () => {
 };
 
 const createFollowUpAttempt = async () => {
-  reviewError.value = "";
+  reviewError.value = null;
   const t = selectedTask.value;
   if (!t) return;
   const notes = String(followUpNotes.value || "").trim();
@@ -395,9 +387,7 @@ const createFollowUpAttempt = async () => {
     await refreshTasks();
     activeDetailTab.value = "overview";
   } catch (e: any) {
-    reviewError.value = String(
-      e?.data?.error || e?.message || "Failed to create follow-up attempt",
-    );
+    reviewError.value = parseApiError(e, "创建 follow-up 失败");
   } finally {
     submittingFollowUp.value = false;
   }
@@ -496,7 +486,7 @@ const addWorkspace = () => {
 };
 
 const queueTask = async () => {
-  tasksError.value = "";
+  tasksError.value = null;
   const ws = normalizeWorkspace(workspaceSelected.value);
   const p = normalizeWorkspace(prompt.value);
   if (!ws || !p) return;
@@ -528,9 +518,7 @@ const queueTask = async () => {
     await refreshTasks();
     await refreshSelected();
   } catch (e: any) {
-    tasksError.value = String(
-      e?.data?.error || e?.message || "Failed to create task",
-    );
+    tasksError.value = parseApiError(e, "创建任务失败");
   } finally {
     submitting.value = false;
   }
@@ -555,30 +543,26 @@ const formatUsage = (a: TaskAttempt | null) => {
 const doCancel = async () => {
   const id = normalizeWorkspace(selectedTaskId.value);
   if (!id) return;
-  selectedError.value = "";
+  selectedError.value = null;
   try {
     await cancelTask(id);
     await refreshTasks();
     await refreshSelected();
   } catch (e: any) {
-    selectedError.value = String(
-      e?.data?.error || e?.message || "Failed to cancel task",
-    );
+    selectedError.value = parseApiError(e, "取消任务失败");
   }
 };
 
 const doResume = async () => {
   const id = normalizeWorkspace(selectedTaskId.value);
   if (!id) return;
-  selectedError.value = "";
+  selectedError.value = null;
   try {
     await resumeTask(id);
     await refreshTasks();
     await refreshSelected();
   } catch (e: any) {
-    selectedError.value = String(
-      e?.data?.error || e?.message || "Failed to resume task",
-    );
+    selectedError.value = parseApiError(e, "恢复任务失败");
   }
 };
 
@@ -664,12 +648,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div
-        v-if="tasksError"
-        class="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-      >
-        {{ tasksError }}
-      </div>
+      <ErrorBanner v-if="tasksError" class="mb-6" :error="tasksError" title="任务失败" />
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <!-- Left column: Workspaces + Task list -->
@@ -969,12 +948,7 @@ onUnmounted(() => {
               </button>
             </div>
 
-            <div
-              v-if="selectedError"
-              class="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-            >
-              {{ selectedError }}
-            </div>
+            <ErrorBanner v-if="selectedError" class="m-4" :error="selectedError" title="加载失败" />
 
             <div v-if="!selectedTask" class="p-8 text-sm text-surface-500 text-center">
               选择任务查看详情
@@ -1210,12 +1184,7 @@ onUnmounted(() => {
                 <div class="text-xs text-surface-500">{{ latestAttempt?.id }}</div>
               </div>
 
-              <div
-                v-if="reviewError"
-                class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-200"
-              >
-                {{ reviewError }}
-              </div>
+              <ErrorBanner v-if="reviewError" :error="reviewError" title="审查失败" />
 
               <div v-if="reviewLoading" class="text-xs text-surface-500">
                 加载中…
@@ -1347,12 +1316,7 @@ onUnmounted(() => {
           <div v-if="artifactModalLoading" class="text-sm text-surface-500 py-8 text-center">
             加载中…
           </div>
-          <div
-            v-else-if="artifactModalError"
-            class="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-          >
-            {{ artifactModalError }}
-          </div>
+          <ErrorBanner v-else-if="artifactModalError" :error="artifactModalError" title="加载失败" />
           <div v-else class="space-y-3">
             <div
               v-if="artifactModalContent?.truncated"

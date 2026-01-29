@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { KeyRound, RefreshCw, Save, Shield, Trash2 } from 'lucide-vue-next'
 
+import ErrorBanner from '@/components/ErrorBanner.vue'
 import {
   createAuthToken,
   getToolPolicy,
@@ -13,6 +14,7 @@ import {
   type ToolPolicyResponse,
   type ToolPolicy,
 } from '@/api/client'
+import { parseApiError, type ParsedApiError } from '@/lib/apiError'
 
 type ToolInfo = {
   id: string
@@ -21,7 +23,7 @@ type ToolInfo = {
 }
 
 const loading = ref(false)
-const error = ref('')
+const error = ref<ParsedApiError | null>(null)
 
 const tools = ref<ToolInfo[]>([])
 const tokens = ref<AuthTokenResponse[]>([])
@@ -39,7 +41,7 @@ const snapshot = computed(() => policyResponse.value?.snapshot)
 const shortHash = (hash?: string) => (hash && hash.length >= 8 ? hash.slice(0, 8) : hash || '')
 
 const refresh = async () => {
-  error.value = ''
+  error.value = null
   loading.value = true
   createdToken.value = null
   try {
@@ -51,7 +53,7 @@ const refresh = async () => {
     }))
     tokens.value = Array.isArray(rawTokens) ? rawTokens : []
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to load tool permissions')
+    error.value = parseApiError(e, '加载工具权限失败')
     tools.value = []
     tokens.value = []
   } finally {
@@ -60,7 +62,7 @@ const refresh = async () => {
 }
 
 const loadPolicy = async () => {
-  error.value = ''
+  error.value = null
   const id = String(principalID.value || '').trim()
   if (!id) return
   loading.value = true
@@ -71,21 +73,21 @@ const loadPolicy = async () => {
     policyJSON.value = JSON.stringify(src || {}, null, 2)
     policyDirty.value = false
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to load policy')
+    error.value = parseApiError(e, '加载策略失败')
   } finally {
     loading.value = false
   }
 }
 
 const savePolicy = async () => {
-  error.value = ''
+  error.value = null
   const id = String(principalID.value || '').trim()
   if (!id) return
   let parsed: ToolPolicy
   try {
     parsed = JSON.parse(policyJSON.value || '{}')
   } catch (e: any) {
-    error.value = `Invalid policy JSON: ${String(e?.message || e)}`
+    error.value = { message: `Invalid policy JSON: ${String(e?.message || e)}` }
     return
   }
 
@@ -96,14 +98,14 @@ const savePolicy = async () => {
     policyJSON.value = JSON.stringify(res.policy || {}, null, 2)
     policyDirty.value = false
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to save policy')
+    error.value = parseApiError(e, '保存策略失败')
   } finally {
     loading.value = false
   }
 }
 
 const createToken = async () => {
-  error.value = ''
+  error.value = null
   const p = String(newTokenPrincipal.value || '').trim() || String(principalID.value || '').trim()
   if (!p) return
   loading.value = true
@@ -112,14 +114,14 @@ const createToken = async () => {
     createdToken.value = res
     await refresh()
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to create token')
+    error.value = parseApiError(e, '创建 token 失败')
   } finally {
     loading.value = false
   }
 }
 
 const revokeToken = async (token: string) => {
-  error.value = ''
+  error.value = null
   const t = String(token || '').trim()
   if (!t) return
   loading.value = true
@@ -127,7 +129,7 @@ const revokeToken = async (token: string) => {
     await revokeAuthToken(t)
     await refresh()
   } catch (e: any) {
-    error.value = String(e?.data?.error || e?.message || 'Failed to revoke token')
+    error.value = parseApiError(e, '撤销 token 失败')
   } finally {
     loading.value = false
   }
@@ -158,9 +160,7 @@ onMounted(async () => {
         </button>
       </div>
 
-      <div v-if="error" class="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-        {{ error }}
-      </div>
+      <ErrorBanner v-if="error" :error="error" title="操作失败" />
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div class="lg:col-span-2 space-y-4">

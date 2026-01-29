@@ -8,6 +8,8 @@ import {
   Search,
   Wand2,
 } from "lucide-vue-next";
+
+import ErrorBanner from "@/components/ErrorBanner.vue";
 import {
   getLedgerStatusToday,
   getTodayDigest,
@@ -23,12 +25,13 @@ import {
   type SuggestionStatus,
   type SimilarSuggestion,
 } from "@/api/client";
+import { parseApiError, type ParsedApiError } from "@/lib/apiError";
 
 const activeTab = ref<"receipts" | "digest" | "sop">("receipts");
 
 // Ledger status badges
 const statusLoading = ref(false);
-const statusError = ref("");
+const statusError = ref<ParsedApiError | null>(null);
 const ledgerStatus = ref<{
   day_key: string;
   digest_exists: boolean;
@@ -38,12 +41,12 @@ const ledgerStatus = ref<{
 
 const loadLedgerStatus = async () => {
   statusLoading.value = true;
-  statusError.value = "";
+  statusError.value = null;
   try {
     const st = await getLedgerStatusToday();
     ledgerStatus.value = st;
   } catch (e: any) {
-    statusError.value = e?.message || "Failed to load ledger status";
+    statusError.value = parseApiError(e, "加载 ledger 状态失败");
     ledgerStatus.value = null;
   } finally {
     statusLoading.value = false;
@@ -63,7 +66,7 @@ const hasLearningBadge = computed(() =>
 
 // Receipts state
 const receiptsLoading = ref(false);
-const receiptsError = ref("");
+const receiptsError = ref<ParsedApiError | null>(null);
 const receipts = ref<Receipt[]>([]);
 const receiptsQuery = ref("");
 const receiptsStatus = ref<string>("");
@@ -76,7 +79,7 @@ const selectedReceipt = computed(() =>
 
 const loadReceipts = async () => {
   receiptsLoading.value = true;
-  receiptsError.value = "";
+  receiptsError.value = null;
   try {
     const list = await listReceipts({
       q: receiptsQuery.value.trim() || undefined,
@@ -92,7 +95,7 @@ const loadReceipts = async () => {
       selectedReceiptID.value = "";
     }
   } catch (e: any) {
-    receiptsError.value = e?.message || "Failed to load receipts";
+    receiptsError.value = parseApiError(e, "加载 receipts 失败");
     receipts.value = [];
     selectedReceiptID.value = "";
   } finally {
@@ -102,19 +105,19 @@ const loadReceipts = async () => {
 
 // Digest state
 const digestLoading = ref(false);
-const digestError = ref("");
+const digestError = ref<ParsedApiError | null>(null);
 const digestMarkdown = ref("");
 const digestDayKey = ref("");
 
 const loadDigest = async (refresh: boolean = false) => {
   digestLoading.value = true;
-  digestError.value = "";
+  digestError.value = null;
   try {
     const d: any = await getTodayDigest(refresh);
     digestMarkdown.value = String(d?.markdown || "");
     digestDayKey.value = String(d?.day_key || "");
   } catch (e: any) {
-    digestError.value = e?.message || "Failed to load digest";
+    digestError.value = parseApiError(e, "加载 digest 失败");
     digestMarkdown.value = "";
     digestDayKey.value = "";
   } finally {
@@ -124,7 +127,7 @@ const loadDigest = async (refresh: boolean = false) => {
 
 // SOP state
 const sopLoading = ref(false);
-const sopError = ref("");
+const sopError = ref<ParsedApiError | null>(null);
 const sopIncludeParked = ref(false);
 const sopStatusFilter = ref<SuggestionStatus>("proposed");
 const sopItems = ref<Suggestion[]>([]);
@@ -147,7 +150,7 @@ const similarByID = ref<Record<string, SimilarSuggestion[]>>({});
 
 const loadSopSuggestionsList = async () => {
   sopLoading.value = true;
-  sopError.value = "";
+  sopError.value = null;
   try {
     const list = await listSopSuggestions({
       status: sopStatusFilter.value,
@@ -156,7 +159,7 @@ const loadSopSuggestionsList = async () => {
     });
     sopItems.value = Array.isArray(list) ? list : [];
   } catch (e: any) {
-    sopError.value = e?.message || "Failed to load SOP suggestions";
+    sopError.value = parseApiError(e, "加载 SOP 建议失败");
     sopItems.value = [];
   } finally {
     sopLoading.value = false;
@@ -183,7 +186,7 @@ const saveEdit = async (s: Suggestion) => {
   const d = editDraft.value[s.suggestion_id];
   if (!d) return;
   sopLoading.value = true;
-  sopError.value = "";
+  sopError.value = null;
   try {
     await updateSopSuggestion(s.suggestion_id, {
       title: d.title,
@@ -195,7 +198,7 @@ const saveEdit = async (s: Suggestion) => {
     await loadSopSuggestionsList();
     await loadLedgerStatus();
   } catch (e: any) {
-    sopError.value = e?.message || "Failed to save edit";
+    sopError.value = parseApiError(e, "保存失败");
   } finally {
     sopLoading.value = false;
   }
@@ -207,7 +210,7 @@ const setSuggestionStatus = async (
   mergedInto?: string,
 ) => {
   sopLoading.value = true;
-  sopError.value = "";
+  sopError.value = null;
   try {
     await updateSopSuggestionStatus(suggestionId, {
       status,
@@ -216,7 +219,7 @@ const setSuggestionStatus = async (
     await loadSopSuggestionsList();
     await loadLedgerStatus();
   } catch (e: any) {
-    sopError.value = e?.message || "Failed to update status";
+    sopError.value = parseApiError(e, "更新状态失败");
   } finally {
     sopLoading.value = false;
   }
@@ -224,13 +227,13 @@ const setSuggestionStatus = async (
 
 const generateOneSuggestion = async () => {
   sopLoading.value = true;
-  sopError.value = "";
+  sopError.value = null;
   try {
     await generateSopSuggestions({ count: 1, lookback_days: 7 });
     await loadSopSuggestionsList();
     await loadLedgerStatus();
   } catch (e: any) {
-    sopError.value = e?.message || "Failed to generate suggestion";
+    sopError.value = parseApiError(e, "生成失败");
   } finally {
     sopLoading.value = false;
   }
@@ -238,13 +241,13 @@ const generateOneSuggestion = async () => {
 
 const loadMoreParkedSuggestions = async () => {
   sopLoading.value = true;
-  sopError.value = "";
+  sopError.value = null;
   try {
     await loadMoreSopSuggestions({ count: 3 });
     await loadSopSuggestionsList();
     await loadLedgerStatus();
   } catch (e: any) {
-    sopError.value = e?.message || "Failed to load more suggestions";
+    sopError.value = parseApiError(e, "加载更多失败");
   } finally {
     sopLoading.value = false;
   }
@@ -421,9 +424,7 @@ onMounted(async () => {
             <div v-if="receiptsLoading" class="text-sm text-surface-500">
               加载中…
             </div>
-            <div v-else-if="receiptsError" class="text-sm text-red-400">
-              {{ receiptsError }}
-            </div>
+            <ErrorBanner v-else-if="receiptsError" :error="receiptsError" title="加载失败" />
             <div
               v-else-if="receipts.length === 0"
               class="text-sm text-surface-500"
@@ -635,9 +636,7 @@ onMounted(async () => {
           <div v-if="digestLoading" class="text-sm text-surface-500">
             加载中…
           </div>
-          <div v-else-if="digestError" class="text-sm text-red-400">
-            {{ digestError }}
-          </div>
+          <ErrorBanner v-else-if="digestError" :error="digestError" title="加载失败" />
           <div v-else class="prose prose-invert max-w-none">
             <pre
               class="whitespace-pre-wrap text-sm bg-surface-900/60 border border-surface-700/50 rounded-xl p-4"
@@ -720,9 +719,7 @@ onMounted(async () => {
 
         <div class="p-6 space-y-4">
           <div v-if="sopLoading" class="text-sm text-surface-500">加载中…</div>
-          <div v-else-if="sopError" class="text-sm text-red-400">
-            {{ sopError }}
-          </div>
+          <ErrorBanner v-else-if="sopError" :error="sopError" title="操作失败" />
           <div
             v-else-if="sopItems.length === 0"
             class="text-sm text-surface-500"
