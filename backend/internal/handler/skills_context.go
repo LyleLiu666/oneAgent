@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,10 @@ func buildSkillSuggestionTurnContext(ctx context.Context, manager *skill.Manager
 	catalog, err := manager.Load(loadCtx, workspaceRoot)
 	if err != nil || catalog == nil || len(catalog.Skills) == 0 {
 		return ""
+	}
+
+	if wantsSkillsHelpTurnContext(userMessage) {
+		return formatSkillsHelpTurnContext(catalog)
 	}
 
 	eligibleCatalog := skill.FilterEligibleCatalog(catalog, nil)
@@ -70,5 +75,74 @@ func formatSkillSuggestion(s skill.Skill) string {
 	b.WriteString(string(s.Source))
 	b.WriteString("\n")
 	b.WriteString("  - 使用方式: 调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`，再遵循其中指令执行\n")
+	return b.String()
+}
+
+func wantsSkillsHelpTurnContext(userMessage string) bool {
+	msg := strings.TrimSpace(userMessage)
+	if msg == "" {
+		return false
+	}
+
+	lower := strings.ToLower(msg)
+	hasSkillWord := strings.Contains(msg, "技能") || strings.Contains(lower, "skill") || strings.Contains(lower, "skills")
+	if !hasSkillWord {
+		return false
+	}
+
+	hasListIntent := strings.Contains(msg, "有哪些") ||
+		strings.Contains(msg, "有什么") ||
+		strings.Contains(msg, "列出") ||
+		strings.Contains(msg, "列表") ||
+		strings.Contains(msg, "可用") ||
+		strings.Contains(lower, "list") ||
+		strings.Contains(lower, "available") ||
+		strings.Contains(lower, "what")
+	return hasListIntent
+}
+
+func formatSkillsHelpTurnContext(catalog *skill.Catalog) string {
+	if catalog == nil || len(catalog.Skills) == 0 {
+		return ""
+	}
+
+	eligible := skill.FilterEligibleCatalog(catalog, nil)
+	list := eligible.Skills
+	if len(list) == 0 {
+		return ""
+	}
+
+	ordered := make([]skill.Skill, len(list))
+	copy(ordered, list)
+	sort.Slice(ordered, func(i, j int) bool {
+		return strings.Compare(ordered[i].ID, ordered[j].ID) < 0
+	})
+
+	const maxPreview = 10
+	if len(ordered) > maxPreview {
+		ordered = ordered[:maxPreview]
+	}
+
+	var b strings.Builder
+	b.WriteString("## 技能帮助（可用 skills）\n")
+	b.WriteString("你似乎在询问当前环境有哪些 skills 可用。为了避免靠猜导致连续 `skill.read` 错误，请优先使用以下入口：\n\n")
+	b.WriteString("- UI：打开 Skills Governance 页面查看完整列表（/governance/skills）\n")
+	b.WriteString("- CLI：运行 `oneagent skills status` 检查可用性/缺失依赖\n\n")
+	b.WriteString("可用技能摘要（Top-10）：\n")
+	for _, s := range ordered {
+		name := strings.TrimSpace(s.Name)
+		if name == "" {
+			name = s.ID
+		}
+		b.WriteString("- ")
+		b.WriteString(name)
+		if strings.TrimSpace(s.ID) != "" && strings.TrimSpace(s.ID) != strings.TrimSpace(name) {
+			b.WriteString(" (id=")
+			b.WriteString(s.ID)
+			b.WriteString(")")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n提示：确定要用某个技能时，调用 `skill.read`（按技能名称或 skill_id）读取 `SKILL.md` 再执行。\n")
 	return b.String()
 }
