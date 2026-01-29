@@ -17,6 +17,7 @@ vi.mock("@/api/client", () => ({
   resumeTask: vi.fn(async () => ({})),
   listTaskAttemptReviewComments: vi.fn(async () => []),
   postTaskAttemptReviewComment: vi.fn(async () => ({})),
+  chooseWorkspaceDir: vi.fn(async () => ({ path: "/tmp/ws" })),
 }));
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -294,6 +295,32 @@ it("queues a task for selected workspace", async () => {
   expect(apiClient.createTask).toHaveBeenCalledWith(
     expect.objectContaining({ workspace: "/tmp/wsA", prompt: "do it" }),
   );
+
+  wrapper.unmount();
+});
+
+it("shows guided empty state when no task is selected", async () => {
+  vi.stubGlobal("localStorage", {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  expect(wrapper.find('[data-testid="workbench-empty-focus"]').exists()).toBe(
+    true,
+  );
+
+  const textarea = wrapper.get('[data-testid="workbench-prompt"]');
+  const focusSpy = vi.spyOn(textarea.element, "focus");
+  await wrapper.get('[data-testid="workbench-empty-focus"]').trigger("click");
+
+  expect(focusSpy).toHaveBeenCalled();
 
   wrapper.unmount();
 });

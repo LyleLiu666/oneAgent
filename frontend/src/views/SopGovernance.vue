@@ -130,7 +130,7 @@ onMounted(async () => {
       <div class="flex items-start justify-between gap-4">
         <div>
           <h1 class="text-2xl font-bold text-surface-100">SOP 治理</h1>
-          <p class="text-sm text-surface-500">收件箱（上限 10）· 按稀缺性/know-how/证据排序</p>
+          <p class="text-sm text-surface-500">收件箱（上限 10）· 优先展示高价值建议</p>
         </div>
         <button
           data-testid="sop-governance-refresh"
@@ -169,6 +169,7 @@ onMounted(async () => {
               包含搁置
             </label>
             <button
+              v-if="sortedItems.length > 0"
               class="px-3 py-2 rounded-lg text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2"
               :disabled="loading"
               @click="loadMore"
@@ -182,7 +183,22 @@ onMounted(async () => {
         <div class="p-5 space-y-3">
           <ErrorBanner v-if="error" :error="error" title="操作失败" />
           <div v-if="loading" class="text-sm text-surface-500">加载中…</div>
-          <div v-else-if="sortedItems.length === 0" class="text-sm text-surface-500">暂无建议。</div>
+          <div v-else-if="sortedItems.length === 0" class="rounded-xl border border-surface-700/50 bg-surface-950/30 p-5">
+            <div class="text-sm text-surface-200 font-semibold">暂无建议</div>
+            <div class="mt-1 text-xs text-surface-500">
+              建议会从近期回执中自动提取；你可以稍后再试，或手动“加载更多”。
+            </div>
+            <div class="mt-4">
+              <button
+                class="px-3 py-2 rounded-lg text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 inline-flex items-center gap-2 disabled:opacity-50"
+                :disabled="loading"
+                @click="loadMore"
+              >
+                <Wand2 class="w-4 h-4" />
+                加载更多
+              </button>
+            </div>
+          </div>
 
           <div v-else class="space-y-3">
             <div v-for="s in sortedItems" :key="s.suggestion_id" class="glass-card p-4 space-y-3">

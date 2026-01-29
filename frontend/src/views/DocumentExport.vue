@@ -99,7 +99,7 @@ const run = async () => {
                 @click="chooseWorkspace"
               >
                 <FolderOpen class="w-4 h-4" />
-                选择
+                选择文件夹
               </button>
             </div>
           </div>

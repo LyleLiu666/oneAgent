@@ -104,6 +104,17 @@ const savePolicy = async () => {
   }
 }
 
+const formatPolicyJSON = () => {
+  error.value = null
+  try {
+    const parsed = JSON.parse(policyJSON.value || '{}')
+    policyJSON.value = JSON.stringify(parsed || {}, null, 2)
+    policyDirty.value = true
+  } catch (e: any) {
+    error.value = { message: `Invalid policy JSON: ${String(e?.message || e)}` }
+  }
+}
+
 const createToken = async () => {
   error.value = null
   const p = String(newTokenPrincipal.value || '').trim() || String(principalID.value || '').trim()
@@ -264,6 +275,14 @@ onMounted(async () => {
                 @input="policyDirty = true"
               />
               <div class="flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+                  :disabled="loading"
+                  @click="formatPolicyJSON"
+                >
+                  格式化
+                </button>
                 <button
                   class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
                   :disabled="loading || !policyDirty"

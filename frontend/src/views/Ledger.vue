@@ -484,6 +484,9 @@ onMounted(async () => {
                 <p class="text-sm font-semibold text-surface-100">
                   {{ selectedReceipt.summary }}
                 </p>
+                <p class="mt-1 text-[11px] text-surface-500 truncate">
+                  id={{ selectedReceipt.receipt_id.slice(0, 12) }}
+                </p>
                 <div
                   class="mt-2 flex flex-wrap gap-2 text-[11px] text-surface-500"
                 >

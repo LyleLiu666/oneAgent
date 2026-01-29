@@ -129,6 +129,23 @@ const sorted = computed(() => {
   return list;
 });
 
+const humanizeSkillID = (id: string) => {
+  const raw = String(id || "").trim();
+  if (!raw) return "";
+  return raw
+    .split(/[-_]+/g)
+    .filter(Boolean)
+    .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+};
+
+const displaySkillTitle = (s: SkillInfo) => {
+  const name = String(s?.name || "").trim();
+  if (name) return name;
+  const fallback = humanizeSkillID(String(s?.skill_id || ""));
+  return fallback || String(s?.skill_id || "");
+};
+
 const canEditSelected = computed(() => {
   if (!selected.value) return false;
   if (!selected.value.archivable) return false;
@@ -252,7 +269,7 @@ const effectiveCandidate = (g: SkillDuplicateGroup) => {
 
 const duplicateGroupTitle = (g: SkillDuplicateGroup) => {
   const c = effectiveCandidate(g);
-  return (c?.name || "").trim() || g.skill_id;
+  return (c?.name || "").trim() || humanizeSkillID(g.skill_id) || g.skill_id;
 };
 
 onMounted(async () => {
@@ -321,7 +338,7 @@ onMounted(async () => {
               >
                 <div class="min-w-0">
                   <p class="text-sm text-surface-100 font-semibold truncate">
-                    {{ s.name }}
+                    {{ displaySkillTitle(s) }}
                   </p>
                   <p class="text-xs text-surface-500 truncate">
                     {{ s.description }}
@@ -364,7 +381,7 @@ onMounted(async () => {
             <ErrorBanner v-if="selectedError" class="m-4" :error="selectedError" title="操作失败" />
 
             <div v-if="!selected" class="p-6 text-sm text-surface-500">
-              选择技能查看/编辑。
+              请选择技能查看/编辑。
             </div>
             <div v-else class="p-4 space-y-3">
               <div class="text-xs text-surface-500">

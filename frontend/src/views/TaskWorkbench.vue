@@ -14,6 +14,7 @@ import EventLogViewer from "@/components/EventLogViewer.vue";
 
 import {
   cancelTask,
+  chooseWorkspaceDir,
   createTask,
   getTask,
   getTaskAttemptArtifact,
@@ -60,6 +61,8 @@ const taskUpdates = ref<TaskUpdate[]>([]);
 const workspacesManual = ref<string[]>([]);
 const workspaceNew = ref("");
 const workspaceSelected = ref("");
+const workspaceChoosing = ref(false);
+const workspaceChooseError = ref<ParsedApiError | null>(null);
 
 const selectedTaskId = ref("");
 const selectedTask = ref<Task | null>(null);
@@ -69,6 +72,7 @@ const selectedError = ref<ParsedApiError | null>(null);
 
 const title = ref("");
 const prompt = ref("");
+const promptEl = ref<HTMLTextAreaElement | null>(null);
 const budgetTokens = ref("");
 const budgetCost = ref("");
 const submitting = ref(false);
@@ -217,6 +221,23 @@ const canResume = computed(() =>
 );
 
 const normalizeWorkspace = (ws: string) => String(ws || "").trim();
+
+const persistDefaultWorkspace = (ws: string) => {
+  const v = normalizeWorkspace(ws);
+  if (!v) return;
+  try {
+    localStorage.setItem("oneagent-workspace", v);
+  } catch {
+    // ignore
+  }
+};
+
+const focusComposer = () => {
+  const el = promptEl.value;
+  if (!el) return;
+  el.focus();
+  el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+};
 
 const sortTaskEventsNewestFirst = (events: TaskEvent[]) => {
   const safeEvents = Array.isArray(events) ? events : [];
@@ -464,6 +485,7 @@ const filteredTasks = computed(() => {
 
 const selectWorkspace = (ws: string) => {
   workspaceSelected.value = ws;
+  persistDefaultWorkspace(ws);
   if (
     selectedTask.value &&
     normalizeWorkspace(selectedTask.value.workspace) !== normalizeWorkspace(ws)
@@ -482,7 +504,30 @@ const addWorkspace = () => {
     saveManualWorkspaces();
   }
   workspaceNew.value = "";
-  if (!workspaceSelected.value) workspaceSelected.value = ws;
+  if (!workspaceSelected.value) {
+    workspaceSelected.value = ws;
+    persistDefaultWorkspace(ws);
+  }
+};
+
+const chooseWorkspace = async () => {
+  workspaceChooseError.value = null;
+  workspaceChoosing.value = true;
+  try {
+    const res: any = await chooseWorkspaceDir();
+    const ws = normalizeWorkspace(res?.path);
+    if (!ws) return;
+    if (!workspacesManual.value.includes(ws)) {
+      workspacesManual.value = [...workspacesManual.value, ws];
+      saveManualWorkspaces();
+    }
+    workspaceSelected.value = ws;
+    persistDefaultWorkspace(ws);
+  } catch (e: any) {
+    workspaceChooseError.value = parseApiError(e, "选择文件夹失败");
+  } finally {
+    workspaceChoosing.value = false;
+  }
 };
 
 const queueTask = async () => {
@@ -571,6 +616,7 @@ onMounted(async () => {
   await refreshTasks();
   if (!workspaceSelected.value) {
     workspaceSelected.value = allWorkspaces.value[0] || "";
+    persistDefaultWorkspace(workspaceSelected.value);
   }
 });
 
@@ -671,6 +717,16 @@ onUnmounted(() => {
                   placeholder="/path/to/workspace"
                 />
                 <button
+                  data-testid="workspace-browse"
+                  type="button"
+                  class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-800/60 text-surface-300 hover:bg-surface-700/60 inline-flex items-center gap-2 disabled:opacity-50 transition-colors"
+                  :disabled="workspaceChoosing"
+                  @click="chooseWorkspace"
+                >
+                  <Folder class="w-4 h-4" />
+                  选择文件夹
+                </button>
+                <button
                   data-testid="workspace-add"
                   class="px-3 py-2 rounded-xl text-sm font-medium bg-primary-500/15 text-primary-300 hover:bg-primary-500/20 inline-flex items-center gap-2"
                   @click="addWorkspace"
@@ -678,6 +734,7 @@ onUnmounted(() => {
                   <Plus class="w-4 h-4" />
                 </button>
               </div>
+              <ErrorBanner v-if="workspaceChooseError" class="mt-3" :error="workspaceChooseError" title="选择失败" />
             </div>
 
             <div class="max-h-[30vh] overflow-y-auto px-2 pb-2">
@@ -815,6 +872,7 @@ onUnmounted(() => {
               <div class="grid grid-cols-1 gap-3">
                 <textarea
                   data-testid="workbench-prompt"
+                  ref="promptEl"
                   v-model="prompt"
                   rows="4"
                   class="px-4 py-3 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-200 text-sm focus:ring-2 focus:ring-primary-500/30 focus:border-primary-500/30 transition-all resize-none"
@@ -950,8 +1008,32 @@ onUnmounted(() => {
 
             <ErrorBanner v-if="selectedError" class="m-4" :error="selectedError" title="加载失败" />
 
-            <div v-if="!selectedTask" class="p-8 text-sm text-surface-500 text-center">
-              选择任务查看详情
+            <div v-if="!selectedTask" class="p-6">
+              <div class="rounded-2xl border border-surface-800/60 bg-surface-950/30 p-6 text-center">
+                <div class="text-sm font-semibold text-surface-200">
+                  还没有选择任务
+                </div>
+                <div class="mt-1 text-xs text-surface-500">
+                  你可以从左侧选择一个任务，或先创建一个新任务。
+                </div>
+                <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="workbench-empty-focus"
+                    class="px-3 py-2 rounded-xl text-xs font-medium bg-primary-500/20 text-primary-200 hover:bg-primary-500/30"
+                    @click="focusComposer"
+                  >
+                    去新建任务
+                  </button>
+                  <button
+                    type="button"
+                    class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-800/60 text-surface-200 hover:bg-surface-700/60"
+                    @click="refreshTasks"
+                  >
+                    刷新列表
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div v-else class="p-4 pt-2">
