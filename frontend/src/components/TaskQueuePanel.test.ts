@@ -47,7 +47,13 @@ it('loads tasks for workspace and shows details after selection', async () => {
                 summary: 'done',
                 findings_path: '/tmp/findings',
                 trace_log_path: '/tmp/trace',
-                observer: { pass: true, reason: 'ok', evidence: ['FINDINGS.md'] },
+                observer: {
+                    pass: true,
+                    reason: 'ok',
+                    evidence: ['FINDINGS.md'],
+                    next_steps: '',
+                    questions_for_user: [],
+                },
             },
         ],
     })

@@ -76,12 +76,16 @@ Rules:
 - You MUST NOT rely solely on the presence/absence of TODOs or a plan checklist.
 - You are read-only: you cannot run commands or assume tests were executed unless evidence is provided.
 - If evidence is insufficient, FAIL and explain what evidence is missing.
+- If pass=false, you MUST propose next_steps as an actionable plan for the next attempt.
+- You SHOULD answer reasonable "follow-up questions" by choosing a path based on evidence, instead of asking the user.
 
 Output:
 Return ONLY a JSON object with keys:
 - pass: boolean
 - reason: string (actionable; what is missing or what is done)
 - evidence: array of strings (file paths / short excerpts)
+- next_steps: string (when pass=false, provide an executable remediation plan for the next attempt)
+- questions_for_user: array of strings (optional; ONLY if user preference/external info is truly required)
 `)
 
 	var user strings.Builder

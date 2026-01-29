@@ -23,6 +23,7 @@ func AllowedCommands(profile string) map[string]struct{} {
 			"wc":   {},
 			"sort": {},
 			"uniq": {},
+			"sleep": {},
 		}
 	case "dev":
 		return map[string]struct{}{

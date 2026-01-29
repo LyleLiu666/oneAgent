@@ -359,12 +359,15 @@ export interface TaskLimits {
   max_runtime_seconds?: number;
   max_total_tokens?: number;
   max_cost_usd?: number;
+  max_auto_attempts?: number;
 }
 
 export interface TaskObserverDecision {
   pass: boolean;
   reason?: string;
   evidence?: string[];
+  next_steps?: string;
+  questions_for_user?: string[];
 }
 
 export type ToolPolicyEffect = "allow" | "deny";
@@ -404,6 +407,7 @@ export interface TaskAttempt {
   started_at?: string;
   finished_at?: string;
   resumed_from_attempt_id?: string;
+  auto?: boolean;
   principal_id?: string;
   policy_snapshot?: ToolPolicySnapshot;
   run_id?: string;

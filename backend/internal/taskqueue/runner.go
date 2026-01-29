@@ -235,6 +235,21 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 }
 
 func (r *TaskRunner) Resume(taskID string, reviewNotes string) (Task, error) {
+	return r.enqueueAttempt(taskID, reviewNotes, "resume", false)
+}
+
+func truncateReviewNotes(reviewNotes string) string {
+	notes := strings.TrimSpace(reviewNotes)
+	if notes == "" {
+		return ""
+	}
+	if len([]rune(notes)) > 2000 {
+		return string([]rune(notes)[:2000]) + "…"
+	}
+	return notes
+}
+
+func (r *TaskRunner) enqueueAttempt(taskID string, reviewNotes string, source string, auto bool) (Task, error) {
 	if r == nil || r.Store == nil {
 		return Task{}, errors.New("runner not initialized")
 	}
@@ -243,6 +258,8 @@ func (r *TaskRunner) Resume(taskID string, reviewNotes string) (Task, error) {
 		newAttemptID string
 		fromAttempt  string
 	)
+
+	normalizedNotes := truncateReviewNotes(reviewNotes)
 
 	updated, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
 		latest := tk.LatestAttempt()
@@ -266,8 +283,9 @@ func (r *TaskRunner) Resume(taskID string, reviewNotes string) (Task, error) {
 			Status:               AttemptQueued,
 			CreatedAt:            now,
 			ResumedFromAttemptID: latest.ID,
+			Auto:                 auto,
 			PrincipalID:          tk.UserID,
-			ReviewNotes:          strings.TrimSpace(reviewNotes),
+			ReviewNotes:          normalizedNotes,
 		})
 		return nil
 	})
@@ -275,23 +293,20 @@ func (r *TaskRunner) Resume(taskID string, reviewNotes string) (Task, error) {
 		return Task{}, err
 	}
 
-	notes := strings.TrimSpace(reviewNotes)
-	if len([]rune(notes)) > 2000 {
-		notes = string([]rune(notes)[:2000]) + "…"
-	}
-
 	data := map[string]any{
 		"resumed_from_attempt_id": fromAttempt,
+		"source":                 strings.TrimSpace(source),
+		"auto":                   auto,
 	}
-	if strings.TrimSpace(notes) != "" {
-		data["review_notes"] = notes
+	if strings.TrimSpace(normalizedNotes) != "" {
+		data["review_notes"] = normalizedNotes
 	}
 
 	_ = r.Store.AppendEvent(Event{
 		TaskID:    taskID,
 		AttemptID: newAttemptID,
 		Type:      "attempt.queued",
-		Message:   "Attempt queued via resume",
+		Message:   "Attempt queued",
 		Data:      data,
 	})
 
@@ -404,6 +419,8 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	finishedAt := Now()
 	finalStatus := AttemptFailed
 	finalError := ""
+	observerFailed := false
+	var decision ObserverDecision
 
 	if runErr != nil {
 		finalError = runErr.Error()
@@ -418,7 +435,7 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 			finalStatus = AttemptFailed
 		}
 	} else {
-		decision, err := r.DecideOutcome(attemptCtx, updated, ranAttempt)
+		decision, err = r.DecideOutcome(attemptCtx, updated, ranAttempt)
 		if err != nil {
 			finalStatus = AttemptFailed
 			finalError = err.Error()
@@ -426,6 +443,7 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 			finalStatus = AttemptSucceeded
 		} else {
 			finalStatus = AttemptFailed
+			observerFailed = true
 		}
 		ranAttempt.Observer = &decision
 
@@ -448,14 +466,15 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 		ranAttempt.StartedAt = &startedAt
 	}
 
-	if _, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
+	saved, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
 		a := tk.LatestAttempt()
 		if a == nil || a.ID != attemptID {
 			return nil
 		}
 		*a = ranAttempt
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return
 	}
 
@@ -469,6 +488,37 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 			"error":  finalError,
 		},
 	})
+
+	if observerFailed {
+		latest := saved.LatestAttempt()
+		if latest == nil || latest.ID != attemptID || latest.Status != AttemptFailed {
+			return
+		}
+		if strings.TrimSpace(decision.NextSteps) == "" {
+			return
+		}
+		if len(decision.QuestionsForUser) > 0 {
+			return
+		}
+
+		autoAttempts := 0
+		for _, a := range saved.Attempts {
+			if a.Auto {
+				autoAttempts++
+			}
+		}
+
+		effectiveLimits := ResolveLimits(saved.Limits)
+		if effectiveLimits.MaxAutoAttempts <= 0 {
+			return
+		}
+		if autoAttempts >= effectiveLimits.MaxAutoAttempts {
+			return
+		}
+
+		reviewNotes := strings.TrimSpace(decision.NextSteps)
+		_, _ = r.enqueueAttempt(taskID, reviewNotes, "observer", true)
+	}
 }
 
 func findAttemptByID(attempts []Attempt, id string) *Attempt {

@@ -552,6 +552,128 @@ func TestTaskRunner_BudgetExceeded_IsTerminalAndResumable(t *testing.T) {
 	waitForStatus(t, store, task.ID, AttemptSucceeded, 2*time.Second)
 }
 
+func TestTaskRunner_ObserverFail_AutoFollowUp_SucceedsOnSecondAttempt(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{MaxAutoAttempts: 1})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	exec := &execStub{
+		t:            t,
+		artifactsDir: t.TempDir(),
+	}
+
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			if strings.TrimSpace(attempt.ResumedFromAttemptID) == "" {
+				return ObserverDecision{
+					Pass:      false,
+					Reason:    "missing requirement",
+					Evidence:  []string{"FINDINGS.md"},
+					NextSteps: "apply the missing change and rerun tests",
+				}, nil
+			}
+			return ObserverDecision{Pass: true, Reason: "ok", Evidence: []string{"FINDINGS.md"}}, nil
+		},
+		ExecuteAttempt: exec.Execute,
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	_ = runner.Enqueue(task.ID)
+	waitForStatus(t, store, task.ID, AttemptSucceeded, 2*time.Second)
+
+	updated, err := store.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if len(updated.Attempts) != 2 {
+		t.Fatalf("expected 2 attempts, got %d", len(updated.Attempts))
+	}
+	if !updated.Attempts[1].Auto {
+		t.Fatalf("expected follow-up attempt to be auto")
+	}
+	if strings.TrimSpace(updated.Attempts[1].ReviewNotes) == "" {
+		t.Fatalf("expected follow-up attempt to include review_notes")
+	}
+
+	evs, err := store.ReadEvents(task.ID)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	found := false
+	for _, ev := range evs {
+		if ev.AttemptID == updated.Attempts[1].ID && ev.Type == "attempt.queued" {
+			if v, ok := ev.Data["source"]; ok && v == "observer" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected attempt.queued event to include source=observer")
+	}
+}
+
+func TestTaskRunner_ObserverFail_AutoFollowUp_StopsAfterCap(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{MaxAutoAttempts: 1})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	exec := &execStub{
+		t:            t,
+		artifactsDir: t.TempDir(),
+	}
+
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{
+				Pass:      false,
+				Reason:    "still missing",
+				Evidence:  []string{"FINDINGS.md"},
+				NextSteps: "do more work",
+			}, nil
+		},
+		ExecuteAttempt: exec.Execute,
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	_ = runner.Enqueue(task.ID)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		cur, err := store.GetTask(task.ID)
+		if err != nil {
+			t.Fatalf("GetTask: %v", err)
+		}
+		if len(cur.Attempts) == 2 && cur.LatestAttempt() != nil && cur.LatestAttempt().Status == AttemptFailed {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cur, _ := store.GetTask(task.ID)
+	t.Fatalf("timeout waiting for capped auto-follow-up failure; got attempts=%d latest=%+v", len(cur.Attempts), cur.LatestAttempt())
+}
+
 func TestTaskRunner_AttemptResult_DiffArtifactsPropagate(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

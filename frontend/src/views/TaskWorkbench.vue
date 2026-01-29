@@ -807,6 +807,30 @@ onUnmounted(() => {
                 {{ latestAttempt.observer.reason }}
               </div>
               <div
+                v-if="
+                  latestAttempt.observer &&
+                  !latestAttempt.observer.pass &&
+                  latestAttempt.observer.next_steps
+                "
+                class="text-xs text-surface-400 mt-2 whitespace-pre-wrap"
+              >
+                下一步：{{ latestAttempt.observer.next_steps }}
+              </div>
+              <div
+                v-if="
+                  latestAttempt.observer &&
+                  !latestAttempt.observer.pass &&
+                  latestAttempt.observer.questions_for_user &&
+                  latestAttempt.observer.questions_for_user.length
+                "
+                class="text-xs text-surface-400 mt-2"
+              >
+                需要你确认：
+                <span class="whitespace-pre-wrap">{{
+                  latestAttempt.observer.questions_for_user.join("\n")
+                }}</span>
+              </div>
+              <div
                 v-if="detailsAdvancedOpen"
                 data-testid="workbench-details-advanced"
                 class="mt-2 space-y-1"

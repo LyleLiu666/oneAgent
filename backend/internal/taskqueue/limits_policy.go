@@ -18,11 +18,15 @@ type LimitsPolicy struct {
 
 	MaxTotalTokensCap int
 	MaxCostUSDCap     float64
+
+	DefaultMaxAutoAttempts int
+	MaxAutoAttemptsCap     int
 }
 
 const (
 	defaultMaxSteps          = 2000
 	defaultMaxRuntimeSeconds = 6 * 60 * 60
+	defaultMaxAutoAttempts   = 3
 )
 
 func LimitsPolicyFromEnv() LimitsPolicy {
@@ -35,6 +39,8 @@ func LimitsPolicyFromEnv() LimitsPolicy {
 		DefaultMaxCostUSD:        0,
 		MaxTotalTokensCap:        0,
 		MaxCostUSDCap:            0,
+		DefaultMaxAutoAttempts:   defaultMaxAutoAttempts,
+		MaxAutoAttemptsCap:       0,
 	}
 
 	if v := envInt("ONEAGENT_TASK_DEFAULT_MAX_STEPS"); v > 0 {
@@ -61,6 +67,12 @@ func LimitsPolicyFromEnv() LimitsPolicy {
 	if v := envFloat("ONEAGENT_TASK_MAX_COST_USD_CAP"); v > 0 {
 		p.MaxCostUSDCap = v
 	}
+	if v, ok := envIntOptional("ONEAGENT_TASK_DEFAULT_MAX_AUTO_ATTEMPTS"); ok && v >= 0 {
+		p.DefaultMaxAutoAttempts = v
+	}
+	if v := envInt("ONEAGENT_TASK_MAX_AUTO_ATTEMPTS_CAP"); v > 0 {
+		p.MaxAutoAttemptsCap = v
+	}
 
 	return p
 }
@@ -80,6 +92,12 @@ func ApplyLimitsPolicy(in Limits, p LimitsPolicy) Limits {
 	if out.MaxCostUSD <= 0 && p.DefaultMaxCostUSD > 0 {
 		out.MaxCostUSD = p.DefaultMaxCostUSD
 	}
+	if out.MaxAutoAttempts < 0 {
+		out.MaxAutoAttempts = 0
+	}
+	if out.MaxAutoAttempts == 0 && p.DefaultMaxAutoAttempts >= 0 {
+		out.MaxAutoAttempts = p.DefaultMaxAutoAttempts
+	}
 
 	if p.MaxStepsCap > 0 && out.MaxSteps > p.MaxStepsCap {
 		out.MaxSteps = p.MaxStepsCap
@@ -92,6 +110,9 @@ func ApplyLimitsPolicy(in Limits, p LimitsPolicy) Limits {
 	}
 	if p.MaxCostUSDCap > 0 && out.MaxCostUSD > p.MaxCostUSDCap {
 		out.MaxCostUSD = p.MaxCostUSDCap
+	}
+	if p.MaxAutoAttemptsCap > 0 && out.MaxAutoAttempts > p.MaxAutoAttemptsCap {
+		out.MaxAutoAttempts = p.MaxAutoAttemptsCap
 	}
 
 	// Absolute minimums to avoid "instant cancel" surprises.
@@ -106,6 +127,9 @@ func ApplyLimitsPolicy(in Limits, p LimitsPolicy) Limits {
 	}
 	if out.MaxCostUSD < 0 {
 		out.MaxCostUSD = 0
+	}
+	if out.MaxAutoAttempts < 0 {
+		out.MaxAutoAttempts = 0
 	}
 
 	return out
@@ -125,6 +149,18 @@ func envInt(key string) int {
 		return 0
 	}
 	return v
+}
+
+func envIntOptional(key string) (int, bool) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 func envFloat(key string) float64 {

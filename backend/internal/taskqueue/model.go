@@ -25,12 +25,15 @@ type Limits struct {
 	MaxRuntimeSeconds int     `json:"max_runtime_seconds,omitempty"`
 	MaxTotalTokens    int     `json:"max_total_tokens,omitempty"`
 	MaxCostUSD        float64 `json:"max_cost_usd,omitempty"`
+	MaxAutoAttempts   int     `json:"max_auto_attempts,omitempty"`
 }
 
 type ObserverDecision struct {
-	Pass     bool     `json:"pass"`
-	Reason   string   `json:"reason,omitempty"`
-	Evidence []string `json:"evidence,omitempty"`
+	Pass             bool     `json:"pass"`
+	Reason           string   `json:"reason,omitempty"`
+	Evidence         []string `json:"evidence,omitempty"`
+	NextSteps        string   `json:"next_steps,omitempty"`
+	QuestionsForUser []string `json:"questions_for_user,omitempty"`
 }
 
 type Attempt struct {
@@ -43,6 +46,7 @@ type Attempt struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 
 	ResumedFromAttemptID string `json:"resumed_from_attempt_id,omitempty"`
+	Auto                bool   `json:"auto,omitempty"`
 
 	PrincipalID    string                `json:"principal_id,omitempty"`
 	PolicySnapshot *permissions.Snapshot `json:"policy_snapshot,omitempty"`

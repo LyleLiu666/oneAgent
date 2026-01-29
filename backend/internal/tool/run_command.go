@@ -147,16 +147,22 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		profile := CommandProfile(dec, "dev")
-		if err := permissions.ValidateCommand(profile, command, dec.Constraints.Allowlist); err != nil {
-			return nil, err
-		}
 		mode := strings.ToLower(strings.TrimSpace(SandboxMode(dec, "none")))
 		if mode == "" {
 			mode = "none"
 		}
 		if mode != "none" && mode != "docker" {
 			return nil, errors.New("unsupported sandbox_mode (expected none|docker)")
+		}
+		profile := CommandProfile(dec, "dev")
+		allowlist := dec.Constraints.Allowlist
+		if mode == "none" {
+			// Safety invariant: without a hard sandbox boundary, command tools MUST degrade to readonly.
+			profile = "readonly"
+			allowlist = nil
+		}
+		if err := permissions.ValidateCommand(profile, command, allowlist); err != nil {
+			return nil, err
 		}
 		root, err := resolveWorkspaceRoot(ctx)
 		if err != nil {

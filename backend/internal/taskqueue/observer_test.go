@@ -43,7 +43,7 @@ func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	}
 
 	client := &stubLLMClient{
-		out: `{"pass":true,"reason":"done","evidence":["FINDINGS.md"]}`,
+		out: `{"pass":true,"reason":"done","evidence":["FINDINGS.md"],"next_steps":"","questions_for_user":[]}`,
 	}
 
 	obs := &OutcomeObserver{Client: client}
@@ -63,6 +63,9 @@ func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	if !got.Pass || got.Reason != "done" || len(got.Evidence) != 1 {
 		t.Fatalf("unexpected decision: %+v", got)
 	}
+	if strings.TrimSpace(got.NextSteps) != "" {
+		t.Fatalf("expected empty next_steps for pass decision, got %q", got.NextSteps)
+	}
 	if len(client.lastMessages) != 2 || client.lastMessages[0].Role != "system" || client.lastMessages[1].Role != "user" {
 		t.Fatalf("unexpected messages: %+v", client.lastMessages)
 	}
@@ -73,7 +76,7 @@ func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 
 func TestOutcomeObserver_Decide_ParsesJSONFromWrappedOutput(t *testing.T) {
 	client := &stubLLMClient{
-		out: "OK\n```json\n{\"pass\":false,\"reason\":\"missing evidence\",\"evidence\":[]}\n```\n",
+		out: "OK\n```json\n{\"pass\":false,\"reason\":\"missing evidence\",\"evidence\":[],\"next_steps\":\"run tests and fix issues\",\"questions_for_user\":[\"Should we prioritize speed or correctness?\"]}\n```\n",
 	}
 	obs := &OutcomeObserver{Client: client}
 	got, err := obs.Decide(context.Background(), ObserveInput{
@@ -87,6 +90,12 @@ func TestOutcomeObserver_Decide_ParsesJSONFromWrappedOutput(t *testing.T) {
 	}
 	if got.Pass || got.Reason != "missing evidence" {
 		t.Fatalf("unexpected decision: %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) == "" {
+		t.Fatalf("expected next_steps for fail decision")
+	}
+	if len(got.QuestionsForUser) != 1 {
+		t.Fatalf("expected questions_for_user, got %+v", got.QuestionsForUser)
 	}
 }
 

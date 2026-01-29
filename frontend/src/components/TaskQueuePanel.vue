@@ -492,6 +492,27 @@ onUnmounted(() => {
                   >
                     {{ latestAttempt.observer.reason }}
                   </p>
+                  <p
+                    v-if="
+                      !latestAttempt.observer.pass &&
+                      latestAttempt.observer.next_steps
+                    "
+                    class="text-surface-400 whitespace-pre-wrap"
+                  >
+                    下一步：{{ latestAttempt.observer.next_steps }}
+                  </p>
+                  <p
+                    v-if="
+                      !latestAttempt.observer.pass &&
+                      latestAttempt.observer.questions_for_user &&
+                      latestAttempt.observer.questions_for_user.length
+                    "
+                    class="text-surface-400 whitespace-pre-wrap"
+                  >
+                    需要你确认：{{
+                      latestAttempt.observer.questions_for_user.join("\n")
+                    }}
+                  </p>
                 </div>
 
                 <div v-if="latestAttempt?.findings_path" class="text-xs">
