@@ -11,6 +11,6 @@
 - [x] 2.2 Frontend: view tests for error banner + key empty states (do not couple to UI text)
 
 ## 3. Validation
-- [ ] 3.1 Run `openspec validate update-ux-error-surface --strict --no-interactive`
-- [ ] 3.2 Run `go test ./...`
-- [ ] 3.3 Run frontend tests (e.g. `pnpm test`)
+- [x] 3.1 Run `openspec validate update-ux-error-surface --strict --no-interactive`
+- [x] 3.2 Run `go test ./...`
+- [x] 3.3 Run frontend tests (e.g. `pnpm test`)
