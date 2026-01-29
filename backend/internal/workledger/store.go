@@ -336,11 +336,20 @@ func buildReceiptMarkdown(r Receipt) string {
 	b.WriteString(strings.TrimSpace(r.Summary))
 	b.WriteString("\n\n")
 
-	if strings.TrimSpace(r.Artifacts.FindingsPath) != "" || strings.TrimSpace(r.Artifacts.TraceLogPath) != "" || strings.TrimSpace(r.Artifacts.TestReportPath) != "" || strings.TrimSpace(r.Artifacts.DiffPatchPath) != "" || strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" || strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" || strings.TrimSpace(r.Artifacts.DiffRef) != "" {
-		b.WriteString("## Artifacts\n\n")
-		if strings.TrimSpace(r.Artifacts.FindingsPath) != "" {
-			b.WriteString("- findings_path: ")
-			b.WriteString(strings.TrimSpace(r.Artifacts.FindingsPath))
+		if strings.TrimSpace(r.Artifacts.FindingsPath) != "" ||
+			strings.TrimSpace(r.Artifacts.TraceLogPath) != "" ||
+			strings.TrimSpace(r.Artifacts.TestReportPath) != "" ||
+			strings.TrimSpace(r.Artifacts.DiffPatchPath) != "" ||
+			strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" ||
+			strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" ||
+			strings.TrimSpace(r.Artifacts.DiffRef) != "" ||
+			strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" ||
+			strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" ||
+			strings.TrimSpace(r.Artifacts.BaseRef) != "" {
+			b.WriteString("## Artifacts\n\n")
+			if strings.TrimSpace(r.Artifacts.FindingsPath) != "" {
+				b.WriteString("- findings_path: ")
+				b.WriteString(strings.TrimSpace(r.Artifacts.FindingsPath))
 			b.WriteString("\n")
 		}
 		if strings.TrimSpace(r.Artifacts.TraceLogPath) != "" {
@@ -368,13 +377,28 @@ func buildReceiptMarkdown(r Receipt) string {
 			b.WriteString(strings.TrimSpace(r.Artifacts.ReviewCommentsPath))
 			b.WriteString("\n")
 		}
-		if strings.TrimSpace(r.Artifacts.DiffRef) != "" {
-			b.WriteString("- diff_ref: ")
-			b.WriteString(strings.TrimSpace(r.Artifacts.DiffRef))
+			if strings.TrimSpace(r.Artifacts.DiffRef) != "" {
+				b.WriteString("- diff_ref: ")
+				b.WriteString(strings.TrimSpace(r.Artifacts.DiffRef))
+				b.WriteString("\n")
+			}
+			if strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" {
+				b.WriteString("- worktree_root: ")
+				b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeRoot))
+				b.WriteString("\n")
+			}
+			if strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" {
+				b.WriteString("- base_commit_sha: ")
+				b.WriteString(strings.TrimSpace(r.Artifacts.BaseCommitSHA))
+				b.WriteString("\n")
+			}
+			if strings.TrimSpace(r.Artifacts.BaseRef) != "" {
+				b.WriteString("- base_ref: ")
+				b.WriteString(strings.TrimSpace(r.Artifacts.BaseRef))
+				b.WriteString("\n")
+			}
 			b.WriteString("\n")
 		}
-		b.WriteString("\n")
-	}
 
 	if r.Signals.DurationMs > 0 || r.Signals.TotalTokens > 0 || r.Signals.Calls > 0 || r.Signals.CostUSD > 0 {
 		b.WriteString("## Signals\n\n")

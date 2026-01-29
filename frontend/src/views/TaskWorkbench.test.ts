@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { shallowMount } from "@vue/test-utils";
 
 import * as apiClient from "@/api/client";
@@ -20,6 +20,11 @@ vi.mock("@/api/client", () => ({
 }));
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 
 it("loads tasks and groups by workspace", async () => {
   vi.stubGlobal("localStorage", {
@@ -83,6 +88,76 @@ it("uses a wider container to reduce side whitespace", async () => {
   await flushPromises();
 
   expect(wrapper.find(".max-w-screen-2xl").exists()).toBe(true);
+
+  wrapper.unmount();
+});
+
+it("shows worktree evidence in advanced tab when present", async () => {
+  vi.stubGlobal("localStorage", {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  (apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "local",
+      workspace: "/tmp/wsA",
+      title: "A1",
+      prompt: "do A",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: "a1", status: "succeeded", created_at: new Date().toISOString() },
+      ],
+    },
+  ]);
+  (apiClient.getTask as any).mockResolvedValueOnce({
+    id: "t1",
+    user_id: "local",
+    workspace: "/tmp/wsA",
+    title: "A1",
+    prompt: "do A",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      {
+        id: "a1",
+        status: "succeeded",
+        created_at: new Date().toISOString(),
+        worktree_root: "/tmp/wsA/.oneagent-worktree/a1",
+        base_ref: "main",
+        base_commit_sha: "abc123",
+      },
+    ],
+  });
+  (apiClient.getTaskEvents as any).mockResolvedValueOnce([]);
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  await wrapper.get('[data-testid="workbench-task-item"]').trigger("click");
+  await flushPromises();
+
+  await wrapper
+    .get('[data-testid="workbench-details-advanced-toggle"]')
+    .trigger("click");
+  await flushPromises();
+
+  expect(
+    wrapper.find('[data-testid="workbench-worktree-evidence"]').exists(),
+  ).toBe(true);
+  expect(wrapper.get('[data-testid="workbench-worktree-root"]').text()).toBe(
+    "/tmp/wsA/.oneagent-worktree/a1",
+  );
+  expect(wrapper.get('[data-testid="workbench-base-ref"]').text()).toBe("main");
+  expect(wrapper.get('[data-testid="workbench-base-commit-sha"]').text()).toBe(
+    "abc123",
+  );
 
   wrapper.unmount();
 });
@@ -422,10 +497,12 @@ it("shows newest events first", async () => {
   await eventsTab!.trigger("click");
   await flushPromises();
 
-  const text = wrapper.text();
-  expect(text).toContain("old event");
-  expect(text).toContain("new event");
-  expect(text.indexOf("new event")).toBeLessThan(text.indexOf("old event"));
+  const viewer = wrapper.findComponent({ name: "EventLogViewer" });
+  expect(viewer.exists()).toBe(true);
+  const evs = viewer.props("events") as any[];
+  expect(evs).toHaveLength(2);
+  expect(evs[0].message).toBe("new event");
+  expect(evs[1].message).toBe("old event");
 
   wrapper.unmount();
 });

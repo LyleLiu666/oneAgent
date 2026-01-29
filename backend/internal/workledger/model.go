@@ -26,6 +26,10 @@ type ReceiptArtifacts struct {
 	ChangedFilesPath   string `json:"changed_files_path,omitempty"`
 	ReviewCommentsPath string `json:"review_comments_path,omitempty"`
 	DiffRef            string `json:"diff_ref,omitempty"`
+
+	WorktreeRoot  string `json:"worktree_root,omitempty"`
+	BaseCommitSHA string `json:"base_commit_sha,omitempty"`
+	BaseRef       string `json:"base_ref,omitempty"`
 }
 
 type ReceiptSignals struct {

@@ -9,6 +9,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     ChatBox: typeof import('./components/ChatBox.vue')['default']
     ChatHistoryList: typeof import('./components/ChatHistoryList.vue')['default']
+    EventLogViewer: typeof import('./components/EventLogViewer.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Sidebar: typeof import('./components/Sidebar.vue')['default']

@@ -34,12 +34,13 @@ func TestLoad_MissingFileReturnsFoundFalse(t *testing.T) {
 func TestLoad_ValidConfigParses(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	writeProjectJSON(t, workspaceRoot, `{
-		"setup_script":"echo setup",
-		"test_script":"echo test",
-		"cleanup_script":"echo cleanup",
-		"dev_server_script":"echo dev",
-		"copy_files":[".env","config/.env.local"]
-	}`)
+			"setup_script":"echo setup",
+			"test_script":"echo test",
+			"cleanup_script":"echo cleanup",
+			"dev_server_script":"echo dev",
+			"copy_files":[".env","config/.env.local"],
+			"attempt_execution_mode":"worktree"
+		}`)
 
 	cfg, found, err := Load(workspaceRoot)
 	if err != nil {
@@ -50,6 +51,9 @@ func TestLoad_ValidConfigParses(t *testing.T) {
 	}
 	if cfg.SetupScript != "echo setup" || cfg.TestScript != "echo test" || cfg.CleanupScript != "echo cleanup" || cfg.DevServerScript != "echo dev" {
 		t.Fatalf("unexpected scripts: %+v", cfg)
+	}
+	if cfg.AttemptExecutionMode != "worktree" {
+		t.Fatalf("unexpected attempt_execution_mode: %+v", cfg)
 	}
 	if len(cfg.CopyFiles) != 2 || cfg.CopyFiles[0] != ".env" || cfg.CopyFiles[1] != "config/.env.local" {
 		t.Fatalf("unexpected copy_files: %+v", cfg.CopyFiles)
@@ -106,4 +110,3 @@ func TestLoad_CopyFilesAbsolutePathIsRejected(t *testing.T) {
 		t.Fatalf("expected actionable error mentioning path and copy_files, got: %q", msg)
 	}
 }
-

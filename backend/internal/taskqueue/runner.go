@@ -26,6 +26,10 @@ type AttemptResult struct {
 	ChangedFilesPath   string
 	ReviewCommentsPath string
 
+	WorktreeRoot  string
+	BaseCommitSHA string
+	BaseRef       string
+
 	ProjectConfigPath    string
 	CopyFilesLogPath     string
 	SetupScriptLogPath   string
@@ -406,11 +410,14 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
 	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
 	ranAttempt.TestReportPath = strings.TrimSpace(result.TestReportPath)
-	ranAttempt.DiffPatchPath = strings.TrimSpace(result.DiffPatchPath)
-	ranAttempt.ChangedFilesPath = strings.TrimSpace(result.ChangedFilesPath)
-	ranAttempt.ReviewCommentsPath = strings.TrimSpace(result.ReviewCommentsPath)
-	ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
-	ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
+		ranAttempt.DiffPatchPath = strings.TrimSpace(result.DiffPatchPath)
+		ranAttempt.ChangedFilesPath = strings.TrimSpace(result.ChangedFilesPath)
+		ranAttempt.ReviewCommentsPath = strings.TrimSpace(result.ReviewCommentsPath)
+		ranAttempt.WorktreeRoot = strings.TrimSpace(result.WorktreeRoot)
+		ranAttempt.BaseCommitSHA = strings.TrimSpace(result.BaseCommitSHA)
+		ranAttempt.BaseRef = strings.TrimSpace(result.BaseRef)
+		ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
+		ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
 	ranAttempt.SetupScriptLogPath = strings.TrimSpace(result.SetupScriptLogPath)
 	ranAttempt.TestScriptLogPath = strings.TrimSpace(result.TestScriptLogPath)
 	ranAttempt.CleanupScriptLogPath = strings.TrimSpace(result.CleanupScriptLogPath)

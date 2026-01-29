@@ -117,6 +117,12 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/approvals/:id/approve", handler.ApproveToolApproval)
 		api.POST("/approvals/:id/deny", handler.DenyToolApproval)
 
+		// MCP server (local-only by default).
+		mcp := api.Group("/mcp")
+		mcp.Use(middleware.RequireLoopback(rt.Config.MCPAllowRemote, "MCP server", "MCP_ALLOW_REMOTE"))
+		mcp.POST("", handler.HandleMCP)
+		mcp.GET("/events/tasks", handler.StreamMCPTaskEvents)
+
 		// Document export (pandoc).
 		api.POST("/documents/export", handler.ExportDocument)
 

@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { Loader2, RefreshCw, X, RotateCcw, ListTodo } from "lucide-vue-next";
 
+import EventLogViewer from "@/components/EventLogViewer.vue";
+
 import {
   cancelTask,
   createTask,
@@ -640,25 +642,13 @@ onUnmounted(() => {
                   >
                     事件
                   </p>
-                  <div class="mt-2 max-h-40 overflow-y-auto pr-1 space-y-1">
-                    <div
-                      v-for="(ev, idx) in selectedEvents"
-                      :key="idx"
-                      class="text-[11px] text-surface-300 rounded border border-surface-800/60 bg-surface-950/40 px-2 py-1"
-                    >
-                      <span class="text-surface-500">{{ ev.ts }}</span>
-                      <span class="text-surface-500"> · </span>
-                      <span class="text-surface-200">{{ ev.type }}</span>
-                      <span v-if="ev.message" class="text-surface-400">
-                        — {{ ev.message }}</span
-                      >
-                    </div>
-                    <div
-                      v-if="selectedEvents.length === 0"
-                      class="text-xs text-surface-500"
-                    >
-                      暂无事件。
-                    </div>
+                  <div class="mt-2 max-h-40 overflow-y-auto pr-1">
+                    <EventLogViewer
+                      :events="selectedEvents"
+                      :loading="selectedLoading && selectedEvents.length === 0"
+                      :refreshing="selectedLoading && selectedEvents.length > 0"
+                      compact
+                    />
                   </div>
                 </div>
               </div>

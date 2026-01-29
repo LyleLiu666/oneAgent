@@ -22,6 +22,8 @@ type ProjectConfig struct {
 	CleanupScript   string   `json:"cleanup_script,omitempty"`
 	DevServerScript string   `json:"dev_server_script,omitempty"`
 	CopyFiles       []string `json:"copy_files,omitempty"`
+
+	AttemptExecutionMode string `json:"attempt_execution_mode,omitempty"`
 }
 
 // Load discovers and parses <workspace>/.oneagent/project.json.
@@ -60,6 +62,13 @@ func Load(workspaceRoot string) (cfg ProjectConfig, found bool, err error) {
 	parsed.TestScript = strings.TrimSpace(parsed.TestScript)
 	parsed.CleanupScript = strings.TrimSpace(parsed.CleanupScript)
 	parsed.DevServerScript = strings.TrimSpace(parsed.DevServerScript)
+	parsed.AttemptExecutionMode = strings.ToLower(strings.TrimSpace(parsed.AttemptExecutionMode))
+	if parsed.AttemptExecutionMode == "" {
+		parsed.AttemptExecutionMode = "workspace"
+	}
+	if parsed.AttemptExecutionMode != "workspace" && parsed.AttemptExecutionMode != "worktree" {
+		return ProjectConfig{}, true, fmt.Errorf("parse project config %s: attempt_execution_mode must be one of: workspace, worktree", path)
+	}
 
 	if len(parsed.CopyFiles) > 0 {
 		normalized := make([]string, 0, len(parsed.CopyFiles))

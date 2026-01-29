@@ -9,6 +9,8 @@ import {
   Plus,
 } from "lucide-vue-next";
 
+import EventLogViewer from "@/components/EventLogViewer.vue";
+
 import {
   cancelTask,
   createTask,
@@ -1127,25 +1129,11 @@ onUnmounted(() => {
               <!-- Events Tab -->
               <div v-else-if="activeDetailTab === 'events'" class="space-y-4"
               >
-                <div v-if="selectedLoading" class="text-sm text-surface-500 text-center py-8"
-                >加载中…</div>
-                <div v-else-if="selectedEvents.length === 0" class="text-sm text-surface-500 text-center py-8"
-                >暂无事件</div>
-                <div v-else class="rounded-2xl bg-surface-800/30 p-3 space-y-1 max-h-[60vh] overflow-y-auto"
-                >
-                  <div
-                    v-for="(e, idx) in selectedEvents"
-                    :key="idx"
-                    class="flex items-start gap-3 p-2.5 rounded-xl hover:bg-surface-800/50 transition-colors"
-                  >
-                    <span class="text-xs text-surface-500 font-mono flex-shrink-0 w-[52px] pt-0.5"
-                    >{{ e.ts.slice(11, 19) }}</span>
-                    <span class="text-[11px] font-medium text-surface-300 px-2 py-1 rounded-lg bg-surface-700/50 flex-shrink-0"
-                    >{{ e.type }}</span>
-                    <span v-if="e.message" class="text-xs text-surface-400 flex-1 break-words pt-0.5"
-                    >{{ e.message }}</span>
-                  </div>
-                </div>
+                <EventLogViewer
+                  :events="selectedEvents"
+                  :loading="selectedLoading && selectedEvents.length === 0"
+                  :refreshing="selectedLoading && selectedEvents.length > 0"
+                />
               </div>
 
               <!-- Advanced Tab -->
@@ -1153,25 +1141,61 @@ onUnmounted(() => {
               >
                 <div data-testid="workbench-details-advanced">
                 <div v-if="!latestAttempt" class="text-sm text-surface-500 text-center py-8">暂无尝试记录</div>
-                <div v-else-if="advancedArtifacts.length" class="grid grid-cols-1 lg:grid-cols-2 gap-3"
-                >
-                  <button
-                    v-for="item in advancedArtifacts"
-                    :key="item.kind"
-                    type="button"
-                    class="rounded-2xl bg-surface-800/40 p-4 text-left hover:bg-surface-800/60 transition-all group"
-                    :data-testid="`artifact-card-${item.kind}`"
-                    @click="openArtifactModal(item)"
+                <div v-else class="space-y-3">
+                  <div
+                    v-if="latestAttempt.worktree_root || latestAttempt.base_commit_sha || latestAttempt.base_ref"
+                    class="rounded-2xl bg-surface-800/40 p-4"
+                    data-testid="workbench-worktree-evidence"
                   >
-                    <div class="flex items-center justify-between gap-2 mb-2">
-                      <div class="text-xs font-medium text-surface-300 uppercase tracking-wide">{{ item.label }}</div>
-                      <div class="text-[11px] text-surface-500 group-hover:text-surface-300 transition-colors">查看 →</div>
+                    <div class="text-xs font-semibold text-surface-200">Worktree</div>
+                    <div class="mt-2 space-y-2">
+                      <div v-if="latestAttempt.worktree_root" class="space-y-1">
+                        <div class="text-[11px] text-surface-500">worktree_root</div>
+                        <div
+                          class="text-[11px] text-surface-200 font-mono break-all"
+                          data-testid="workbench-worktree-root"
+                        >{{ latestAttempt.worktree_root }}</div>
+                      </div>
+
+                      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <div v-if="latestAttempt.base_ref" class="space-y-1">
+                          <div class="text-[11px] text-surface-500">base_ref</div>
+                          <div
+                            class="text-[11px] text-surface-200 font-mono break-all"
+                            data-testid="workbench-base-ref"
+                          >{{ latestAttempt.base_ref }}</div>
+                        </div>
+                        <div v-if="latestAttempt.base_commit_sha" class="space-y-1">
+                          <div class="text-[11px] text-surface-500">base_commit_sha</div>
+                          <div
+                            class="text-[11px] text-surface-200 font-mono break-all"
+                            data-testid="workbench-base-commit-sha"
+                          >{{ latestAttempt.base_commit_sha }}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div class="text-[11px] text-surface-500 font-mono truncate"
-                    >{{ item.path }}</div>
-                  </button>
+                  </div>
+
+                  <div v-if="advancedArtifacts.length" class="grid grid-cols-1 lg:grid-cols-2 gap-3"
+                  >
+                    <button
+                      v-for="item in advancedArtifacts"
+                      :key="item.kind"
+                      type="button"
+                      class="rounded-2xl bg-surface-800/40 p-4 text-left hover:bg-surface-800/60 transition-all group"
+                      :data-testid="`artifact-card-${item.kind}`"
+                      @click="openArtifactModal(item)"
+                    >
+                      <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="text-xs font-medium text-surface-300 uppercase tracking-wide">{{ item.label }}</div>
+                        <div class="text-[11px] text-surface-500 group-hover:text-surface-300 transition-colors">查看 →</div>
+                      </div>
+                      <div class="text-[11px] text-surface-500 font-mono truncate"
+                      >{{ item.path }}</div>
+                    </button>
+                  </div>
+                  <div v-else class="text-sm text-surface-500 text-center py-8">暂无可预览的文件</div>
                 </div>
-                <div v-else class="text-sm text-surface-500 text-center py-8">暂无可预览的文件</div>
                 </div>
               </div>
             </div>

@@ -440,6 +440,9 @@ export interface TaskAttempt {
   review_comments_path?: string;
   review_notes?: string;
   project_config_path?: string;
+  worktree_root?: string;
+  base_commit_sha?: string;
+  base_ref?: string;
   copy_files_log_path?: string;
   setup_script_log_path?: string;
   test_script_log_path?: string;
@@ -793,6 +796,9 @@ export interface ReceiptArtifacts {
   changed_files_path?: string;
   review_comments_path?: string;
   diff_ref?: string;
+  worktree_root?: string;
+  base_commit_sha?: string;
+  base_ref?: string;
 }
 
 export interface ReceiptSignals {

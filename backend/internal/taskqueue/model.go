@@ -55,6 +55,10 @@ type Attempt struct {
 	RolledBackAt   *time.Time `json:"rolled_back_at,omitempty"`
 	RollbackError  string     `json:"rollback_error,omitempty"`
 
+	WorktreeRoot  string `json:"worktree_root,omitempty"`
+	BaseCommitSHA string `json:"base_commit_sha,omitempty"`
+	BaseRef       string `json:"base_ref,omitempty"`
+
 	RunID              string `json:"run_id,omitempty"`
 	Summary            string `json:"summary,omitempty"`
 	FindingsPath       string `json:"findings_path,omitempty"`

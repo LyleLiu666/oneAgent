@@ -33,6 +33,10 @@ type Config struct {
 
 	AuthMode string
 
+	// MCPAllowRemote enables remote (non-loopback) access to the MCP server endpoints.
+	// Default is false (local-only).
+	MCPAllowRemote bool
+
 	EnableTrace bool
 
 	BashRootDir string
@@ -133,6 +137,8 @@ type configFile struct {
 
 	AuthMode *string `yaml:"auth_mode"`
 
+	MCPAllowRemote *bool `yaml:"mcp_allow_remote"`
+
 	EnableTrace *bool `yaml:"enable_trace"`
 
 	BashRootDir *string `yaml:"bash_root_dir"`
@@ -170,6 +176,9 @@ func loadConfigFile(cfg *Config) error {
 	if parsed.AuthMode != nil {
 		cfg.AuthMode = *parsed.AuthMode
 	}
+	if parsed.MCPAllowRemote != nil {
+		cfg.MCPAllowRemote = *parsed.MCPAllowRemote
+	}
 	if parsed.EnableTrace != nil {
 		cfg.EnableTrace = *parsed.EnableTrace
 	}
@@ -198,6 +207,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("DEFAULT_WORKSPACE")); v != "" {
 		cfg.DefaultWorkspace = v
+	}
+	if v := strings.TrimSpace(os.Getenv("MCP_ALLOW_REMOTE")); v != "" {
+		cfg.MCPAllowRemote = parseBool(v)
 	}
 	if v := strings.TrimSpace(os.Getenv("AUTH_MODE")); v != "" {
 		cfg.AuthMode = v

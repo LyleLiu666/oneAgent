@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,9 +16,17 @@ import (
 )
 
 func runCopyFilesChecks(logPath string, workspaceRoot string, copyFiles []string) error {
-	workspaceRoot = strings.TrimSpace(workspaceRoot)
-	if workspaceRoot == "" {
-		return errors.New("workspace_root is required")
+	return runCopyFiles(logPath, workspaceRoot, workspaceRoot, copyFiles)
+}
+
+func runCopyFiles(logPath string, sourceRoot string, destRoot string, copyFiles []string) error {
+	sourceRoot = strings.TrimSpace(sourceRoot)
+	if sourceRoot == "" {
+		return errors.New("source_root is required")
+	}
+	destRoot = strings.TrimSpace(destRoot)
+	if destRoot == "" {
+		return errors.New("dest_root is required")
 	}
 	logPath = strings.TrimSpace(logPath)
 	if logPath == "" {
@@ -34,7 +43,7 @@ func runCopyFilesChecks(logPath string, workspaceRoot string, copyFiles []string
 	defer f.Close()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	fmt.Fprintf(f, "# copy_files\n\n- checked_at: %s\n- workspace_root: %s\n\n", now, workspaceRoot)
+	fmt.Fprintf(f, "# copy_files\n\n- checked_at: %s\n- source_root: %s\n- dest_root: %s\n\n", now, sourceRoot, destRoot)
 
 	if len(copyFiles) == 0 {
 		fmt.Fprintln(f, "- copy_files: (empty)")
@@ -47,14 +56,44 @@ func runCopyFilesChecks(logPath string, workspaceRoot string, copyFiles []string
 		if rel == "" {
 			continue
 		}
-		abs := filepath.Join(workspaceRoot, filepath.FromSlash(rel))
-		if st, err := os.Stat(abs); err != nil {
+		srcAbs := filepath.Join(sourceRoot, filepath.FromSlash(rel))
+		if st, err := os.Stat(srcAbs); err != nil {
 			fmt.Fprintf(f, "- %s: missing (%v)\n", rel, err)
 			return fmt.Errorf("copy_files missing: %s", rel)
 		} else if st.IsDir() {
 			fmt.Fprintf(f, "- %s: is a directory\n", rel)
 			return fmt.Errorf("copy_files is a directory: %s", rel)
 		}
+
+		if sourceRoot != destRoot {
+			dstAbs := filepath.Join(destRoot, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(dstAbs), 0o700); err != nil {
+				fmt.Fprintf(f, "- %s: copy failed (mkdir) (%v)\n", rel, err)
+				return fmt.Errorf("copy_files mkdir: %s", rel)
+			}
+			src, err := os.Open(srcAbs)
+			if err != nil {
+				fmt.Fprintf(f, "- %s: copy failed (open) (%v)\n", rel, err)
+				return fmt.Errorf("copy_files open: %s", rel)
+			}
+			dst, err := os.OpenFile(dstAbs, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+			if err != nil {
+				_ = src.Close()
+				fmt.Fprintf(f, "- %s: copy failed (create) (%v)\n", rel, err)
+				return fmt.Errorf("copy_files create: %s", rel)
+			}
+			if _, err := io.Copy(dst, src); err != nil {
+				_ = dst.Close()
+				_ = src.Close()
+				fmt.Fprintf(f, "- %s: copy failed (write) (%v)\n", rel, err)
+				return fmt.Errorf("copy_files write: %s", rel)
+			}
+			_ = dst.Close()
+			_ = src.Close()
+			fmt.Fprintf(f, "- %s: copied\n", rel)
+			continue
+		}
+
 		fmt.Fprintf(f, "- %s: ok\n", rel)
 	}
 	fmt.Fprintln(f)

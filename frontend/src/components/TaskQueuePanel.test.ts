@@ -201,10 +201,12 @@ it('shows newest events first', async () => {
     await taskButton.trigger('click')
     await flushPromises()
 
-    const text = wrapper.text()
-    expect(text).toContain('old event')
-    expect(text).toContain('new event')
-    expect(text.indexOf('new event')).toBeLessThan(text.indexOf('old event'))
+    const viewer = wrapper.findComponent({ name: 'EventLogViewer' })
+    expect(viewer.exists()).toBe(true)
+    const evs = viewer.props('events') as any[]
+    expect(evs).toHaveLength(2)
+    expect(evs[0].message).toBe('new event')
+    expect(evs[1].message).toBe('old event')
 
     wrapper.unmount()
 })
