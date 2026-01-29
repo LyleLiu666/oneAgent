@@ -176,11 +176,14 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 		}
 
 		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "data: ") {
+		if line == "" {
 			continue
 		}
 
-		data := strings.TrimPrefix(line, "data: ")
+		data, ok := extractSSEDataLine(line)
+		if !ok {
+			continue
+		}
 		if data == "[DONE]" {
 			break
 		}

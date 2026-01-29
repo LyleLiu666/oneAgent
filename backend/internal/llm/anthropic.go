@@ -233,11 +233,14 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, messages []C
 		}
 
 		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "data: ") {
+		if line == "" {
 			continue
 		}
 
-		data := strings.TrimPrefix(line, "data: ")
+		data, ok := extractSSEDataLine(line)
+		if !ok {
+			continue
+		}
 		if data == "[DONE]" {
 			break
 		}
@@ -411,11 +414,10 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 			continue
 		}
 
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := extractSSEDataLine(line)
+		if !ok {
 			continue
 		}
-
-		data := strings.TrimPrefix(line, "data: ")
 
 		var event anthropicStreamEvent
 		if err := json.Unmarshal([]byte(data), &event); err != nil {

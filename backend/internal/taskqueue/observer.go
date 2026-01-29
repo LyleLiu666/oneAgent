@@ -168,16 +168,59 @@ func parseObserverDecision(out string) (ObserverDecision, error) {
 		return d, nil
 	}
 
-	start := strings.Index(raw, "{")
-	end := strings.LastIndex(raw, "}")
-	if start >= 0 && end > start {
-		candidate := strings.TrimSpace(raw[start : end+1])
+	if candidate := extractFirstJSONObject(raw); candidate != "" {
 		if err := json.Unmarshal([]byte(candidate), &d); err == nil {
 			return d, nil
 		}
 	}
 
 	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected JSON): %q", truncateString(raw, 300))
+}
+
+func extractFirstJSONObject(raw string) string {
+	start := strings.Index(raw, "{")
+	if start < 0 {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(raw); i++ {
+		ch := raw[i]
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(raw[start : i+1])
+			}
+			if depth < 0 {
+				return ""
+			}
+		}
+	}
+
+	return ""
 }
 
 func readFileHead(path string, maxBytes int) (string, string) {

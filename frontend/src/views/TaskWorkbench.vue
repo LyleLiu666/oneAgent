@@ -81,6 +81,20 @@ const followUpNotes = ref("");
 const submittingReviewComment = ref(false);
 const submittingFollowUp = ref(false);
 
+// Tab navigation for task details
+const activeDetailTab = ref("overview");
+const detailTabs = [
+  { key: "overview", label: "概览" },
+  { key: "review", label: "审查" },
+  { key: "events", label: "事件" },
+  { key: "advanced", label: "高级" },
+];
+
+// Reset tab when task changes
+watch(selectedTaskId, () => {
+  activeDetailTab.value = 'overview';
+});
+
 const latestAttempt = computed<TaskAttempt | null>(() => {
   const t = selectedTask.value;
   if (!t || !Array.isArray(t.attempts) || t.attempts.length === 0) return null;
@@ -722,219 +736,285 @@ onUnmounted(() => {
 
           <!-- Task details -->
           <div class="glass rounded-2xl overflow-hidden">
+            <!-- Header: Title + Actions -->
             <div
-              class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-2"
+              class="px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-4"
             >
-              <p class="text-sm font-semibold text-surface-100">详情</p>
-              <div class="inline-flex gap-2">
-              <button
-                data-testid="workbench-cancel"
-                class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
-                :disabled="!canCancel || selectedLoading"
-                @click="doCancel"
-              >
-                <X class="w-4 h-4" />
-                取消
-              </button>
-              <button
-                data-testid="workbench-resume"
-                class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
-                :disabled="!canResume || selectedLoading"
-                @click="doResume"
-              >
-                <RotateCcw class="w-4 h-4" />
-                继续/跟进
-              </button>
-              <button
-                type="button"
-                data-testid="workbench-review-toggle"
-                class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
-                :disabled="!latestAttempt"
-                @click="
-                  reviewOpen = !reviewOpen;
-                  if (reviewOpen) detailsAdvancedOpen = true;
-                "
-              >
-                <ListTodo class="w-4 h-4" />
-                审查
-              </button>
-              <button
-                type="button"
-                data-testid="workbench-details-advanced-toggle"
-                class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
-                @click="detailsAdvancedOpen = !detailsAdvancedOpen"
-              >
-                {{ detailsAdvancedOpen ? "收起" : "高级" }}
-              </button>
-            </div>
-          </div>
-
-          <div
-            v-if="selectedError"
-            class="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
-          >
-            {{ selectedError }}
-          </div>
-
-          <div v-if="!selectedTask" class="p-6 text-sm text-surface-500">
-            选择任务查看详情。
-          </div>
-
-          <div v-else class="p-4 space-y-4">
-            <div>
-              <div class="text-sm text-surface-100 font-semibold">
-                {{ selectedTask.title }}
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-surface-100 truncate">
+                  {{ selectedTask?.title || "详情" }}
+                </p>
+                <p
+                  v-if="selectedTask"
+                  class="text-xs text-surface-500 mt-0.5 truncate"
+                >
+                  {{ selectedTask.workspace }}
+                </p>
               </div>
-              <div class="text-xs text-surface-500 mt-1 break-words">
-                {{ selectedTask.workspace }}
+              <div class="inline-flex gap-2 flex-shrink-0">
+                <button
+                  data-testid="workbench-cancel"
+                  class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
+                  :disabled="!canCancel || selectedLoading"
+                  @click="doCancel"
+                >
+                  <X class="w-4 h-4" />
+                  取消
+                </button>
+                <button
+                  data-testid="workbench-resume"
+                  class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
+                  :disabled="!canResume || selectedLoading"
+                  @click="doResume"
+                >
+                  <RotateCcw class="w-4 h-4" />
+                  继续
+                </button>
+                <button
+                  type="button"
+                  data-testid="workbench-review-toggle"
+                  class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 disabled:opacity-50 inline-flex items-center gap-2"
+                  :disabled="!latestAttempt"
+                  :class="reviewOpen ? 'bg-indigo-500/20 text-indigo-300' : ''"
+                  @click="reviewOpen = !reviewOpen"
+                >
+                  <ListTodo class="w-4 h-4" />
+                  审查
+                </button>
               </div>
             </div>
 
+            <!-- Tab Navigation -->
             <div
-              v-if="latestAttempt"
-              class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4"
+              v-if="selectedTask"
+              class="px-5 py-2 border-b border-surface-700/30 flex items-center gap-1 bg-surface-900/20"
             >
-              <div class="flex items-center justify-between gap-2">
-                <div class="text-sm text-surface-100 font-semibold">
-                  最近一次尝试
-                </div>
-                <div class="text-xs text-surface-400">
-                  {{ latestAttempt.status }}
-                </div>
-              </div>
-              <div
-                v-if="latestAttempt.summary"
-                class="text-sm text-surface-200 mt-2 whitespace-pre-wrap"
-              >
-                {{ latestAttempt.summary }}
-              </div>
-              <div
-                v-if="formatUsage(latestAttempt)"
-                class="text-xs text-surface-400 mt-2"
-              >
-                用量：{{ formatUsage(latestAttempt) }}
-              </div>
-              <div
-                v-if="latestAttempt.observer"
-                class="text-xs text-surface-400 mt-2"
-              >
-                观察者：{{ latestAttempt.observer.pass ? "通过" : "失败" }} ·
-                {{ latestAttempt.observer.reason }}
-              </div>
-              <div
-                v-if="
-                  latestAttempt.observer &&
-                  !latestAttempt.observer.pass &&
-                  latestAttempt.observer.next_steps
+              <button
+                v-for="tab in detailTabs"
+                :key="tab.key"
+                class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                :class="
+                  activeDetailTab === tab.key
+                    ? 'bg-surface-700/50 text-surface-100'
+                    : 'text-surface-500 hover:text-surface-300 hover:bg-surface-800/30'
                 "
-                class="text-xs text-surface-400 mt-2 whitespace-pre-wrap"
+                @click="activeDetailTab = tab.key"
               >
-                下一步：{{ latestAttempt.observer.next_steps }}
+                {{ tab.label }}
+              </button>
+            </div>
+
+            <div
+              v-if="selectedError"
+              class="m-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
+            >
+              {{ selectedError }}
+            </div>
+
+            <div v-if="!selectedTask" class="p-6 text-sm text-surface-500">
+              选择任务查看详情。
+            </div>
+
+            <div v-else class="p-4">
+              <!-- Overview Tab -->
+              <div v-if="activeDetailTab === 'overview'" class="space-y-4">
+                <!-- Two-column layout: Status info | Details -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <!-- Left: Task Summary -->
+                  <div class="space-y-3">
+                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+                      <div class="flex items-center gap-2 mb-3">
+                        <div class="w-2 h-2 rounded-full" :class="{
+                          'bg-emerald-400': latestStatus === 'succeeded',
+                          'bg-rose-400': ['failed', 'canceled', 'limit_exceeded', 'timed_out', 'interrupted'].includes(latestStatus),
+                          'bg-amber-400': latestStatus === 'running',
+                          'bg-surface-400': latestStatus === 'queued'
+                        }"></div>
+                        <span class="text-sm font-medium text-surface-200">{{ latestStatus || 'queued' }}</span>
+                      </div>
+                      <div v-if="formatUsage(latestAttempt)" class="text-xs text-surface-400 flex items-center gap-4">
+                        <span>用量：{{ formatUsage(latestAttempt) }}</span>
+                      </div>
+                    </div>
+
+                    <div v-if="latestAttempt?.observer" class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="w-2 h-2 rounded-full" :class="latestAttempt.observer.pass ? 'bg-emerald-400' : 'bg-rose-400'"></div>
+                        <span class="text-xs font-medium text-surface-200">观察者：{{ latestAttempt.observer.pass ? '通过' : '失败' }}</span>
+                      </div>
+                      <p class="text-xs text-surface-400">{{ latestAttempt.observer.reason }}</p>
+                      <div v-if="!latestAttempt.observer.pass && latestAttempt.observer.next_steps" class="mt-2 p-2 rounded-lg bg-surface-900/60 border border-surface-700/30">
+                        <p class="text-[11px] text-surface-500 mb-1">下一步：</p>
+                        <p class="text-xs text-surface-300 whitespace-pre-wrap">{{ latestAttempt.observer.next_steps }}</p>
+                      </div>
+                      <div v-if="!latestAttempt.observer.pass && latestAttempt.observer.questions_for_user?.length" class="mt-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                        <p class="text-[11px] text-amber-400 mb-1">需要你确认：</p>
+                        <p class="text-xs text-surface-300 whitespace-pre-wrap">{{ latestAttempt.observer.questions_for_user.join('\n') }}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Right: Summary Text -->
+                  <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+                    <div class="flex items-center justify-between mb-3">
+                      <span class="text-sm font-medium text-surface-200">执行摘要</span>
+                      <span class="text-xs text-surface-500">{{ latestAttempt?.id?.slice(0, 8) }}</span>
+                    </div>
+                    <div v-if="latestAttempt?.summary" class="text-sm text-surface-300 whitespace-pre-wrap leading-relaxed">
+                      {{ latestAttempt.summary }}
+                    </div>
+                    <div v-else class="text-sm text-surface-500 italic">暂无执行摘要</div>
+                  </div>
+                </div>
               </div>
-              <div
-                v-if="
-                  latestAttempt.observer &&
-                  !latestAttempt.observer.pass &&
-                  latestAttempt.observer.questions_for_user &&
-                  latestAttempt.observer.questions_for_user.length
-                "
-                class="text-xs text-surface-400 mt-2"
-              >
-                需要你确认：
-                <span class="whitespace-pre-wrap">{{
-                  latestAttempt.observer.questions_for_user.join("\n")
-                }}</span>
+
+              <!-- Review Tab -->
+              <div v-else-if="activeDetailTab === 'review'" class="space-y-4">
+                <div v-if="!latestAttempt" class="text-sm text-surface-500">暂无尝试记录</div>
+                <div v-else class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <!-- Left: File changes -->
+                  <div class="space-y-4">
+                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+                      <div class="text-sm font-medium text-surface-200 mb-3">变更文件</div>
+                      <pre
+                        v-if="changedFiles?.content"
+                        class="max-h-[40vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
+                      >{{ changedFiles.content }}</pre>
+                      <div v-else class="text-sm text-surface-500 italic">暂无变更文件列表</div>
+                    </div>
+                  </div>
+
+                  <!-- Right: Diff + Comments -->
+                  <div class="space-y-4">
+                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+                      <div class="text-sm font-medium text-surface-200 mb-3">Diff Patch</div>
+                      <pre
+                        v-if="diffPatch?.content"
+                        class="max-h-[30vh] overflow-auto rounded-xl bg-surface-900/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
+                      >{{ diffPatch.content }}</pre>
+                      <div v-else class="text-sm text-surface-500 italic">暂无 diff patch</div>
+                    </div>
+
+                    <!-- Review Comments -->
+                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4">
+                      <div class="text-sm font-medium text-surface-200 mb-3">Review Comments</div>
+                      <div v-if="reviewComments.length" class="space-y-2 mb-4">
+                        <div
+                          v-for="(cmt, idx) in reviewComments"
+                          :key="idx"
+                          class="rounded-xl bg-surface-900/40 p-3 text-sm text-surface-200"
+                        >
+                          <div class="text-[11px] text-surface-500"
+                          >{{ cmt.ts }} · {{ cmt.principal_id }}</div>
+                          <div class="mt-1 whitespace-pre-wrap">{{ cmt.comment }}</div>
+                        </div>
+                      </div>
+
+                      <textarea
+                        data-testid="review-comment-input"
+                        v-model="reviewCommentDraft"
+                        class="w-full rounded-xl bg-surface-900/40 border border-surface-700/40 p-3 text-surface-100 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        rows="2"
+                        placeholder="写一条 review comment..."
+                      />
+                      <div class="mt-2 flex justify-end gap-2">
+                        <button
+                          data-testid="review-comment-submit"
+                          class="px-3 py-2 rounded-xl text-sm font-medium bg-indigo-500/80 text-white hover:bg-indigo-500 disabled:opacity-50"
+                          :disabled="submittingReviewComment || !reviewCommentDraft.trim()"
+                          @click="submitReviewComment"
+                        >
+                          提交评论
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Follow-up -->
+                    <div class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4"
+                    >
+                      <div class="text-sm font-medium text-surface-200 mb-3">Follow-up Attempt</div>
+                      <textarea
+                        data-testid="follow-up-notes-input"
+                        v-model="followUpNotes"
+                        class="w-full rounded-xl bg-surface-900/40 border border-surface-700/40 p-3 text-surface-100 text-sm outline-none focus:ring-2 focus:ring-emerald-500/30"
+                        rows="2"
+                        placeholder="输入跟进指令..."
+                      />
+                      <div class="mt-2 flex justify-end"
+                    >
+                        <button
+                          data-testid="follow-up-submit"
+                          class="px-3 py-2 rounded-xl text-sm font-medium bg-emerald-500/80 text-white hover:bg-emerald-500 disabled:opacity-50"
+                          :disabled="submittingFollowUp || !followUpNotes.trim()"
+                          @click="createFollowUpAttempt"
+                        >
+                          创建跟进 attempt
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div
-                v-if="detailsAdvancedOpen"
-                data-testid="workbench-details-advanced"
-                class="mt-2 space-y-1"
+
+              <!-- Events Tab -->
+              <div v-else-if="activeDetailTab === 'events'" class="space-y-4"
               >
-                <div
-                  v-if="latestAttempt.findings_path"
-                  class="text-xs text-surface-400"
+                <div v-if="selectedLoading" class="text-sm text-surface-500"
+                >加载中…</div>
+                <div v-else-if="selectedEvents.length === 0" class="text-sm text-surface-500"
+                >暂无事件。</div>
+                <div v-else class="space-y-2 max-h-[60vh] overflow-y-auto pr-2"
                 >
-                  findings：{{ latestAttempt.findings_path }}
+                  <div
+                    v-for="(e, idx) in selectedEvents"
+                    :key="idx"
+                    class="flex items-start gap-3 py-2 border-b border-surface-700/20 last:border-0"
+                  >
+                    <span class="text-xs text-surface-500 font-mono flex-shrink-0 w-[52px]"
+                    >{{ e.ts.slice(11, 19) }}</span>
+                    <span class="text-xs font-mono text-surface-300 px-1.5 py-0.5 rounded bg-surface-800/50"
+                    >{{ e.type }}</span>
+                    <span v-if="e.message" class="text-xs text-surface-400"
+                    >{{ e.message }}</span>
+                  </div>
                 </div>
-                <div
-                  v-if="latestAttempt.trace_log_path"
-                  class="text-xs text-surface-400"
+              </div>
+
+              <!-- Advanced Tab -->
+              <div v-else-if="activeDetailTab === 'advanced'" class="space-y-4"
+              >
+                <div v-if="!latestAttempt" class="text-sm text-surface-500"
+                >暂无尝试记录</div>
+                <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-4"
                 >
-                  trace：{{ latestAttempt.trace_log_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.test_report_path"
-                  class="text-xs text-surface-400"
-                >
-                  测试报告：{{ latestAttempt.test_report_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.changed_files_path"
-                  class="text-xs text-surface-400"
-                >
-                  changed_files：{{ latestAttempt.changed_files_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.diff_patch_path"
-                  class="text-xs text-surface-400"
-                >
-                  diff_patch：{{ latestAttempt.diff_patch_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.review_comments_path"
-                  class="text-xs text-surface-400"
-                >
-                  review_comments：{{ latestAttempt.review_comments_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.project_config_path"
-                  class="text-xs text-surface-400"
-                >
-                  project.json：{{ latestAttempt.project_config_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.copy_files_log_path"
-                  class="text-xs text-surface-400"
-                >
-                  copy_files：{{ latestAttempt.copy_files_log_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.setup_script_log_path"
-                  class="text-xs text-surface-400"
-                >
-                  setup_script：{{ latestAttempt.setup_script_log_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.test_script_log_path"
-                  class="text-xs text-surface-400"
-                >
-                  test_script：{{ latestAttempt.test_script_log_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.cleanup_script_log_path"
-                  class="text-xs text-surface-400"
-                >
-                  cleanup_script：{{ latestAttempt.cleanup_script_log_path }}
-                </div>
-                <div
-                  v-if="latestAttempt.policy_snapshot"
-                  class="text-xs text-surface-400"
-                >
-                  policy:
-                  <span class="font-mono text-surface-200">{{
-                    latestAttempt.policy_snapshot.policy?.id
-                  }}</span>
-                  ·
-                  <span class="font-mono text-surface-200">{{
-                    shortHash(latestAttempt.policy_snapshot.policy_hash)
-                  }}</span>
-                  · principal={{ latestAttempt.policy_snapshot.principal_id }}
+                  <div
+                    v-for="item in [
+                      ['findings', latestAttempt.findings_path],
+                      ['trace', latestAttempt.trace_log_path],
+                      ['测试报告', latestAttempt.test_report_path],
+                      ['changed_files', latestAttempt.changed_files_path],
+                      ['diff_patch', latestAttempt.diff_patch_path],
+                      ['review_comments', latestAttempt.review_comments_path],
+                      ['project.json', latestAttempt.project_config_path],
+                      ['copy_files', latestAttempt.copy_files_log_path],
+                      ['setup_script', latestAttempt.setup_script_log_path],
+                      ['test_script', latestAttempt.test_script_log_path],
+                      ['cleanup_script', latestAttempt.cleanup_script_log_path],
+                    ].filter(([, v]) => v) as [string, string]"
+                    :key="item[0]"
+                    class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3"
+                  >
+                    <div class="text-xs text-surface-500 mb-1"
+                    >{{ item[0] }}</div>
+                    <div class="text-xs text-surface-300 font-mono break-all"
+                    >{{ item[1] }}</div>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div
-              v-if="detailsAdvancedOpen && reviewOpen && latestAttempt"
+              v-if="false"
               data-testid="workbench-review-panel"
               class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4 space-y-3"
             >
@@ -1040,34 +1120,6 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div
-              v-if="detailsAdvancedOpen"
-              class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-4"
-            >
-              <div class="text-sm text-surface-100 font-semibold">事件</div>
-              <div v-if="selectedLoading" class="text-xs text-surface-500 mt-2">
-                加载中…
-              </div>
-              <div
-                v-else-if="selectedEvents.length === 0"
-                class="text-xs text-surface-500 mt-2"
-              >
-                暂无事件。
-              </div>
-              <div v-else class="mt-2 space-y-2 max-h-[40vh] overflow-y-auto">
-                <div
-                  v-for="(e, idx) in selectedEvents"
-                  :key="idx"
-                  class="text-xs text-surface-300"
-                >
-                  <span class="text-surface-500">{{ e.ts }}</span>
-                  <span class="mx-2 text-surface-600">·</span>
-                  <span class="font-mono text-surface-200">{{ e.type }}</span>
-                  <span v-if="e.message" class="ml-2">{{ e.message }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
           </div>
         </div>
       </div>

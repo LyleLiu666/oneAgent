@@ -34,3 +34,9 @@ func TestValidateCommand_Dev_DeniesInterpretersInChains(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCommand_Dev_AllowsCd(t *testing.T) {
+	if err := ValidateCommand("dev", "cd . && ls", nil); err != nil {
+		t.Fatalf("expected allow, got %v", err)
+	}
+}

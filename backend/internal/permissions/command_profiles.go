@@ -27,6 +27,7 @@ func AllowedCommands(profile string) map[string]struct{} {
 		}
 	case "dev":
 		return map[string]struct{}{
+			"cd":    {},
 			"ls":    {},
 			"cat":   {},
 			"rg":    {},

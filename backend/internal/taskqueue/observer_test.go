@@ -99,6 +99,25 @@ func TestOutcomeObserver_Decide_ParsesJSONFromWrappedOutput(t *testing.T) {
 	}
 }
 
+func TestOutcomeObserver_Decide_ParsesFirstJSONObjectWhenTrailingBracesExist(t *testing.T) {
+	client := &stubLLMClient{
+		out: "```json\n{\"pass\":true,\"reason\":\"done\",\"evidence\":[],\"next_steps\":\"\",\"questions_for_user\":[]}\n```\n\nextra note {not json}\n",
+	}
+	obs := &OutcomeObserver{Client: client}
+	got, err := obs.Decide(context.Background(), ObserveInput{
+		TaskID:        "task-1",
+		AttemptID:     "attempt-1",
+		WorkspaceRoot: "/tmp/ws",
+		Prompt:        "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if !got.Pass || got.Reason != "done" {
+		t.Fatalf("unexpected decision: %+v", got)
+	}
+}
+
 func TestOutcomeObserver_Decide_RequiresClient(t *testing.T) {
 	obs := &OutcomeObserver{}
 	_, err := obs.Decide(context.Background(), ObserveInput{

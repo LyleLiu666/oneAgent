@@ -40,6 +40,7 @@
 - 进入可运行态仍容易卡在环境准备（setup/test/dev server/复制 `.env` 等）
 - 交付缺少“一眼审查”的默认路径（diff/变更摘要 + review→follow-up）
 - 失败后的清理/隔离/回滚成本偏高（尤其是代码类任务）
+- Chat 仍偏“工作台式”信息密度：当用户只想把任务委托给“秘书”时，缺少一个足够低噪声的纯对话模式
 
 这是一个“产品形态层”的缺口：它决定用户是否真的把 oneAgent 当作可长期依赖的 client，而不是“偶尔聊两句的工具”。
 
@@ -59,12 +60,13 @@
 - 统一信息架构：避免“功能堆叠”导致的拥挤（布局、密度、对齐、溢出）。
 - 默认视图只显示：workspace、任务入口、交付入口；其余都可展开但不干扰。
 - “展开后仍好看”：展开态要像一个专业工具，而不是堆叠面板。
+- 引入“秘书模式”（像 Moltbot 的 WebChat 一样低噪声）：当用户只想对话时，界面仅保留消息流 + 输入框 + 必要状态；模型/工具/trace/任务面板等统一折叠到“详情/高级”，并且支持一键切换回完整模式。
 
 ### P2. 项目化工作流（开箱即用地进入可运行态）
 **目标**：真实项目里，agent 能在 1 分钟内进入“可运行/可测试/可预览”状态，并留下证据。
 
 **当前**：
-- 已有 OpenSpec：`add-project-scripts`（未实现）。
+- 已完成：`add-project-scripts`（baseline 已实现）。
 
 **迭代点（典型）**：
 - `.oneagent/project.json` 支持 setup/test/cleanup/dev_server/copy_files，并且失败留痕。
@@ -74,7 +76,7 @@
 **目标**：交付默认可审查；用户评论可直接成为下一轮 attempt 的输入（短反馈闭环）。
 
 **当前**：
-- 已有 OpenSpec：`add-diff-review-loop`（未实现）。
+- 已完成：`add-diff-review-loop`（baseline 已实现）。
 
 **迭代点（典型）**：
 - 每次 attempt 产出 diff artifacts（git 优先，非 git 降级）。
@@ -122,8 +124,8 @@
 
 | 层级 | 目标 | 主要 changes | 依赖/门槛 |
 | --- | --- | --- | --- |
-| **L0** | 项目可运行/可测试（可复现） | `add-project-scripts` | tool permissions 不可绕过；失败留痕完整 |
-| **L1** | 交付可审查（评论→下一轮） | `add-diff-review-loop` | 具备 diff/test evidence 的可打开指针 |
+| **L0** | 项目可运行/可测试（可复现） | `add-project-scripts`（已完成） | tool permissions 不可绕过；失败留痕完整 |
+| **L1** | 交付可审查（评论→下一轮） | `add-diff-review-loop`（已完成） | 具备 diff/test evidence 的可打开指针 |
 | **L2** | 执行隔离 + 易回滚 | `add-worktree-attempt-isolation` | git repo 检测稳定；生命周期清理可解释 |
 | **L3** | 对外编排入口 | `add-mcp-server` | local-only + auth/policy；事件流与证据链打通 |
 
@@ -131,8 +133,8 @@
 - `fix-skill-read-not-found-ux`：不阻塞主线，但每次碰到都值得顺手修掉（减少治理摩擦）。
 
 ### Phase A：把“项目任务”做到默认可用（近期主线）
-1) `add-project-scripts`（进入可运行态 + 日志证据）
-2) `add-diff-review-loop`（可审查交付 + review→follow-up）
+1) `add-project-scripts`（已完成：进入可运行态 + 日志证据）
+2) `add-diff-review-loop`（已完成：可审查交付 + review→follow-up）
 3) `add-worktree-attempt-isolation`（隔离执行 + 可回滚边界）
 4) `fix-skill-read-not-found-ux`（小而关键的摩擦修复）
 

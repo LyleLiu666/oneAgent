@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -1014,12 +1015,14 @@ func looksLikePath(value string) bool {
 }
 
 func isPlainPathToken(value string) bool {
-	for i := 0; i < len(value); i++ {
-		ch := value[i]
-		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' {
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
 			continue
 		}
-		switch ch {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) {
+			continue
+		}
+		switch r {
 		case '/', '.', '_', '-', '~', '*', '?', '[', ']', '{', '}', '+', '@', '%', ':', '=':
 			continue
 		default:

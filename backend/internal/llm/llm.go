@@ -432,12 +432,10 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 			continue
 		}
 
-		// SSE format: data: {...}
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := extractSSEDataLine(line)
+		if !ok {
 			continue
 		}
-
-		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			break
 		}
@@ -620,11 +618,10 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			continue
 		}
 
-		if !strings.HasPrefix(line, "data: ") {
+		data, ok := extractSSEDataLine(line)
+		if !ok {
 			continue
 		}
-
-		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			break
 		}
