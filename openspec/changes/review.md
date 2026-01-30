@@ -7,14 +7,18 @@
 
 ## Priority（高 → 低）
 
-### P0（先测后改 / 高优先级评估）
-- （暂无）
+### P0（核心体验 / 高 ROI）
+- `update-ledger-digest-harvest-ux`：收割体验（聚合/聚类/批处理 follow-up / 低打扰通知信号）
 
-### P1（Prompt 基建 / 降低踩坑）
-- （暂无）
+### P1（治理与自动化 / 降低损耗）
+- `add-multi-workspace-queue-governance`：多 workspace 队列策略 + 资源治理 + 日程化（可选配置）
+- `update-sop-learning-pipeline-staleness`：学习管线治理（证据/去重合并线索/技能过时淘汰）
 
-### P2（对齐 Codex / 中长期）
-- （暂无）
+### P2（中长期愿景 / 上层形态）
+- `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
 
 ## Snapshot（来自 `openspec list`）
-- （暂无 active changes）
+- `update-sop-learning-pipeline-staleness`：0/13 tasks
+- `add-multi-workspace-queue-governance`：0/13 tasks
+- `update-ledger-digest-harvest-ux`：0/13 tasks
+- `add-workflow-orchestration-graph`：0/14 tasks
