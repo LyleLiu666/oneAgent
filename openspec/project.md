@@ -5,6 +5,22 @@ oneAgent is a **local-first agent client** that helps users complete real work e
 
 The core idea is: users should be able to **install once, choose a workspace folder, and start working immediately**—with an agent that can run for hours, produce industrial-grade deliverables, and leave traceable evidence.
 
+## Vision (North Star)
+The long-term vision of oneAgent is **not** “a chatty assistant”, but an **industrial-grade agent platform**:
+- Like FastGPT / n8n, it supports **workflow orchestration**
+- But each workflow node is a **work-style agent** (Claude Code / OpenAI Codex-like), not a simple function/plugin
+- Node handoffs are **deliverables (often multiple files)**, not just text copied into prompts
+
+To make this vision operational (and avoid infinite loops), each node MUST have a stable “done” definition with two layers:
+1) **Hard Gate (objective)**: facts we can validate by code/rules (e.g., files exist, tests pass, word count, schema validation).
+2) **Soft Gate (subjective)**: quality dimensions scored via an LLM rubric (predefined criteria + threshold + structured feedback; best-effort).
+
+In this architecture, “Secretary” is the system-level orchestrator:
+- Accepts **multi-threaded** user intents (write article / write jokes / write code) without forcing linear work
+- Decomposes tasks into nodes, manages dependencies and budgets, and delivers artifacts with evidence
+
+**Short-term priority:** workflows are a higher layer; right now our primary goal is to make the **core agent loop** high-success, smooth, fast, and low-loss. The platform foundations (permissions, observability, rollback, evidence) are not wasted work—they are prerequisites for the workflow future.
+
 This project is designed for users who:
 - Have a personal “domain”: writing, planning, coding, research, email handling, etc.
 - Want both **custom workflows** (their own know-how) and a **general all-purpose assistant**.
