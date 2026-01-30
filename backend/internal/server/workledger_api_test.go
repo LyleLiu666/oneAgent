@@ -116,6 +116,25 @@ func TestServer_WorkLedgerAPI_Smoke(t *testing.T) {
 		t.Fatalf("expected digest markdown")
 	}
 
+	// Structured digest.
+	req, _ = http.NewRequest(http.MethodGet, srv.URL+"/api/ledger/digests/today/structured", nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/ledger/digests/today/structured: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/ledger/digests/today/structured status=%d", res.StatusCode)
+	}
+	var structured map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&structured); err != nil {
+		t.Fatalf("decode structured digest: %v", err)
+	}
+	items, _ := structured["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected structured digest items")
+	}
+
 	// Sanity: list is independent of any external state.
 	_, _ = context.Background(), got
 }

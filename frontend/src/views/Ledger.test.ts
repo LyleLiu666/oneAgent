@@ -13,6 +13,8 @@ vi.mock('@/api/client', () => ({
     sop_proposed_count: 0,
   })),
   getTodayDigest: vi.fn(),
+  getTodayStructuredDigest: vi.fn(async () => ({ items: [], clusters: [] })),
+  createLedgerFollowUpTask: vi.fn(async () => ({ id: 't1' })),
   listReceipts: vi.fn(async () => []),
   listSopSuggestions: vi.fn(async () => []),
   generateSopSuggestions: vi.fn(async () => []),
@@ -139,6 +141,66 @@ it('shows digest and SOP badges from status endpoint', async () => {
   const sopBadge = wrapper.find('[data-testid="ledger-badge-sop-count"]')
   expect(sopBadge.exists()).toBe(true)
   expect(sopBadge.text()).toContain('3')
+
+  wrapper.unmount()
+})
+
+it('creates a follow-up task from selected digest items', async () => {
+  vi.stubGlobal('localStorage', {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+    clear: () => {},
+  })
+
+  ;(apiClient.getTodayDigest as any).mockResolvedValueOnce({
+    principal_id: 'local',
+    day_key: '2099-01-01',
+    markdown: '# Digest',
+  })
+  ;(apiClient.getTodayStructuredDigest as any).mockResolvedValueOnce({
+    principal_id: 'local',
+    day_key: '2099-01-01',
+    items: [
+      {
+        receipt_id: 'r1',
+        status: 'failed',
+        workspace_root: '/tmp/ws',
+        summary: 'fix tests',
+      },
+      {
+        receipt_id: 'r2',
+        status: 'failed',
+        workspace_root: '/tmp/ws',
+        summary: 'fix tests',
+      },
+    ],
+    clusters: [{ key: 'fix tests', count: 2, receipt_ids: ['r1', 'r2'] }],
+  })
+
+  const { default: Ledger } = await import('@/views/Ledger.vue')
+  const wrapper = shallowMount(Ledger)
+  await flushPromises()
+
+  await wrapper.get('[data-testid="ledger-tab-digest"]').trigger('click')
+  await flushPromises()
+
+  const items = wrapper.findAll('[data-testid="digest-item"] input[type="checkbox"]')
+  expect(items.length).toBeGreaterThanOrEqual(2)
+
+  await items[0].setValue(true)
+  await flushPromises()
+
+  await wrapper.get('[data-testid="digest-followup-instruction"]').setValue('please follow up')
+  await wrapper.get('[data-testid="digest-followup"]').trigger('click')
+  await flushPromises()
+
+  expect(apiClient.createLedgerFollowUpTask).toHaveBeenCalledWith(
+    expect.objectContaining({
+      receipt_ids: expect.arrayContaining(['r1']),
+      instruction: 'please follow up',
+    }),
+  )
 
   wrapper.unmount()
 })

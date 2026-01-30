@@ -13,13 +13,17 @@ import ErrorBanner from "@/components/ErrorBanner.vue";
 import {
   getLedgerStatusToday,
   getTodayDigest,
+  getTodayStructuredDigest,
   listReceipts,
   type Receipt,
+  type DigestItem,
+  type DigestCluster,
   listSopSuggestions,
   generateSopSuggestions,
   loadMoreSopSuggestions,
   updateSopSuggestionStatus,
   updateSopSuggestion,
+  createLedgerFollowUpTask,
   getSimilarSopSuggestions,
   type Suggestion,
   type SuggestionStatus,
@@ -108,20 +112,102 @@ const digestLoading = ref(false);
 const digestError = ref<ParsedApiError | null>(null);
 const digestMarkdown = ref("");
 const digestDayKey = ref("");
+const digestItems = ref<DigestItem[]>([]);
+const digestClusters = ref<DigestCluster[]>([]);
+
+const digestFilterStatus = ref<string>(""); // empty = all
+const digestFilterWorkspace = ref<string>("");
+const digestFilterQuery = ref<string>("");
+const digestFilterClusterKey = ref<string>("");
+const digestSelected = ref<Record<string, boolean>>({});
+
+const followUpInstruction = ref("");
+const followUpLoading = ref(false);
+const followUpError = ref<ParsedApiError | null>(null);
+const followUpCreatedTaskID = ref("");
 
 const loadDigest = async (refresh: boolean = false) => {
   digestLoading.value = true;
   digestError.value = null;
+  followUpError.value = null;
+  followUpCreatedTaskID.value = "";
   try {
     const d: any = await getTodayDigest(refresh);
     digestMarkdown.value = String(d?.markdown || "");
     digestDayKey.value = String(d?.day_key || "");
+
+    try {
+      const sd: any = await getTodayStructuredDigest();
+      digestItems.value = Array.isArray(sd?.items) ? sd.items : [];
+      digestClusters.value = Array.isArray(sd?.clusters) ? sd.clusters : [];
+    } catch {
+      digestItems.value = [];
+      digestClusters.value = [];
+    }
   } catch (e: any) {
     digestError.value = parseApiError(e, "加载 digest 失败");
     digestMarkdown.value = "";
     digestDayKey.value = "";
+    digestItems.value = [];
+    digestClusters.value = [];
   } finally {
     digestLoading.value = false;
+  }
+};
+
+const filteredDigestItems = computed(() => {
+  const q = digestFilterQuery.value.trim().toLowerCase();
+  const ws = digestFilterWorkspace.value.trim();
+  const st = digestFilterStatus.value.trim();
+  const ck = digestFilterClusterKey.value.trim();
+
+  return (digestItems.value || []).filter((it) => {
+    if (st && String(it.status || "") !== st) return false;
+    if (ws && String(it.workspace_root || "").trim() !== ws) return false;
+    if (q) {
+      const hay = `${it.receipt_id || ""} ${it.summary || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (ck) {
+      const k = String((it as any).summary || "").trim();
+      if (!k.startsWith(ck)) return false;
+    }
+    return true;
+  });
+});
+
+const selectedDigestIDs = computed(() =>
+  Object.entries(digestSelected.value)
+    .filter(([, v]) => !!v)
+    .map(([k]) => k),
+);
+
+const toggleSelectAllDigest = (checked: boolean) => {
+  const next: Record<string, boolean> = { ...digestSelected.value };
+  for (const it of filteredDigestItems.value) {
+    if (!it?.receipt_id) continue;
+    next[String(it.receipt_id)] = checked;
+  }
+  digestSelected.value = next;
+};
+
+const createFollowUpFromSelection = async () => {
+  const ids = selectedDigestIDs.value;
+  if (ids.length === 0) return;
+  followUpLoading.value = true;
+  followUpError.value = null;
+  followUpCreatedTaskID.value = "";
+  try {
+    const task: any = await createLedgerFollowUpTask({
+      receipt_ids: ids,
+      instruction: followUpInstruction.value.trim() || undefined,
+    });
+    followUpCreatedTaskID.value = String(task?.id || "");
+    await loadLedgerStatus();
+  } catch (e: any) {
+    followUpError.value = parseApiError(e, "创建 follow-up 失败");
+  } finally {
+    followUpLoading.value = false;
   }
 };
 
@@ -633,18 +719,193 @@ onMounted(async () => {
               </button>
             </div>
           </div>
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <select
+                v-model="digestFilterStatus"
+                data-testid="digest-filter-status"
+                class="rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs"
+              >
+                <option value="">全部状态</option>
+                <option value="succeeded">succeeded</option>
+                <option value="failed">failed</option>
+                <option value="timed_out">timed_out</option>
+                <option value="interrupted">interrupted</option>
+                <option value="canceled">canceled</option>
+              </select>
+              <input
+                v-model="digestFilterWorkspace"
+                data-testid="digest-filter-workspace"
+                class="rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs w-56"
+                placeholder="workspace（可选，需完整路径）"
+              />
+              <div class="relative">
+                <Search class="w-4 h-4 text-surface-500 absolute left-2 top-2.5" />
+                <input
+                  v-model="digestFilterQuery"
+                  data-testid="digest-filter-q"
+                  class="pl-8 rounded-lg bg-surface-900/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs w-56"
+                  placeholder="搜索（receipt_id / summary）"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="p-6 space-y-3">
           <div v-if="digestLoading" class="text-sm text-surface-500">
             加载中…
           </div>
-          <ErrorBanner v-else-if="digestError" :error="digestError" title="加载失败" />
-          <div v-else class="prose prose-invert max-w-none">
-            <pre
-              class="whitespace-pre-wrap text-sm bg-surface-900/60 border border-surface-700/50 rounded-xl p-4"
-              >{{ digestMarkdown || "（空）" }}</pre
+          <ErrorBanner
+            v-else-if="digestError"
+            :error="digestError"
+            title="加载失败"
+          />
+          <div v-else class="space-y-4">
+            <div
+              v-if="digestItems.length === 0"
+              class="text-sm text-surface-500"
+              data-testid="digest-structured-empty"
             >
+              （结构化日报尚未生成；点击右上角“刷新”生成一次后再回到这里收割）
+            </div>
+
+            <div v-else class="space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <label class="flex items-center gap-2 text-xs text-surface-400">
+                  <input
+                    type="checkbox"
+                    data-testid="digest-select-all"
+                    class="accent-primary-500"
+                    @change="toggleSelectAllDigest(($event.target as any).checked)"
+                  />
+                  全选（当前过滤结果）
+                </label>
+                <div class="text-xs text-surface-500">
+                  已选：{{ selectedDigestIDs.length }}
+                </div>
+              </div>
+
+              <div
+                v-if="digestClusters.length > 0"
+                class="rounded-xl bg-surface-900/60 border border-surface-700/50 p-3"
+              >
+                <div class="text-xs text-surface-400 mb-2">
+                  失败聚类（best-effort）
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    class="px-2 py-1 rounded-lg text-[11px] bg-surface-800/70 text-surface-200 hover:bg-surface-700/70"
+                    :class="digestFilterClusterKey ? '' : 'ring-1 ring-primary-500/50'"
+                    @click="digestFilterClusterKey = ''"
+                  >
+                    全部
+                  </button>
+                  <button
+                    v-for="c in digestClusters"
+                    :key="c.key"
+                    class="px-2 py-1 rounded-lg text-[11px] bg-surface-800/70 text-surface-200 hover:bg-surface-700/70"
+                    :class="digestFilterClusterKey === c.key ? 'ring-1 ring-primary-500/50' : ''"
+                    @click="digestFilterClusterKey = c.key"
+                  >
+                    {{ c.count }}× {{ c.key }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="space-y-2">
+                <div
+                  v-for="it in filteredDigestItems"
+                  :key="it.receipt_id"
+                  class="glass-card p-3 flex items-start gap-3"
+                  data-testid="digest-item"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-1 accent-primary-500"
+                    :checked="!!digestSelected[it.receipt_id]"
+                    @change="digestSelected[it.receipt_id] = ($event.target as any).checked"
+                  />
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="min-w-0">
+                        <p class="text-sm text-surface-100 truncate">
+                          {{ it.summary || "（无摘要）" }}
+                        </p>
+                        <p class="text-[11px] text-surface-500 truncate">
+                          receipt_id={{ it.receipt_id }} · status={{ it.status }}
+                          <span v-if="it.workspace_root">
+                            · ws={{ it.workspace_root }}
+                          </span>
+                        </p>
+                      </div>
+                      <button
+                        class="px-2 py-1 rounded-lg text-[11px] bg-surface-800/70 text-surface-100 hover:bg-surface-700/70"
+                        @click="activeTab = 'receipts'; selectedReceiptID = it.receipt_id"
+                      >
+                        打开
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  v-if="filteredDigestItems.length === 0"
+                  class="text-sm text-surface-500"
+                >
+                  （无匹配条目）
+                </div>
+              </div>
+
+              <div
+                class="rounded-xl bg-surface-900/60 border border-surface-700/50 p-4 space-y-3"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div class="text-sm text-surface-200 font-medium">
+                    批处理 follow-up
+                  </div>
+                  <button
+                    data-testid="digest-followup"
+                    class="px-3 py-2 rounded-lg text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-60"
+                    :disabled="followUpLoading || selectedDigestIDs.length === 0"
+                    @click="createFollowUpFromSelection"
+                  >
+                    {{ followUpLoading ? "创建中…" : "创建任务" }}
+                  </button>
+                </div>
+                <textarea
+                  v-model="followUpInstruction"
+                  data-testid="digest-followup-instruction"
+                  class="w-full min-h-[96px] rounded-lg bg-surface-950/60 border border-surface-700/50 px-3 py-2 text-surface-100 text-xs"
+                  placeholder="可选：补充指令（例如：把这些失败点集中修复，补齐测试，并生成一份变更说明）"
+                />
+                <ErrorBanner
+                  v-if="followUpError"
+                  :error="followUpError"
+                  title="创建失败"
+                />
+                <div
+                  v-if="followUpCreatedTaskID"
+                  class="text-xs text-surface-400"
+                  data-testid="digest-followup-success"
+                >
+                  已创建任务：{{ followUpCreatedTaskID }}
+                </div>
+              </div>
+            </div>
+
+            <details
+              class="rounded-xl bg-surface-900/60 border border-surface-700/50"
+            >
+              <summary
+                class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200"
+              >
+                原始 Digest Markdown（调试）
+              </summary>
+              <pre class="whitespace-pre-wrap text-sm text-surface-100 px-4 pb-4">{{
+                digestMarkdown || "（空）"
+              }}</pre>
+            </details>
           </div>
         </div>
       </div>

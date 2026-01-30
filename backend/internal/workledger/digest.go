@@ -61,6 +61,7 @@ func (s *Store) GetOrCreateDigest(principalID string, day time.Time, refresh boo
 
 	dayKey := DayKey(day)
 	path := s.DigestPath(principalID, dayKey)
+	structuredPath := s.DigestStructuredPath(principalID, dayKey)
 
 	if !refresh {
 		if b, err := os.ReadFile(path); err == nil {
@@ -73,14 +74,29 @@ func (s *Store) GetOrCreateDigest(principalID string, day time.Time, refresh boo
 		}
 	}
 
-	d, err := s.GenerateDigest(principalID, day)
+	receipts, err := s.listReceiptsForDay(principalID, day)
 	if err != nil {
 		return Digest{}, err
 	}
-	if err := writeTextAtomic(path, d.Markdown, 0o644); err != nil {
+
+	generatedAt := time.Now().UTC()
+	md := buildDigestMarkdown(principalID, dayKey, receipts)
+	structured := buildStructuredDigest(principalID, dayKey, receipts)
+	structured.GeneratedAt = generatedAt
+
+	if err := writeTextAtomic(path, md, 0o644); err != nil {
 		return Digest{}, err
 	}
-	return d, nil
+	if err := writeJSONAtomic(structuredPath, structured, 0o644); err != nil {
+		return Digest{}, err
+	}
+
+	return Digest{
+		PrincipalID: principalID,
+		DayKey:      dayKey,
+		GeneratedAt: generatedAt,
+		Markdown:    md,
+	}, nil
 }
 
 func (s *Store) listReceiptsForDay(principalID string, day time.Time) ([]Receipt, error) {
@@ -227,4 +243,3 @@ func (s *Store) DeleteDigest(principalID, dayKey string) error {
 	}
 	return nil
 }
-

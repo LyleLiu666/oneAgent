@@ -753,6 +753,30 @@ export interface Digest {
   markdown: string;
 }
 
+export interface DigestItem {
+  receipt_id: string;
+  status: string;
+  workspace_root?: string;
+  kind?: string;
+  summary: string;
+  finished_at?: string;
+  artifacts?: Record<string, any>;
+}
+
+export interface DigestCluster {
+  key: string;
+  count: number;
+  receipt_ids: string[];
+}
+
+export interface StructuredDigest {
+  principal_id: string;
+  day_key: string;
+  generated_at?: string;
+  items: DigestItem[];
+  clusters?: DigestCluster[];
+}
+
 export async function getTodayDigest(
   refresh: boolean = false,
 ): Promise<Digest> {
@@ -766,6 +790,28 @@ export async function getDigest(
 ): Promise<Digest> {
   const q = refresh ? "?refresh=1" : "";
   return api(`/api/ledger/digests/${encodeURIComponent(dayKey)}${q}`);
+}
+
+export async function getTodayStructuredDigest(): Promise<StructuredDigest> {
+  return api(`/api/ledger/digests/today/structured`);
+}
+
+export async function getStructuredDigest(
+  dayKey: string,
+): Promise<StructuredDigest> {
+  return api(`/api/ledger/digests/${encodeURIComponent(dayKey)}/structured`);
+}
+
+export async function createLedgerFollowUpTask(payload: {
+  receipt_ids: string[];
+  instruction?: string;
+  model_id?: string;
+  limits?: Record<string, any>;
+}): Promise<any> {
+  return api(`/api/ledger/followups`, {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export interface LedgerStatusToday {
