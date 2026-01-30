@@ -116,3 +116,37 @@ func TestStore_RunKeepsVersionSnapshot(t *testing.T) {
 		t.Fatalf("unexpected got: %+v", got)
 	}
 }
+
+func TestStore_RenameAndDeleteWorkflow(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "workflows"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws := filepath.Join(t.TempDir(), "ws")
+	ctx := context.Background()
+
+	wf, err := store.CreateWorkflow(ctx, ws, "Demo")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	renamed, err := store.RenameWorkflow(ctx, ws, wf.WorkflowID, "Demo2")
+	if err != nil {
+		t.Fatalf("RenameWorkflow: %v", err)
+	}
+	if renamed.Name != "Demo2" {
+		t.Fatalf("expected Demo2, got %+v", renamed)
+	}
+
+	if err := store.DeleteWorkflow(ctx, ws, wf.WorkflowID); err != nil {
+		t.Fatalf("DeleteWorkflow: %v", err)
+	}
+	list, err := store.ListWorkflows(ctx, ws)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("expected empty list after delete, got %+v", list)
+	}
+}

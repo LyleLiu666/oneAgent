@@ -130,6 +130,66 @@ func (s *Store) CreateWorkflow(ctx context.Context, workspaceRoot string, name s
 	return wf, nil
 }
 
+func (s *Store) RenameWorkflow(ctx context.Context, workspaceRoot string, workflowID string, name string) (Workflow, error) {
+	if s == nil {
+		return Workflow{}, errors.New("store is nil")
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	workflowID = strings.TrimSpace(workflowID)
+	name = strings.TrimSpace(name)
+	if workspaceRoot == "" {
+		return Workflow{}, errors.New("workspace_root is required")
+	}
+	if workflowID == "" {
+		return Workflow{}, errors.New("workflow_id is required")
+	}
+	if name == "" {
+		return Workflow{}, errors.New("name is required")
+	}
+	_ = ctx
+
+	mu := s.lockWorkspace(workspaceRoot)
+	mu.Lock()
+	defer mu.Unlock()
+
+	p := s.workflowJSONPath(workspaceRoot, workflowID)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return Workflow{}, err
+	}
+	var wf Workflow
+	if err := json.Unmarshal(b, &wf); err != nil {
+		return Workflow{}, err
+	}
+	wf.Name = name
+	wf.UpdatedAt = time.Now().UTC()
+	if err := writeJSONAtomic(p, wf, 0o600); err != nil {
+		return Workflow{}, err
+	}
+	return wf, nil
+}
+
+func (s *Store) DeleteWorkflow(ctx context.Context, workspaceRoot string, workflowID string) error {
+	if s == nil {
+		return errors.New("store is nil")
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	workflowID = strings.TrimSpace(workflowID)
+	if workspaceRoot == "" {
+		return errors.New("workspace_root is required")
+	}
+	if workflowID == "" {
+		return errors.New("workflow_id is required")
+	}
+	_ = ctx
+
+	mu := s.lockWorkspace(workspaceRoot)
+	mu.Lock()
+	defer mu.Unlock()
+
+	return os.RemoveAll(s.workflowDir(workspaceRoot, workflowID))
+}
+
 func (s *Store) ListWorkflows(ctx context.Context, workspaceRoot string) ([]Workflow, error) {
 	if s == nil {
 		return nil, errors.New("store is nil")

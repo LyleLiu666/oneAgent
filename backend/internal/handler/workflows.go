@@ -64,6 +64,65 @@ func CreateWorkflow(c *gin.Context) {
 	c.JSON(http.StatusOK, wf)
 }
 
+type renameWorkflowRequest struct {
+	WorkspaceRoot string `json:"workspace_root"`
+	Name          string `json:"name"`
+}
+
+func RenameWorkflow(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Workflows == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workflow store not initialized"})
+		return
+	}
+
+	workflowID := strings.TrimSpace(c.Param("id"))
+	if workflowID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow id is required"})
+		return
+	}
+
+	var req renameWorkflowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	req.WorkspaceRoot = strings.TrimSpace(req.WorkspaceRoot)
+	req.Name = strings.TrimSpace(req.Name)
+	if req.WorkspaceRoot == "" || req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_root and name are required"})
+		return
+	}
+
+	wf, err := rt.Workflows.RenameWorkflow(c.Request.Context(), req.WorkspaceRoot, workflowID, req.Name)
+	if err != nil {
+		RespondError(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, wf)
+}
+
+func DeleteWorkflow(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Workflows == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "workflow store not initialized"})
+		return
+	}
+
+	workflowID := strings.TrimSpace(c.Param("id"))
+	workspace := strings.TrimSpace(c.Query("workspace"))
+	if workflowID == "" || workspace == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace and workflow id are required"})
+		return
+	}
+
+	if err := rt.Workflows.DeleteWorkflow(c.Request.Context(), workspace, workflowID); err != nil {
+		RespondError(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 type publishWorkflowRequest struct {
 	WorkspaceRoot string         `json:"workspace_root"`
 	Graph         workflow.Graph `json:"graph"`

@@ -159,6 +159,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Workflow orchestration (MVP, workspace-scoped).
 		api.GET("/workflows", handler.ListWorkflows)
 		api.POST("/workflows", handler.CreateWorkflow)
+		api.PATCH("/workflows/:id", handler.RenameWorkflow)
+		api.DELETE("/workflows/:id", handler.DeleteWorkflow)
 		api.POST("/workflows/:id/publish", handler.PublishWorkflowVersion)
 		api.POST("/workflows/:id/runs", handler.CreateWorkflowRun)
 		api.GET("/workflows/:id/runs/:run_id", handler.GetWorkflowRun)

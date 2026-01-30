@@ -143,3 +143,92 @@ func TestServer_WorkflowsAPI_CreatePublishRunExecute(t *testing.T) {
 	}
 }
 
+func TestServer_WorkflowsAPI_RenameAndDelete(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	workspace := "/tmp/ws-demo"
+
+	// Create workflow.
+	body := bytes.NewReader([]byte(`{"workspace_root":"` + workspace + `","name":"Demo"}`))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/workflows", body)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/workflows: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/workflows status=%d", res.StatusCode)
+	}
+	var wf map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&wf)
+	workflowID, _ := wf["workflow_id"].(string)
+	if workflowID == "" {
+		t.Fatalf("expected workflow_id, got %+v", wf)
+	}
+
+	// Rename.
+	body = bytes.NewReader([]byte(`{"workspace_root":"` + workspace + `","name":"Demo2"}`))
+	req, _ = http.NewRequest(http.MethodPatch, srv.URL+"/api/workflows/"+workflowID, body)
+	req.Header.Set("Content-Type", "application/json")
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH /api/workflows/:id: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH /api/workflows/:id status=%d", res.StatusCode)
+	}
+	var renamed map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&renamed)
+	if renamed["name"] != "Demo2" {
+		t.Fatalf("expected renamed name, got %+v", renamed)
+	}
+
+	// Delete.
+	req, _ = http.NewRequest(http.MethodDelete, srv.URL+"/api/workflows/"+workflowID+"?workspace="+workspace, nil)
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /api/workflows/:id: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("DELETE /api/workflows/:id status=%d", res.StatusCode)
+	}
+
+	// List should be empty.
+	res, err = http.Get(srv.URL + "/api/workflows?workspace=" + workspace)
+	if err != nil {
+		t.Fatalf("GET /api/workflows: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/workflows status=%d", res.StatusCode)
+	}
+	var list []map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&list)
+	if len(list) != 0 {
+		t.Fatalf("expected empty list, got %+v", list)
+	}
+}
