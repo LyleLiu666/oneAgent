@@ -8,7 +8,6 @@
 ## Priority（高 → 低）
 
 ### P0（先测后改 / 高优先级评估）
-- `add-core-tool-manuals`（2/5）：补齐核心工具手册（assets/tools），并用 prompt tests 防回归
 - `update-tool-names-openai-compatible`（2/7）：工具 function name 去点号（OpenAI-compatible）+ 保留 alias 兼容
 
 ### P1（Prompt 基建 / 降低踩坑）
@@ -19,7 +18,6 @@
 - `update-openai-responses-toolcalling`（2/7）：补齐 OpenAI Responses provider 的 tools loop（先 MVP 非流式，流式 best-effort）
 
 ## Snapshot（来自 `openspec list`）
-- `add-core-tool-manuals`：2/5 tasks
 - `add-command-profile-coding`：2/6 tasks
 - `update-tool-names-openai-compatible`：2/7 tasks
 - `update-openai-responses-toolcalling`：2/7 tasks
