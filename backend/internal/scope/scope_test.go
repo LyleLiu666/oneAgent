@@ -83,3 +83,67 @@ func TestResolveWritePath_ScopePatterns(t *testing.T) {
 		t.Fatalf("expected ErrPathOutsideScope, got %v", err)
 	}
 }
+
+func TestResolveWritePath_WorkspaceAlias(t *testing.T) {
+	root := t.TempDir()
+
+	got, err := ResolveWritePath(root, "/workspace/a.txt", nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != filepath.Join(root, "a.txt") {
+		t.Fatalf("unexpected resolved path: %q", got)
+	}
+
+	got, err = ResolveWritePath(root, "/b.txt", nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != filepath.Join(root, "b.txt") {
+		t.Fatalf("unexpected resolved path: %q", got)
+	}
+
+	got, err = ResolveWritePath(root, "workspace/b.txt", nil)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != filepath.Join(root, "b.txt") {
+		t.Fatalf("unexpected resolved path: %q", got)
+	}
+
+	_, err = ResolveWritePath(root, "/workspace/../escape.txt", nil)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if err != ErrPathOutsideWorkspace {
+		t.Fatalf("expected ErrPathOutsideWorkspace, got %v", err)
+	}
+
+	_, err = ResolveWritePath(root, "/../escape.txt", nil)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if err != ErrPathOutsideWorkspace {
+		t.Fatalf("expected ErrPathOutsideWorkspace, got %v", err)
+	}
+}
+
+func TestResolveReadPath_WorkspaceAlias(t *testing.T) {
+	root := t.TempDir()
+
+	got, err := ResolveReadPath(root, "/workspace/a.txt")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != filepath.Join(root, "a.txt") {
+		t.Fatalf("unexpected resolved path: %q", got)
+	}
+
+	got, err = ResolveReadPath(root, "workspace/b.txt")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if got != filepath.Join(root, "b.txt") {
+		t.Fatalf("unexpected resolved path: %q", got)
+	}
+}

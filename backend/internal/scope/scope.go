@@ -51,6 +51,8 @@ func ResolveReadPath(workspaceRoot, input string) (string, error) {
 		return "", errors.New("path is required")
 	}
 
+	trimmed = normalizeWorkspaceAlias(trimmed)
+
 	if filepath.IsAbs(trimmed) {
 		return filepath.Clean(trimmed), nil
 	}
@@ -88,17 +90,39 @@ func ResolveWritePath(workspaceRoot, input string, writeScope []string) (string,
 		return "", ErrWorkspaceNotSet
 	}
 
+	trimmed = normalizeWorkspaceAlias(trimmed)
+
 	var rel string
 	if filepath.IsAbs(trimmed) {
 		abs := filepath.Clean(trimmed)
-		if !isWithinRoot(root, abs) {
-			return "", ErrPathOutsideWorkspace
+		if isWithinRoot(root, abs) {
+			got, err := filepath.Rel(root, abs)
+			if err != nil {
+				return "", fmt.Errorf("resolve path: %w", err)
+			}
+			rel = got
+		} else {
+			// Many agent systems assume the workspace root is `/` and emit paths like `/file.txt`.
+			// Treat such paths as workspace-relative to improve real-world robustness; scope enforcement still applies.
+			//
+			// Example: "/long.txt" => "long.txt"
+			slashed := filepath.ToSlash(trimmed)
+			slashed = strings.TrimPrefix(slashed, "/")
+			slashed = strings.TrimPrefix(slashed, "./")
+			slashed = strings.TrimPrefix(slashed, "/")
+			// Be conservative: only accept single-segment absolute paths ("/file.txt").
+			// Real OS absolute paths outside the workspace MUST remain denied.
+			if slashed == "" || slashed == "." || strings.Contains(slashed, "/") {
+				return "", ErrPathOutsideWorkspace
+			}
+			rel = filepath.Clean(filepath.FromSlash(slashed))
+			if rel == "." {
+				return "", errors.New("path is required")
+			}
+			if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+				return "", ErrPathOutsideWorkspace
+			}
 		}
-		got, err := filepath.Rel(root, abs)
-		if err != nil {
-			return "", fmt.Errorf("resolve path: %w", err)
-		}
-		rel = got
 	} else {
 		rel = filepath.Clean(trimmed)
 		if rel == "." {
@@ -132,6 +156,35 @@ func ResolveWritePath(workspaceRoot, input string, writeScope []string) (string,
 	}
 
 	return abs, nil
+}
+
+// normalizeWorkspaceAlias converts common “virtual workspace root” prefixes into a workspace-relative path.
+//
+// Many agent systems describe the workspace as `/workspace/...`. For our local runtime, the real workspace is an
+// OS path, so we treat `/workspace/` and `workspace/` as aliases for “workspaceRoot/”.
+//
+// NOTE: This function intentionally does not accept arbitrary absolute paths; it only rewrites the `/workspace`
+// alias so scope enforcement remains intact.
+func normalizeWorkspaceAlias(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return path
+	}
+
+	// Be tolerant of Windows-style separators coming from models.
+	canonical := strings.ReplaceAll(trimmed, "\\", "/")
+
+	switch canonical {
+	case "/workspace", "workspace":
+		return "."
+	}
+	if strings.HasPrefix(canonical, "/workspace/") {
+		return strings.TrimPrefix(canonical, "/workspace/")
+	}
+	if strings.HasPrefix(canonical, "workspace/") {
+		return strings.TrimPrefix(canonical, "workspace/")
+	}
+	return trimmed
 }
 
 func isWithinRoot(root, target string) bool {
