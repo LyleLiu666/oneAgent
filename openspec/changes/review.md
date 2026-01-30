@@ -9,7 +9,6 @@
 
 ### P0（先测后改 / 高优先级评估）
 - `add-toolcalling-metrics-regression`（2/6）：工具调用指标体系 + 脚本化回归（把成功率变成可回归数字）
-- `update-workspace-preflight-for-tools`（2/5）：tools 启用但 workspace 未设置时 fail-fast，避免模型白跑一轮
 - `update-tool-output-envelope`（2/6）：工具输出/错误统一 JSON envelope（可解析 + 可行动），降低自愈回合数
 - `add-core-tool-manuals`（2/5）：补齐核心工具手册（assets/tools），并用 prompt tests 防回归
 - `update-tool-names-openai-compatible`（2/7）：工具 function name 去点号（OpenAI-compatible）+ 保留 alias 兼容
@@ -23,7 +22,6 @@
 
 ## Snapshot（来自 `openspec list`）
 - `add-toolcalling-metrics-regression`：2/6 tasks
-- `update-workspace-preflight-for-tools`：2/5 tasks
 - `update-tool-output-envelope`：2/6 tasks
 - `add-core-tool-manuals`：2/5 tasks
 - `add-command-profile-coding`：2/6 tasks
