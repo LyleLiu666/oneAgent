@@ -144,6 +144,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Skills governance (read-only list + archive personal skills).
 		api.GET("/skills", handler.ListSkills)
 		api.GET("/skills/duplicates", handler.ListSkillDuplicates)
+		api.GET("/skills/stale", handler.ListStaleSkills)
 		api.GET("/skills/:id", handler.GetSkill)
 		api.GET("/skills/:id/file", handler.ReadSkillFile)
 		api.PUT("/skills/:id", handler.UpdateSkill)

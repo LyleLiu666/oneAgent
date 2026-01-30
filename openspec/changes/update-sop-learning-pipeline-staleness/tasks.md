@@ -5,7 +5,7 @@
 
 ## 2. Backend
 - [x] 2.1 Record skill usage signals (last_used_at, used_count) (best-effort)
-- [ ] 2.2 Staleness detection job (best-effort) + API to list stale candidates
+- [x] 2.2 Staleness detection job (best-effort) + API to list stale candidates
 - [ ] 2.3 Learning job output: attach similar/merge hints and evidence summary (best-effort)
 - [ ] 2.4 Governance actions: deprecate/archive with reason; ensure recall excludes archived/deprecated
 - [ ] 2.5 Tests: staleness classification + archive invariants + recall exclusion
