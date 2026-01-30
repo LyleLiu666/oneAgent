@@ -14,7 +14,7 @@
 - （暂无）
 
 ### P2（对齐 Codex / 中长期）
-- `update-openai-responses-toolcalling`（2/7）：补齐 OpenAI Responses provider 的 tools loop（先 MVP 非流式，流式 best-effort）
+- （暂无）
 
 ## Snapshot（来自 `openspec list`）
-- `update-openai-responses-toolcalling`：2/7 tasks
+- （暂无 active changes）
