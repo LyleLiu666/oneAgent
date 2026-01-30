@@ -8,7 +8,7 @@
 - [x] 2.2 Staleness detection job (best-effort) + API to list stale candidates
 - [x] 2.3 Learning job output: attach similar/merge hints and evidence summary (best-effort)
 - [x] 2.4 Governance actions: deprecate/archive with reason; ensure recall excludes archived/deprecated
-- [ ] 2.5 Tests: staleness classification + archive invariants + recall exclusion
+- [x] 2.5 Tests: staleness classification + archive invariants + recall exclusion
 
 ## 3. Frontend
 - [ ] 3.1 Surface stale skills list + recommended actions (archive/keep/merge) (best-effort)

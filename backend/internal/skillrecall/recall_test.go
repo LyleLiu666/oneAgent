@@ -223,6 +223,51 @@ func TestSearch_FallsBackToGoWhenRgAndGrepMissing(t *testing.T) {
 	}
 }
 
+func TestSearch_DoesNotReturnArchivedOneAgentSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillPath := filepath.Join(home, ".oneagent", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo-skill\ndescription: demo\n---\nhello\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Archive (move) the skill directory, matching runtime behavior.
+	srcDir := filepath.Dir(skillPath)
+	dstDir := filepath.Join(home, ".oneagent", "skills-archived", "demo-skill")
+	if err := os.MkdirAll(filepath.Dir(dstDir), 0o700); err != nil {
+		t.Fatalf("mkdir archived: %v", err)
+	}
+	if err := os.Rename(srcDir, dstDir); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	cat, err := skill.Discover(context.Background(), skill.DiscoverOptions{})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if _, ok := cat.ByID("demo-skill"); ok {
+		t.Fatalf("expected archived skill to be absent from catalog")
+	}
+
+	lookPath := func(name string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	res, err := Search(context.Background(), cat, "demo-skill", Options{MaxResults: 8, Timeout: 2 * time.Second}, lookPath)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	for _, cand := range res.Candidates {
+		if cand.Skill.ID == "demo-skill" {
+			t.Fatalf("expected demo-skill to be excluded from recall candidates")
+		}
+	}
+}
+
 func TestSearch_WithManySkills_ReturnsTop8(t *testing.T) {
 	skills := make([]skill.Skill, 0, 1200)
 	for i := 0; i < 1200; i++ {
