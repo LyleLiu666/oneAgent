@@ -18,6 +18,7 @@
 - `add-core-tool-manuals`（2/5）：补齐核心工具手册（assets/tools），并用 prompt tests 防回归
 - `add-command-profile-coding`（2/6）：新增 `coding` 命令 profile（docker-only），让 coding agent 常用链路跑得起来
 - `update-tool-output-envelope`（2/6）：工具输出/错误统一 JSON envelope（可解析 + 可行动），降低自愈回合数
+- `update-workspace-preflight-for-tools`（2/5）：tools 启用但 workspace 未设置时 fail-fast，避免模型白跑一轮
 
 ### P2（对齐 Codex / 中长期）
 - `update-openai-responses-toolcalling`（2/7）：补齐 OpenAI Responses provider 的 tools loop（先 MVP 非流式，流式 best-effort）
@@ -34,3 +35,4 @@
 - `update-tool-output-envelope`：2/6 tasks
 - `update-openai-responses-toolcalling`：2/7 tasks
 - `update-tool-protocol-boundaries`：2/7 tasks
+- `update-workspace-preflight-for-tools`：2/5 tasks
