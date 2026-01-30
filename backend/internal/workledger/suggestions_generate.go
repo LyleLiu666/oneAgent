@@ -114,12 +114,78 @@ func (s *Store) GenerateSuggestionsV1(ctx context.Context, in GenerateSuggestion
 			return created, err
 		}
 
+		// Best-effort governance hints: does not affect generation success.
+		_ = s.attachSuggestionGovernanceHintsV1(ctx, principal, sug.SuggestionID)
+		if updated, err := s.GetSuggestion(sug.SuggestionID); err == nil {
+			sug = updated
+		}
+
 		existingSigs[sig] = true
 		_ = s.ApplyInboxCap(principal, dayKey, 10)
 		created = append(created, sug)
 	}
 
 	return created, nil
+}
+
+func (s *Store) attachSuggestionGovernanceHintsV1(ctx context.Context, principalID string, suggestionID string) error {
+	if s == nil {
+		return errors.New("store is nil")
+	}
+	principalID = strings.TrimSpace(principalID)
+	suggestionID = strings.TrimSpace(suggestionID)
+	if principalID == "" || suggestionID == "" {
+		return errors.New("principal_id and suggestion_id are required")
+	}
+
+	current, err := s.GetSuggestion(suggestionID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(current.PrincipalID) != principalID {
+		return nil
+	}
+
+	all, err := s.ListSuggestions(ListSuggestionsQuery{
+		PrincipalID:   principalID,
+		IncludeParked: true,
+		Limit:         200,
+	})
+	if err != nil {
+		return err
+	}
+
+	candidates := make([]Suggestion, 0, len(all))
+	for _, cand := range all {
+		if cand.SuggestionID == current.SuggestionID {
+			continue
+		}
+		candidates = append(candidates, cand)
+	}
+
+	sims := computeSimilarSuggestionsV1(current.Title, current.DraftSkill, candidates, 5)
+	if len(sims) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(sims))
+	for _, it := range sims {
+		ids = append(ids, it.SuggestionID)
+	}
+
+	recommended := ""
+	if sims[0].Similarity >= 0.5 {
+		recommended = sims[0].SuggestionID
+	}
+
+	_, err = s.UpdateSuggestion(current.SuggestionID, func(cur *Suggestion) error {
+		cur.Meta.SimilarSuggestionIDs = ids
+		if strings.TrimSpace(recommended) != "" {
+			cur.Meta.RecommendedMergeTargetID = recommended
+		}
+		return nil
+	})
+	return err
 }
 
 func pickNextPairV1(receipts []Receipt, used map[string]bool) []Receipt {
