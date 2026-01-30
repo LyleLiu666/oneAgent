@@ -11,11 +11,10 @@
 - （暂无）
 
 ### P1（Prompt 基建 / 降低踩坑）
-- `update-tool-protocol-boundaries`（2/7）：固化工具协议边界（JSON 默认 / XML fallback）+ XML 工具集 gating
+- （暂无）
 
 ### P2（对齐 Codex / 中长期）
 - `update-openai-responses-toolcalling`（2/7）：补齐 OpenAI Responses provider 的 tools loop（先 MVP 非流式，流式 best-effort）
 
 ## Snapshot（来自 `openspec list`）
 - `update-openai-responses-toolcalling`：2/7 tasks
-- `update-tool-protocol-boundaries`：2/7 tasks
