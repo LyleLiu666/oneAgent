@@ -40,3 +40,33 @@ func TestValidateCommand_Dev_AllowsCd(t *testing.T) {
 		t.Fatalf("expected allow, got %v", err)
 	}
 }
+
+func TestValidateCommand_Coding_AllowsCommonDevCommands(t *testing.T) {
+	cases := []string{
+		"git status",
+		"git diff --name-only",
+		"find . -name \"*.go\"",
+		"go test ./...",
+		"gofmt -w .",
+		"python -V",
+		"python3 -V",
+		"pip -V",
+		"pytest -q",
+		"node -v",
+		"npm test",
+		"pnpm -v",
+		"yarn -v",
+		"make test",
+	}
+	for _, cmd := range cases {
+		if err := ValidateCommand("coding", cmd, nil); err != nil {
+			t.Fatalf("expected allow for %q, got %v", cmd, err)
+		}
+	}
+}
+
+func TestValidateCommand_Coding_DeniesSudo(t *testing.T) {
+	if err := ValidateCommand("coding", "sudo ls", nil); err == nil {
+		t.Fatalf("expected deny for sudo")
+	}
+}

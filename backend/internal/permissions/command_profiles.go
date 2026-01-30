@@ -47,6 +47,55 @@ func AllowedCommands(profile string) map[string]struct{} {
 			"touch": {},
 			"sleep": {},
 		}
+	case "coding":
+		return map[string]struct{}{
+			// Baseline (dev-like).
+			"cd":    {},
+			"ls":    {},
+			"cat":   {},
+			"rg":    {},
+			"grep":  {},
+			"pwd":   {},
+			"echo":  {},
+			"head":  {},
+			"tail":  {},
+			"wc":    {},
+			"sort":  {},
+			"uniq":  {},
+			"sed":   {},
+			"awk":   {},
+			"cp":    {},
+			"mv":    {},
+			"mkdir": {},
+			"touch": {},
+			"sleep": {},
+
+			// Coding essentials.
+			"find": {},
+			"git":  {},
+
+			// Go.
+			"go":    {},
+			"gofmt": {},
+
+			// Python.
+			"python":  {},
+			"python3": {},
+			"pip":     {},
+			"pip3":    {},
+			"pytest":  {},
+
+			// Node.
+			"node": {},
+			"npm":  {},
+			"pnpm": {},
+			"yarn": {},
+
+			// Build tools (best-effort).
+			"make":  {},
+			"cmake": {},
+			"cargo": {},
+		}
 	default:
 		return map[string]struct{}{
 			"ls":   {},

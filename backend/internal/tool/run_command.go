@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -155,6 +156,10 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			return nil, errors.New("unsupported sandbox_mode (expected none|docker)")
 		}
 		profile := CommandProfile(dec, "dev")
+		requestedProfile := strings.ToLower(strings.TrimSpace(profile))
+		if requestedProfile == "coding" && mode != "docker" {
+			return nil, fmt.Errorf("coding profile requires sandbox_mode=docker (got %s)", mode)
+		}
 		allowlist := dec.Constraints.Allowlist
 		if mode == "none" {
 			// Safety invariant: without a hard sandbox boundary, command tools MUST degrade to readonly.
