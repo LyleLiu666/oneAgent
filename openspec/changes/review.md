@@ -8,7 +8,7 @@
 ## Priority（高 → 低）
 
 ### P0（核心体验 / 高 ROI）
-- `update-sop-learning-pipeline-staleness`：学习管线治理（证据/去重合并线索/技能过时淘汰）
+- （暂无）
 
 ### P1（治理与自动化 / 降低损耗）
 - （暂无）
@@ -17,5 +17,4 @@
 - `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
 
 ## Snapshot（来自 `openspec list`）
-- `update-sop-learning-pipeline-staleness`：0/13 tasks
 - `add-workflow-orchestration-graph`：0/14 tasks
