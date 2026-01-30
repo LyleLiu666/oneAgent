@@ -68,13 +68,6 @@ const selectedError = ref("");
 
 const effectiveWorkspace = computed(() => String(props.workspace || "").trim());
 
-const currentWorkspacePolicy = computed(() => {
-  const ws = effectiveWorkspace.value;
-  if (!ws) return null;
-  const map = governance.value?.workspaces || {};
-  return (map as any)[ws] || null;
-});
-
 const sortTaskEventsNewestFirst = (events: TaskEvent[]) => {
   const safeEvents = Array.isArray(events) ? events : [];
   return [...safeEvents].sort((a, b) => {
