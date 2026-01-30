@@ -10,6 +10,7 @@
 ### P0（先测后改 / 高优先级评估）
 - `update-toolcalling-default-temperature`（2/5）：tools 启用时默认 temperature=0（提升结构化输出稳定性）
 - `update-toolcalling-arguments-normalization`（2/5）：增强 tool arguments JSON 修复（围栏/夹杂文本/quoted JSON）
+- `update-tool-names-openai-compatible`（2/7）：工具 function name 去点号（OpenAI-compatible）+ 保留 alias 兼容
 - `add-toolcalling-reliability-specs`（5/5）：整理工具调用专家建议为 OpenSpec，并增加 XML vs JSON 长文本专项回归测试（先测后改）
 
 ### P1（Prompt 基建 / 降低踩坑）
@@ -22,3 +23,4 @@
 - `add-toolcalling-reliability-specs`：5/5 tasks
 - `add-core-tool-manuals`：2/5 tasks
 - `add-command-profile-coding`：2/6 tasks
+- `update-tool-names-openai-compatible`：2/7 tasks
