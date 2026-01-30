@@ -56,3 +56,40 @@ it('loads and renders suggestions sorted by total_score', async () => {
   wrapper.unmount()
 })
 
+it('shows governance hints and can merge into recommended target', async () => {
+  const { default: SopGovernance } = await import('@/views/SopGovernance.vue')
+
+  ;(apiClient.listSopSuggestions as any).mockResolvedValueOnce([
+    {
+      suggestion_id: 's1',
+      principal_id: 'local',
+      title: 'Needs merge',
+      status: 'proposed',
+      evidence_receipt_ids: [],
+      evidence_count: 0,
+      draft_skill: 'a',
+      scores: { scarcity_score: 0.1, depth_score: 0.1, evidence_score: 0, total_score: 0.1 },
+      meta: {
+        recommended_merge_target_id: 'target-12345678',
+        similar_suggestion_ids: ['target-12345678', 'other-abcdef01'],
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  ])
+
+  const wrapper = shallowMount(SopGovernance)
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="sop-governance-hints"]').exists()).toBe(true)
+
+  await wrapper.get('[data-testid="sop-merge-recommended"]').trigger('click')
+  await flushPromises()
+
+  expect((apiClient as any).updateSopSuggestionStatus).toHaveBeenCalledWith(
+    's1',
+    expect.objectContaining({ status: 'merged', merged_into_suggestion_id: 'target-12345678' }),
+  )
+
+  wrapper.unmount()
+})

@@ -225,6 +225,37 @@ onMounted(async () => {
                 <p v-if="s.meta.compression_reason" class="text-[11px] text-surface-500 mt-2">{{ s.meta.compression_reason }}</p>
               </div>
 
+              <div
+                v-if="s.meta?.recommended_merge_target_id || (Array.isArray(s.meta?.similar_suggestion_ids) && s.meta!.similar_suggestion_ids!.length > 0)"
+                data-testid="sop-governance-hints"
+                class="rounded-xl bg-surface-900/60 border border-surface-700/50 p-3 space-y-2"
+              >
+                <p class="text-xs text-surface-400">治理线索</p>
+
+                <div v-if="s.meta?.recommended_merge_target_id" class="flex items-center justify-between gap-3">
+                  <p class="text-xs text-surface-200 truncate">
+                    推荐合并到：<span class="font-mono">{{ s.meta.recommended_merge_target_id.slice(0, 8) }}</span>
+                  </p>
+                  <button
+                    v-if="(s.status === 'proposed' || s.status === 'parked')"
+                    data-testid="sop-merge-recommended"
+                    class="px-2 py-1 rounded-md text-[10px] uppercase tracking-wide bg-surface-800 text-surface-300 hover:bg-surface-700"
+                    :disabled="loading"
+                    @click="setStatus(s.suggestion_id, 'merged', s.meta.recommended_merge_target_id)"
+                  >
+                    合并到
+                  </button>
+                </div>
+
+                <p
+                  v-if="Array.isArray(s.meta?.similar_suggestion_ids) && s.meta!.similar_suggestion_ids!.length > 0"
+                  class="text-[11px] text-surface-500"
+                >
+                  相似候选：
+                  <span class="font-mono">{{ s.meta!.similar_suggestion_ids!.slice(0, 5).map((x) => String(x).slice(0, 8)).join(', ') }}</span>
+                </p>
+              </div>
+
               <div class="flex flex-wrap gap-2">
                 <button
                   v-if="s.status === 'proposed' || s.status === 'parked'"

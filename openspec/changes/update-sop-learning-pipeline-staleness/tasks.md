@@ -12,9 +12,9 @@
 
 ## 3. Frontend
 - [x] 3.1 Surface stale skills list + recommended actions (archive/keep/merge) (best-effort)
-- [ ] 3.2 SOP/skills governance UI: show “similar/merge hints” inline (best-effort)
-- [ ] 3.3 Frontend tests
+- [x] 3.2 SOP/skills governance UI: show “similar/merge hints” inline (best-effort)
+- [x] 3.3 Frontend tests
 
 ## 4. Validation
-- [ ] 4.1 `cd backend && go test ./...`
-- [ ] 4.2 `cd frontend && npm test -- --run`
+- [x] 4.1 `cd backend && go test ./...`
+- [x] 4.2 `cd frontend && npm test -- --run`

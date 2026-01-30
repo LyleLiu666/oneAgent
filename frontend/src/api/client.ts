@@ -997,6 +997,8 @@ export interface SuggestionMeta {
   compression_evaluated_at?: string;
   similar_skill_ids?: string[];
   delta_vs_top1?: string;
+  similar_suggestion_ids?: string[];
+  recommended_merge_target_id?: string;
   materialized_skill_id?: string;
   materialized_skill_path?: string;
 }
