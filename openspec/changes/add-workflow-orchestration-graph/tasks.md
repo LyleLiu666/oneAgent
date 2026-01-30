@@ -19,5 +19,5 @@
 - [ ] 3.4 Frontend tests: editor basics + run status rendering
 
 ## 4. Validation
-- [ ] 4.1 `cd backend && go test ./...`
-- [ ] 4.2 `cd frontend && npm test -- --run`
+- [x] 4.1 `cd backend && go test ./...`
+- [x] 4.2 `cd frontend && npm test -- --run`
