@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
@@ -18,6 +19,10 @@ import (
 type Store struct {
 	tasksDir string
 	muByTask sync.Map // map[string]*sync.Mutex
+
+	govMu     sync.Mutex
+	govCache  QueueGovernance
+	govCacheAt time.Time
 }
 
 type taskFile struct {

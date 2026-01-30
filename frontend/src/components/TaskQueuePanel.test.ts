@@ -12,6 +12,9 @@ vi.mock('@/api/client', () => ({
     getTaskEvents: vi.fn(async () => []),
     cancelTask: vi.fn(),
     resumeTask: vi.fn(),
+    getTaskQueueGovernance: vi.fn(async () => ({ global: { max_running_workspaces: 0 }, workspaces: {}, schedules: [] })),
+    updateTaskQueueWorkspacePolicy: vi.fn(async () => ({ global: { max_running_workspaces: 0 }, workspaces: {}, schedules: [] })),
+    createTaskQueueSchedule: vi.fn(async () => ({ global: { max_running_workspaces: 0 }, workspaces: {}, schedules: [] })),
 }))
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -138,7 +141,7 @@ it('queues a new task using current workspace and model', async () => {
     await wrapper.get('[data-testid="tasks-toggle"]').trigger('click')
     await flushPromises()
 
-    const textarea = wrapper.get('textarea')
+    const textarea = wrapper.get('[data-testid="newtask-prompt"]')
     await textarea.setValue('do it')
 
     const queueButton = wrapper.get('[data-testid="tasks-queue"]')
@@ -200,6 +203,7 @@ it('shows newest events first', async () => {
     const taskButton = wrapper.get('[data-testid="task-item"][data-task-id="task-1"]')
     await taskButton.trigger('click')
     await flushPromises()
+    await flushPromises()
 
     const viewer = wrapper.findComponent({ name: 'EventLogViewer' })
     expect(viewer.exists()).toBe(true)
@@ -256,10 +260,49 @@ it('shows updates when a task finishes after baseline', async () => {
 
     await wrapper.get('[data-testid="tasks-refresh"]').trigger('click')
     await flushPromises()
+    await flushPromises()
 
     expect(wrapper.find('[data-testid="task-updates"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('更新')
     expect(wrapper.text()).toContain('succeeded')
+
+    wrapper.unmount()
+})
+
+it('updates workspace governance policy via API', async () => {
+    const { default: TaskQueuePanel } = await import('@/components/TaskQueuePanel.vue')
+
+    ;(apiClient.listTasks as any).mockResolvedValueOnce([])
+    ;(apiClient.getTaskQueueGovernance as any).mockResolvedValueOnce({
+        global: { max_running_workspaces: 0 },
+        workspaces: { '/tmp/ws': { paused: false, priority: 1 } },
+        schedules: [],
+    })
+
+    const wrapper = shallowMount(TaskQueuePanel, {
+        props: {
+            workspace: '/tmp/ws',
+            modelId: 'model-1',
+        },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="tasks-toggle"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="governance-paused"]').setValue(true)
+    await wrapper.get('[data-testid="governance-priority"]').setValue('3')
+
+    await wrapper.get('[data-testid="governance-save"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.updateTaskQueueWorkspacePolicy).toHaveBeenCalledWith(
+        expect.objectContaining({
+            workspace: '/tmp/ws',
+            paused: true,
+            priority: 3,
+        }),
+    )
 
     wrapper.unmount()
 })

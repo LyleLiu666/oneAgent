@@ -825,6 +825,70 @@ export async function getLedgerStatusToday(): Promise<LedgerStatusToday> {
   return api("/api/ledger/status/today");
 }
 
+// ============================================================================
+// Task queue governance (multi-workspace policies / schedules)
+// ============================================================================
+
+export interface TaskQueueGovernance {
+  global: {
+    max_running_workspaces?: number;
+  };
+  workspaces?: Record<
+    string,
+    {
+      paused?: boolean;
+      priority?: number;
+    }
+  >;
+  schedules?: Array<{
+    id: string;
+    enabled: boolean;
+    user_id?: string;
+    workspace: string;
+    title?: string;
+    prompt: string;
+    model_id?: string;
+    every_seconds: number;
+    next_run_at?: string;
+    created_at?: string;
+    updated_at?: string;
+  }>;
+  updated_at?: string;
+}
+
+export async function getTaskQueueGovernance(): Promise<TaskQueueGovernance> {
+  return api("/api/tasks/governance");
+}
+
+export async function updateTaskQueueGlobalPolicy(payload: {
+  max_running_workspaces: number;
+}): Promise<TaskQueueGovernance> {
+  return api("/api/tasks/governance/global", { method: "POST", body: payload });
+}
+
+export async function updateTaskQueueWorkspacePolicy(payload: {
+  workspace: string;
+  paused?: boolean;
+  priority?: number;
+}): Promise<TaskQueueGovernance> {
+  return api("/api/tasks/governance/workspace", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function createTaskQueueSchedule(payload: {
+  workspace: string;
+  title?: string;
+  prompt: string;
+  model_id?: string;
+  every_seconds: number;
+  enabled: boolean;
+  limits?: Record<string, any>;
+}): Promise<TaskQueueGovernance> {
+  return api("/api/tasks/governance/schedules", { method: "POST", body: payload });
+}
+
 export type ReceiptKind = "subagent_run";
 
 export type ReceiptStatus =

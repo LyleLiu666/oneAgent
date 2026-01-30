@@ -9,11 +9,15 @@ import {
   createTask,
   getTask,
   getTaskEvents,
+  getTaskQueueGovernance,
   listTasks,
   resumeTask,
+  updateTaskQueueWorkspacePolicy,
+  createTaskQueueSchedule,
   type Task,
   type TaskAttempt,
   type TaskEvent,
+  type TaskQueueGovernance,
 } from "@/api/client";
 import {
   diffTaskUpdates,
@@ -42,6 +46,20 @@ const notifyInitialized = ref(false);
 const taskSnapshots = ref<Record<string, TaskSnapshot>>({});
 const taskUpdates = ref<TaskUpdate[]>([]);
 
+// Governance state (best-effort)
+const governanceLoading = ref(false);
+const governanceError = ref("");
+const governance = ref<TaskQueueGovernance | null>(null);
+const wsPausedDraft = ref(false);
+const wsPriorityDraft = ref(0);
+
+const scheduleTitle = ref("");
+const schedulePrompt = ref("");
+const scheduleEverySeconds = ref<number>(3600);
+const scheduleEnabled = ref(true);
+const scheduleSubmitting = ref(false);
+const scheduleError = ref("");
+
 const selectedTaskId = ref<string>("");
 const selectedTask = ref<Task | null>(null);
 const selectedEvents = ref<TaskEvent[]>([]);
@@ -49,6 +67,13 @@ const selectedLoading = ref(false);
 const selectedError = ref("");
 
 const effectiveWorkspace = computed(() => String(props.workspace || "").trim());
+
+const currentWorkspacePolicy = computed(() => {
+  const ws = effectiveWorkspace.value;
+  if (!ws) return null;
+  const map = governance.value?.workspaces || {};
+  return (map as any)[ws] || null;
+});
 
 const sortTaskEventsNewestFirst = (events: TaskEvent[]) => {
   const safeEvents = Array.isArray(events) ? events : [];
@@ -157,6 +182,84 @@ const refreshSelected = async () => {
   }
 };
 
+const refreshGovernance = async () => {
+  governanceError.value = "";
+  const ws = effectiveWorkspace.value;
+  if (!ws) {
+    governance.value = null;
+    wsPausedDraft.value = false;
+    wsPriorityDraft.value = 0;
+    return;
+  }
+
+  governanceLoading.value = true;
+  try {
+    const g = await getTaskQueueGovernance();
+    governance.value = g;
+    const p: any = (g as any)?.workspaces?.[ws] || {};
+    wsPausedDraft.value = !!p?.paused;
+    wsPriorityDraft.value = Number(p?.priority || 0);
+  } catch (e: any) {
+    governanceError.value = String(
+      e?.data?.error || e?.message || "Failed to load governance",
+    );
+    governance.value = null;
+  } finally {
+    governanceLoading.value = false;
+  }
+};
+
+const saveWorkspacePolicy = async () => {
+  governanceError.value = "";
+  const ws = effectiveWorkspace.value;
+  if (!ws) return;
+
+  governanceLoading.value = true;
+  try {
+    const g = await updateTaskQueueWorkspacePolicy({
+      workspace: ws,
+      paused: wsPausedDraft.value,
+      priority: Number(wsPriorityDraft.value || 0),
+    });
+    governance.value = g;
+  } catch (e: any) {
+    governanceError.value = String(
+      e?.data?.error || e?.message || "Failed to update workspace policy",
+    );
+  } finally {
+    governanceLoading.value = false;
+  }
+};
+
+const createSchedule = async () => {
+  scheduleError.value = "";
+  const ws = effectiveWorkspace.value;
+  const p = String(schedulePrompt.value || "").trim();
+  if (!ws || !p) return;
+  if (Number(scheduleEverySeconds.value || 0) <= 0) return;
+
+  scheduleSubmitting.value = true;
+  try {
+    const g = await createTaskQueueSchedule({
+      workspace: ws,
+      title: String(scheduleTitle.value || "").trim() || undefined,
+      prompt: p,
+      model_id: String(props.modelId || "").trim() || undefined,
+      every_seconds: Number(scheduleEverySeconds.value || 0),
+      enabled: !!scheduleEnabled.value,
+    });
+    governance.value = g;
+    scheduleTitle.value = "";
+    schedulePrompt.value = "";
+  } catch (e: any) {
+    scheduleError.value = String(
+      e?.data?.error || e?.message || "Failed to create schedule",
+    );
+  } finally {
+    scheduleSubmitting.value = false;
+  }
+};
+
 const queueTask = async () => {
   tasksError.value = "";
   const ws = effectiveWorkspace.value;
@@ -227,8 +330,18 @@ watch(
     selectedTask.value = null;
     selectedEvents.value = [];
     await refreshTasks();
+    await refreshGovernance();
   },
   { immediate: true },
+);
+
+watch(
+  () => open.value,
+  async (v) => {
+    if (v) {
+      await refreshGovernance();
+    }
+  },
 );
 
 watch(
@@ -305,6 +418,131 @@ onUnmounted(() => {
           {{ tasksError }}
         </div>
 
+        <details
+          class="rounded-xl border border-surface-700/40 bg-surface-950/40 p-3"
+        >
+          <summary
+            class="cursor-pointer select-none text-xs font-semibold text-surface-200"
+            data-testid="governance-toggle"
+          >
+            队列治理（best-effort）
+          </summary>
+          <div class="mt-3 space-y-3">
+            <div v-if="governanceError" class="text-xs text-red-400">
+              {{ governanceError }}
+            </div>
+
+            <div class="text-xs text-surface-400">
+              全局 max_running_workspaces：
+              <span class="font-mono text-surface-200">{{
+                governance?.global?.max_running_workspaces ?? 0
+              }}</span>
+              <span class="text-surface-500">
+                （0=不限制；默认行为）
+              </span>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <label class="flex items-center gap-2 text-xs text-surface-300">
+                <input
+                  v-model="wsPausedDraft"
+                  data-testid="governance-paused"
+                  type="checkbox"
+                  class="accent-primary-500"
+                  :disabled="governanceLoading || !effectiveWorkspace"
+                />
+                暂停本工作区调度
+              </label>
+              <label class="flex items-center gap-2 text-xs text-surface-300">
+                优先级
+                <input
+                  v-model.number="wsPriorityDraft"
+                  data-testid="governance-priority"
+                  type="number"
+                  class="w-20 rounded-lg bg-surface-900 border border-surface-800 px-2 py-1 text-xs text-surface-100"
+                  :disabled="governanceLoading || !effectiveWorkspace"
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="governance-save"
+                class="px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-800/70 text-surface-100 hover:bg-surface-700/70 disabled:opacity-50"
+                :disabled="governanceLoading || !effectiveWorkspace"
+                @click="saveWorkspacePolicy"
+              >
+                {{ governanceLoading ? "保存中…" : "保存" }}
+              </button>
+            </div>
+
+            <div class="border-t border-surface-800/60 pt-3 space-y-2">
+              <div class="text-xs font-semibold text-surface-200">
+                Schedule（interval，best-effort）
+              </div>
+              <div v-if="scheduleError" class="text-xs text-red-400">
+                {{ scheduleError }}
+              </div>
+              <input
+                v-model="scheduleTitle"
+                class="w-full bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                placeholder="可选标题"
+                :disabled="!effectiveWorkspace || scheduleSubmitting"
+              />
+              <textarea
+                v-model="schedulePrompt"
+                rows="3"
+                class="w-full bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 resize-none"
+                placeholder="schedule prompt（将按间隔自动入队）"
+                :disabled="!effectiveWorkspace || scheduleSubmitting"
+              />
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                  <label class="flex items-center gap-2 text-xs text-surface-300">
+                    每隔（秒）
+                    <input
+                      v-model.number="scheduleEverySeconds"
+                      data-testid="schedule-every-seconds"
+                      type="number"
+                      min="1"
+                      class="w-24 rounded-lg bg-surface-900 border border-surface-800 px-2 py-1 text-xs text-surface-100"
+                      :disabled="!effectiveWorkspace || scheduleSubmitting"
+                    />
+                  </label>
+                  <label class="flex items-center gap-2 text-xs text-surface-300">
+                    <input
+                      v-model="scheduleEnabled"
+                      type="checkbox"
+                      class="accent-primary-500"
+                      :disabled="!effectiveWorkspace || scheduleSubmitting"
+                    />
+                    启用
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  data-testid="schedule-create"
+                  class="bg-primary-600 text-white text-xs rounded-lg px-3 py-1.5 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  :disabled="
+                    !effectiveWorkspace ||
+                    scheduleSubmitting ||
+                    !schedulePrompt.trim() ||
+                    Number(scheduleEverySeconds || 0) <= 0
+                  "
+                  @click="createSchedule"
+                >
+                  {{ scheduleSubmitting ? "创建中…" : "创建 schedule" }}
+                </button>
+              </div>
+
+              <div
+                v-if="(governance?.schedules || []).length"
+                class="text-xs text-surface-400"
+              >
+                当前 schedules：{{ (governance?.schedules || []).length }}
+              </div>
+            </div>
+          </div>
+        </details>
+
         <div
           v-if="taskUpdates.length"
           data-testid="task-updates"
@@ -344,12 +582,14 @@ onUnmounted(() => {
 
             <input
               v-model="title"
+              data-testid="newtask-title"
               class="w-full bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
               placeholder="可选标题"
               :disabled="!effectiveWorkspace || submitting"
             />
             <textarea
               v-model="prompt"
+              data-testid="newtask-prompt"
               rows="3"
               class="w-full bg-surface-900 text-surface-200 text-xs rounded-lg px-2 py-1.5 border border-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 resize-none"
               placeholder="描述要交付的结果（后台运行）"

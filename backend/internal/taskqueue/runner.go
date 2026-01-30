@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/usage"
 )
@@ -52,16 +53,15 @@ type TaskRunner struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 
-	mu      sync.Mutex
-	workers map[string]*workspaceWorker
-	wg      sync.WaitGroup
+	mu sync.Mutex
+	wg sync.WaitGroup
+
+	notify chan struct{}
+
+	queues            map[string][]string
+	runningWorkspaces map[string]bool
 
 	running sync.Map // map[string]context.CancelFunc (key=task_id)
-}
-
-type workspaceWorker struct {
-	workspace string
-	queue     chan string
 }
 
 func (r *TaskRunner) Start() error {
@@ -83,7 +83,21 @@ func (r *TaskRunner) Start() error {
 	}
 
 	r.ctx, r.cancel = context.WithCancel(context.Background())
-	r.workers = make(map[string]*workspaceWorker)
+	r.notify = make(chan struct{}, 1)
+	r.queues = make(map[string][]string)
+	r.runningWorkspaces = make(map[string]bool)
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.runScheduler()
+	}()
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.runSchedules()
+	}()
 
 	// Recovery on (re)start:
 	// - running -> interrupted (no auto-resume)
@@ -172,13 +186,11 @@ func (r *TaskRunner) Enqueue(taskID string) error {
 		return errors.New("task workspace is required")
 	}
 
-	worker := r.ensureWorker(ws)
-	select {
-	case worker.queue <- taskID:
-		return nil
-	case <-r.ctx.Done():
-		return errors.New("runner is stopped")
-	}
+	r.mu.Lock()
+	r.queues[ws] = append(r.queues[ws], taskID)
+	r.mu.Unlock()
+	r.signal()
+	return nil
 }
 
 func (r *TaskRunner) Cancel(taskID string) (Task, error) {
@@ -318,37 +330,143 @@ func (r *TaskRunner) enqueueAttempt(taskID string, reviewNotes string, source st
 	return updated, nil
 }
 
-func (r *TaskRunner) ensureWorker(workspace string) *workspaceWorker {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if w, ok := r.workers[workspace]; ok {
-		return w
+func (r *TaskRunner) signal() {
+	if r == nil || r.ctx == nil || r.ctx.Err() != nil {
+		return
 	}
-
-	w := &workspaceWorker{
-		workspace: workspace,
-		queue:     make(chan string, 64),
+	select {
+	case r.notify <- struct{}{}:
+	default:
 	}
-	r.workers[workspace] = w
-
-	r.wg.Add(1)
-	go func() {
-		defer r.wg.Done()
-		r.runWorker(workspace, w.queue)
-	}()
-
-	return w
 }
 
-func (r *TaskRunner) runWorker(workspace string, queue <-chan string) {
+func (r *TaskRunner) runScheduler() {
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-r.ctx.Done():
 			return
-		case taskID := <-queue:
-			r.processTask(workspace, taskID)
+		case <-r.notify:
+			// attempt schedule loop
+		case <-ticker.C:
+			// periodic re-evaluation (governance changes, pause/resume, etc.)
 		}
+
+		for {
+			workspace, taskID := r.pickNextRunnable()
+			if workspace == "" || taskID == "" {
+				break
+			}
+
+			r.wg.Add(1)
+			go func(ws, id string) {
+				defer r.wg.Done()
+				r.processTask(ws, id)
+				r.mu.Lock()
+				delete(r.runningWorkspaces, ws)
+				r.mu.Unlock()
+				r.signal()
+			}(workspace, taskID)
+		}
+	}
+}
+
+func (r *TaskRunner) pickNextRunnable() (string, string) {
+	if r == nil || r.Store == nil {
+		return "", ""
+	}
+
+	g, _ := r.Store.GetGovernance()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	maxWS := g.Global.MaxRunningWorkspaces
+	if maxWS > 0 {
+		running := 0
+		for _, v := range r.runningWorkspaces {
+			if v {
+				running++
+			}
+		}
+		if running >= maxWS {
+			return "", ""
+		}
+	}
+
+	bestWS := ""
+	bestPriority := -1 << 30
+	for ws, q := range r.queues {
+		if len(q) == 0 {
+			continue
+		}
+		if r.runningWorkspaces[ws] {
+			continue
+		}
+		p := g.Workspaces[ws]
+		if p.Paused {
+			continue
+		}
+
+		pri := p.Priority
+		if bestWS == "" || pri > bestPriority || (pri == bestPriority && ws < bestWS) {
+			bestWS = ws
+			bestPriority = pri
+		}
+	}
+	if bestWS == "" {
+		return "", ""
+	}
+
+	taskID := r.queues[bestWS][0]
+	r.queues[bestWS] = r.queues[bestWS][1:]
+	r.runningWorkspaces[bestWS] = true
+	return bestWS, taskID
+}
+
+func (r *TaskRunner) runSchedules() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case now := <-ticker.C:
+			r.runSchedulesOnce(now)
+		}
+	}
+}
+
+func (r *TaskRunner) runSchedulesOnce(now time.Time) {
+	if r == nil || r.Store == nil {
+		return
+	}
+	due, err := r.Store.TakeDueSchedules(now)
+	if err != nil {
+		return
+	}
+	if len(due) == 0 {
+		return
+	}
+
+	for _, sc := range due {
+		userID := strings.TrimSpace(sc.UserID)
+		if userID == "" {
+			userID = "local"
+		}
+		title := strings.TrimSpace(sc.Title)
+		if title == "" {
+			title = "Scheduled task"
+		}
+
+		task, err := r.Store.CreateTask(userID, sc.Workspace, title, sc.Prompt, sc.ModelID, ResolveLimits(sc.Limits))
+		if err != nil {
+			continue
+		}
+		_ = r.Enqueue(task.ID)
 	}
 }
 
