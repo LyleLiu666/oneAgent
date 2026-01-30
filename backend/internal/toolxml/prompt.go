@@ -1,7 +1,6 @@
 package toolxml
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/tool"
@@ -10,6 +9,11 @@ import (
 // SystemPrompt returns the system prompt suffix that enables XML-wrapped tool calling.
 // The caller should append this to the base system prompt when XML tools are enabled.
 func SystemPrompt(defs []tool.Definition) string {
+	if len(defs) == 0 {
+		return ""
+	}
+
+	defs, _ = FilterSupportedDefinitions(defs)
 	if len(defs) == 0 {
 		return ""
 	}
@@ -29,7 +33,7 @@ func SystemPrompt(defs []tool.Definition) string {
 	b.WriteString("</tool_data>\n\n")
 	b.WriteString("支持的工具：\n")
 	for _, def := range defs {
-		name := def.Spec.Function.Name
+		name := tool.CanonicalToolName(def.Spec.Function.Name)
 		switch name {
 		case "bash":
 			b.WriteString("- bash:\n")
@@ -88,6 +92,24 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("  ]\n")
 			b.WriteString("  </edits>\n")
 			b.WriteString("  <replaceAll>true</replaceAll>（可选；对所有 edits 生效）\n")
+		case "search":
+			b.WriteString("- search（联网搜索）：\n")
+			b.WriteString("  <tool_name>search</tool_name>\n")
+			b.WriteString("  <query>...</query>\n")
+			b.WriteString("  <count>5</count>（可选；默认 5）\n")
+			b.WriteString("  <freshness>day|week|month</freshness>（可选）\n")
+		case "plan":
+			b.WriteString("- plan（计划管理）：\n")
+			b.WriteString("  <tool_name>plan</tool_name>\n")
+			b.WriteString("  <action>start|update|complete</action>\n")
+			b.WriteString("  <task_id>...</task_id>（可选）\n")
+			b.WriteString("  <template>...</template>（可选）\n")
+			b.WriteString("  <overwrite>true</overwrite>（可选）\n")
+		case "skill_read":
+			b.WriteString("- skill_read（读取技能说明）：\n")
+			b.WriteString("  <tool_name>skill_read</tool_name>\n")
+			b.WriteString("  <name>...</name>（可选）\n")
+			b.WriteString("  <skill_id>...</skill_id>（可选）\n")
 		case "rg":
 			b.WriteString("- rg（ripgrep，本地高速搜索，支持正则）：\n")
 			b.WriteString("  <tool_name>rg</tool_name>\n")
@@ -109,9 +131,9 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("  <max_runtime_seconds>3600</max_runtime_seconds>（可选；默认 3600）\n")
 			b.WriteString("  说明：默认禁止递归（子 Agent 不挂载 subagent 工具本身）。\n")
 		default:
-			if strings.TrimSpace(name) != "" {
-				b.WriteString(fmt.Sprintf("- %s: not documented\n", name))
-			}
+			// XML protocol only exposes tools supported by the XML engine.
+			// Keep this prompt fail-closed: do not advertise unknown tools.
+			continue
 		}
 	}
 

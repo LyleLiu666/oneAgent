@@ -245,26 +245,23 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	}
 
 	toolIDsSet := req.ToolIDs != nil
-	selectedToolIDs := req.ToolIDs
+	requestedToolIDs := req.ToolIDs
 	if !toolIDsSet {
 		if stored, ok := extractToolIDs(session.Metadata); ok {
-			selectedToolIDs = stored
+			requestedToolIDs = stored
 		}
-		selectedToolIDs = filterKnownToolIDs(selectedToolIDs)
+		requestedToolIDs = filterKnownToolIDs(requestedToolIDs)
 	}
 
-	toolProtocol := strings.TrimSpace(req.ToolProtocol)
-	toolProtocolSet := toolProtocol != ""
+	requestedToolProtocol := strings.TrimSpace(req.ToolProtocol)
+	toolProtocolSet := requestedToolProtocol != ""
 	if !toolProtocolSet {
 		if stored, ok := extractToolProtocol(session.Metadata); ok {
-			toolProtocol = stored
+			requestedToolProtocol = stored
 		}
 	}
-	toolProtocol = strings.ToLower(strings.TrimSpace(toolProtocol))
-	if toolProtocol == "" {
-		toolProtocol = "json"
-	}
-	if toolProtocol != "json" && toolProtocol != "xml" {
+	requestedToolProtocol = strings.ToLower(strings.TrimSpace(requestedToolProtocol))
+	if requestedToolProtocol != "" && requestedToolProtocol != "json" && requestedToolProtocol != "xml" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tool_protocol"})
 		return
 	}
@@ -275,7 +272,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 	if resolvedModel.SafetyTier != safetyTierHigh && userID != "local" {
-		blocked := intersectToolIDs(selectedToolIDs, []string{tool.ToolIDBash, tool.ToolIDRunCommand})
+		blocked := intersectToolIDs(requestedToolIDs, []string{tool.ToolIDBash, tool.ToolIDRunCommand})
 		if len(blocked) > 0 {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("tool(s) %s require safety_tier=%s (current=%s)", strings.Join(blocked, ","), safetyTierHigh, resolvedModel.SafetyTier),
@@ -284,11 +281,22 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		}
 	}
 
-	toolDefs, err := tool.MountWithSnapshot(selectedToolIDs, policySnap)
+	mountedToolDefs, err := tool.MountWithSnapshot(requestedToolIDs, policySnap)
 	if err != nil {
 		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
+	selectedToolIDs := toolIDsFromDefinitions(mountedToolDefs)
+
+	toolProtocol, toolProtocolFellBack := selectToolProtocol(requestedToolProtocol, mountedToolDefs, resolvedModel.Client)
+
+	toolDefs := mountedToolDefs
+	if toolProtocol == "xml" && len(toolDefs) > 0 {
+		toolDefs, _ = toolxml.FilterSupportedDefinitions(toolDefs)
+	}
+
+	effectiveToolIDs := toolIDsFromDefinitions(toolDefs)
+
 	if len(toolDefs) > 0 && strings.TrimSpace(workspaceRoot) == "" && toolSetRequiresWorkspace(toolDefs) {
 		RespondError(c, http.StatusBadRequest, &PublicError{
 			Status: http.StatusBadRequest,
@@ -298,7 +306,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		})
 		return
 	}
-	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
 
 	toolNames := make([]string, 0, len(toolDefs))
 	for _, def := range toolDefs {
@@ -392,7 +399,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			shouldUpdate = true
 		}
 		if toolProtocolSet {
-			sessionMetadata["tool_protocol"] = toolProtocol
+			sessionMetadata["tool_protocol"] = requestedToolProtocol
 			shouldUpdate = true
 		}
 
@@ -598,11 +605,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 			// Trace internal steps (fake ones purely for UI experience if config enabled)
 			if h.rt.Config.EnableTrace {
+				if toolProtocolFellBack {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: "Tool protocol fallback: provider does not support native tools; using XML.",
+					})
+				}
+
 				traceEntry := model.NewTraceEntry(model.TraceTypeLLMCall, "ChatCompletion")
 				traceEntry.Input = map[string]any{
 					"message_count": len(messages),
 					"tool_protocol": toolProtocol,
-					"tool_ids":      selectedToolIDs,
+					"tool_ids":      effectiveToolIDs,
 				}
 				traceEntry.Model = resolvedModel.ModelName
 				traceEntries = append(traceEntries, traceEntry)
@@ -672,7 +686,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				Request: map[string]any{
 					"messages":                  messages,
 					"tool_protocol":             toolProtocol,
-					"tool_ids":                  selectedToolIDs,
+					"tool_ids":                  effectiveToolIDs,
 					"cacheable_message_indexes": llm.CacheableMessageIndexes(messages),
 				},
 				PromptCacheEnabled: opts.EnablePromptCache,
@@ -1546,47 +1560,47 @@ func runToolLoop(
 						"tool_schema_hint": "Ensure all required fields are present and JSON is a single object.",
 					}
 				} else {
-				broadcaster.Broadcast(StreamEvent{
-					Type: "trace",
-					Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
-				})
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
+					})
 
-				payload, toolErr = handler(ctx, json.RawMessage(call.Function.Arguments))
-				if toolErr != nil {
-					var approvalRequired *tool.ApprovalRequiredError
-					var approvalDenied *tool.ApprovalDeniedError
-					if errors.As(toolErr, &approvalRequired) {
-						payload = map[string]any{
-							"error":             "approval_required",
-							"approval_required": true,
-							"approval_id":       approvalRequired.ApprovalID,
-							"tool_id":           approvalRequired.ToolID,
-							"scope_id":          approvalRequired.ScopeID,
-							"arguments":         call.Function.Arguments,
-						}
-					} else if errors.As(toolErr, &approvalDenied) {
-						payload = map[string]any{
-							"error":           "approval_denied",
-							"approval_denied": true,
-							"approval_id":     approvalDenied.ApprovalID,
-							"tool_id":         approvalDenied.ToolID,
-							"scope_id":        approvalDenied.ScopeID,
-							"reason":          approvalDenied.Reason,
-							"arguments":       call.Function.Arguments,
-						}
-					} else {
-						broadcaster.Broadcast(StreamEvent{
-							Type: "error",
-							Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, toolErr),
-						})
-						recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
+					payload, toolErr = handler(ctx, json.RawMessage(call.Function.Arguments))
+					if toolErr != nil {
+						var approvalRequired *tool.ApprovalRequiredError
+						var approvalDenied *tool.ApprovalDeniedError
+						if errors.As(toolErr, &approvalRequired) {
+							payload = map[string]any{
+								"error":             "approval_required",
+								"approval_required": true,
+								"approval_id":       approvalRequired.ApprovalID,
+								"tool_id":           approvalRequired.ToolID,
+								"scope_id":          approvalRequired.ScopeID,
+								"arguments":         call.Function.Arguments,
+							}
+						} else if errors.As(toolErr, &approvalDenied) {
+							payload = map[string]any{
+								"error":           "approval_denied",
+								"approval_denied": true,
+								"approval_id":     approvalDenied.ApprovalID,
+								"tool_id":         approvalDenied.ToolID,
+								"scope_id":        approvalDenied.ScopeID,
+								"reason":          approvalDenied.Reason,
+								"arguments":       call.Function.Arguments,
+							}
+						} else {
+							broadcaster.Broadcast(StreamEvent{
+								Type: "error",
+								Data: fmt.Sprintf("Tool %s failed: %v", call.Function.Name, toolErr),
+							})
+							recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
 
-						// FEEDBACK: Return error to LLM so it can retry
-						payload = map[string]string{
-							"error": fmt.Sprintf("Tool execution failed: %v", toolErr),
+							// FEEDBACK: Return error to LLM so it can retry
+							payload = map[string]string{
+								"error": fmt.Sprintf("Tool execution failed: %v", toolErr),
+							}
 						}
 					}
-				}
 				}
 			}
 
