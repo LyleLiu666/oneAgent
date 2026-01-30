@@ -8,7 +8,7 @@
 ## Priority（高 → 低）
 
 ### P0（先测后改 / 高优先级评估）
-- `update-tool-names-openai-compatible`（2/7）：工具 function name 去点号（OpenAI-compatible）+ 保留 alias 兼容
+- （暂无）
 
 ### P1（Prompt 基建 / 降低踩坑）
 - `add-command-profile-coding`（2/6）：新增 `coding` 命令 profile（docker-only），让 coding agent 常用链路跑得起来
@@ -19,6 +19,5 @@
 
 ## Snapshot（来自 `openspec list`）
 - `add-command-profile-coding`：2/6 tasks
-- `update-tool-names-openai-compatible`：2/7 tasks
 - `update-openai-responses-toolcalling`：2/7 tasks
 - `update-tool-protocol-boundaries`：2/7 tasks
