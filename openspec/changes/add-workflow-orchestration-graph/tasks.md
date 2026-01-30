@@ -3,8 +3,8 @@
 - [x] 1.2 Run `openspec validate add-workflow-orchestration-graph --strict --no-interactive`
 
 ## 2. Backend (MVP)
-- [ ] 2.1 Data model: workflow / workflow_version / workflow_run / node_run
-- [ ] 2.2 Storage: persist definitions + run snapshots (workspace-scoped)
+- [x] 2.1 Data model: workflow / workflow_version / workflow_run / node_run
+- [x] 2.2 Storage: persist definitions + run snapshots (workspace-scoped)
 - [ ] 2.3 Execution: DAG scheduling (deps, concurrency limit, cancel/resume)
 - [ ] 2.4 Artifacts: node_run produces artifact manifest (multi-file pointers)
 - [ ] 2.5 Gates: run hard/soft evaluation and attach report to node_run evidence

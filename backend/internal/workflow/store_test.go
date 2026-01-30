@@ -56,3 +56,63 @@ func TestStore_WorkflowCreateListAndPublishVersion(t *testing.T) {
 	}
 }
 
+func TestStore_RunKeepsVersionSnapshot(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "workflows"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws := filepath.Join(t.TempDir(), "project-a")
+	ctx := context.Background()
+
+	wf, err := store.CreateWorkflow(ctx, ws, "Demo")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	v1, err := store.PublishVersion(ctx, ws, wf.WorkflowID, Graph{
+		Nodes: []Node{{NodeID: "a", Title: "A"}, {NodeID: "b", Title: "B"}},
+		Edges: []Edge{{From: "a", To: "b"}},
+	})
+	if err != nil {
+		t.Fatalf("PublishVersion(v1): %v", err)
+	}
+
+	v2, err := store.PublishVersion(ctx, ws, wf.WorkflowID, Graph{
+		Nodes: []Node{{NodeID: "x", Title: "X"}},
+		Edges: nil,
+	})
+	if err != nil {
+		t.Fatalf("PublishVersion(v2): %v", err)
+	}
+
+	run1, err := store.CreateRun(ctx, ws, wf.WorkflowID, v1.VersionID, map[string]any{"k": "v"})
+	if err != nil {
+		t.Fatalf("CreateRun(v1): %v", err)
+	}
+	if run1.VersionID != v1.VersionID {
+		t.Fatalf("expected version_id=%q, got %+v", v1.VersionID, run1)
+	}
+	if len(run1.GraphSnapshot.Nodes) != len(v1.Graph.Nodes) {
+		t.Fatalf("expected snapshot nodes=%d, got %+v", len(v1.Graph.Nodes), run1.GraphSnapshot)
+	}
+	if len(run1.NodeRuns) != 2 {
+		t.Fatalf("expected 2 node_runs queued, got %+v", run1.NodeRuns)
+	}
+
+	run2, err := store.CreateRun(ctx, ws, wf.WorkflowID, v2.VersionID, nil)
+	if err != nil {
+		t.Fatalf("CreateRun(v2): %v", err)
+	}
+	if len(run2.GraphSnapshot.Nodes) != 1 || run2.GraphSnapshot.Nodes[0].NodeID != "x" {
+		t.Fatalf("unexpected v2 snapshot: %+v", run2.GraphSnapshot)
+	}
+
+	got, err := store.GetRun(ctx, ws, wf.WorkflowID, run1.RunID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.VersionID != v1.VersionID || got.GraphSnapshot.Nodes[0].NodeID != "a" {
+		t.Fatalf("unexpected got: %+v", got)
+	}
+}
