@@ -1,6 +1,9 @@
 package toolxml
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 type streamFilter struct {
 	pending       string
@@ -62,8 +65,10 @@ func (f *streamFilter) Feed(chunk string) string {
 			if len(f.pending) <= maxSearchTail {
 				break
 			}
-			out.WriteString(f.pending[:len(f.pending)-maxSearchTail])
-			f.pending = f.pending[len(f.pending)-maxSearchTail:]
+			cut := len(f.pending) - maxSearchTail
+			cut = floorToRuneStart(f.pending, cut)
+			out.WriteString(f.pending[:cut])
+			f.pending = f.pending[cut:]
 			break
 		}
 
@@ -135,7 +140,22 @@ func keepTail(value string, max int) string {
 	if max <= 0 || len(value) <= max {
 		return value
 	}
-	return value[len(value)-max:]
+	start := len(value) - max
+	start = floorToRuneStart(value, start)
+	return value[start:]
+}
+
+func floorToRuneStart(s string, idx int) int {
+	if idx <= 0 {
+		return 0
+	}
+	if idx >= len(s) {
+		return len(s)
+	}
+	for idx > 0 && utf8.RuneStart(s[idx]) == false {
+		idx--
+	}
+	return idx
 }
 
 // indexCaseInsensitive finds the index of sub in s, ignoring case.
