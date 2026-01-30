@@ -15,7 +15,7 @@
 > 说明：本文件只记录“我们为什么看它、抄什么、从哪里抄”；具体落地仍需在 oneAgent 里拆 OpenSpec change 与测试。
 >
 > 🔗 **[Competitor Issues Snapshot](./issues/README.md)**: 我们爬取了重点项目的 Top Issues (High Reactions) 以供避坑参考。
-> 🔗 **[Agent Issues Snapshot](./agent_issues/README.md)**: 额外聚焦 coding-agent/agent 产品（Codex/OpenCode/…）的 Top Issues。
+> 🔗 **[Agent Issues Handpicked Snapshot](./agent_issues_handpicked_snapshot.md)**: 额外聚焦 coding-agent/agent 产品（Codex/OpenCode/…）的重点 issue 摘要（手工维护）。
 
 ---
 
