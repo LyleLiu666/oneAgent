@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
@@ -195,6 +196,121 @@ func TestServer_SkillsAPI_GetAndUpdateWithOCC(t *testing.T) {
 	}
 	if _, err := os.Stat(skillPath); err != nil {
 		t.Fatalf("expected skill to exist: %v", err)
+	}
+}
+
+func TestServer_SkillsAPI_ArchivePersistsReason(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	skillPath := filepath.Join(home, ".oneagent", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo-skill\ndescription: demo\n---\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	reason := "stale: unused 30d"
+	body := bytes.NewReader([]byte(`{"reason":"` + reason + `"}`))
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/skills/demo-skill/archive", body)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/skills/:id/archive: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/skills/:id/archive status=%d", res.StatusCode)
+	}
+	var archived map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&archived); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if archived["ok"] != true {
+		t.Fatalf("expected ok=true, got %+v", archived)
+	}
+	ap, _ := archived["archived_path"].(string)
+	if ap == "" {
+		t.Fatalf("expected archived_path, got %+v", archived)
+	}
+
+	notePath := filepath.Join(filepath.Dir(ap), "ARCHIVE_REASON.md")
+	note, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read reason note: %v", err)
+	}
+	if !strings.Contains(string(note), reason) {
+		t.Fatalf("expected note to contain reason %q, got %q", reason, string(note))
+	}
+}
+
+func TestServer_SkillsAPI_DeprecateIsAliasOfArchive(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	skillPath := filepath.Join(home, ".oneagent", "skills", "demo-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(skillPath, []byte("---\nname: demo-skill\ndescription: demo\n---\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/api/skills/demo-skill/deprecate", bytes.NewReader([]byte(`{"reason":"stale"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/skills/:id/deprecate: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/skills/:id/deprecate status=%d", res.StatusCode)
+	}
+
+	// Deprecated should remove the original.
+	if _, err := os.Stat(skillPath); err == nil {
+		t.Fatalf("expected original skill to be moved")
 	}
 }
 

@@ -132,6 +132,11 @@ type archiveSkillResult struct {
 	OK           bool   `json:"ok"`
 	SkillID      string `json:"skill_id"`
 	ArchivedPath string `json:"archived_path"`
+	Reason       string `json:"reason,omitempty"`
+}
+
+type archiveSkillRequest struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 type getSkillResult struct {
@@ -534,6 +539,9 @@ func ArchiveSkill(c *gin.Context) {
 		return
 	}
 
+	var req archiveSkillRequest
+	_ = c.ShouldBindJSON(&req)
+
 	cat, err := skill.Discover(c.Request.Context(), skill.DiscoverOptions{})
 	if err != nil {
 		RespondError(c, http.StatusInternalServerError, err)
@@ -560,11 +568,22 @@ func ArchiveSkill(c *gin.Context) {
 		return
 	}
 
+	// Best-effort: persist retirement reason alongside archived files.
+	if strings.TrimSpace(req.Reason) != "" {
+		_ = writeSkillRetirementReason(filepath.Dir(archivedPath), req.Reason)
+	}
+
 	c.JSON(http.StatusOK, archiveSkillResult{
 		OK:           true,
 		SkillID:      s.ID,
 		ArchivedPath: archivedPath,
+		Reason:       strings.TrimSpace(req.Reason),
 	})
+}
+
+func DeprecateSkill(c *gin.Context) {
+	// For now, "deprecate" is an alias of archive (best-effort).
+	ArchiveSkill(c)
 }
 
 func canArchiveSkill(home string, s skill.Skill) bool {
@@ -622,6 +641,18 @@ func archiveOneAgentSkill(home string, s skill.Skill) (string, error) {
 	}
 
 	return filepath.Join(dstDir, "SKILL.md"), nil
+}
+
+func writeSkillRetirementReason(archivedDir string, reason string) error {
+	archivedDir = strings.TrimSpace(archivedDir)
+	reason = strings.TrimSpace(reason)
+	if archivedDir == "" || reason == "" {
+		return nil
+	}
+	note := "# Skill Archived\n\n" +
+		"- reason: " + reason + "\n" +
+		"- archived_at: " + time.Now().UTC().Format(time.RFC3339) + "\n"
+	return fsutil.AtomicWriteFile(filepath.Join(archivedDir, "ARCHIVE_REASON.md"), []byte(note), 0o600)
 }
 
 type pinSkillRequest struct {

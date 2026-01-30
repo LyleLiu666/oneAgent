@@ -149,6 +149,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/skills/:id/file", handler.ReadSkillFile)
 		api.PUT("/skills/:id", handler.UpdateSkill)
 		api.POST("/skills/:id/archive", handler.ArchiveSkill)
+		api.POST("/skills/:id/deprecate", handler.DeprecateSkill)
 		api.POST("/skills/:id/pin", handler.PinSkillCandidate)
 		api.POST("/skills/:id/archive_shadowed", handler.ArchiveShadowedPersonalDuplicates)
 
