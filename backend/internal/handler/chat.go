@@ -627,6 +627,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			opts := &llm.ChatCompletionOptions{
 				Trace: traceCallback,
 			}
+			if len(toolDefs) > 0 && opts.Temperature == nil {
+				// Tool calling is a structured-output task; default to low temperature unless explicitly set.
+				temp := 0.0
+				opts.Temperature = &temp
+			}
 			if toolProtocol == "json" && len(toolDefs) > 0 {
 				opts.Tools = tool.ToolsForLLM(toolDefs)
 			}
