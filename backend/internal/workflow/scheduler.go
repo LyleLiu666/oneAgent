@@ -13,8 +13,14 @@ type NodeExecutor interface {
 	ExecuteNode(ctx context.Context, run WorkflowRun, node Node) (ArtifactManifest, error)
 }
 
+type GateEvaluator interface {
+	EvaluateHardGate(ctx context.Context, run WorkflowRun, node Node, manifest ArtifactManifest) (reportPath string, err error)
+	EvaluateSoftGate(ctx context.Context, run WorkflowRun, node Node, manifest ArtifactManifest) (reportPath string, err error)
+}
+
 type RunOptions struct {
 	Concurrency int
+	Gates       GateEvaluator
 }
 
 func (s *Store) RunWorkflow(ctx context.Context, workspaceRoot string, workflowID string, runID string, exec NodeExecutor, opts RunOptions) (WorkflowRun, error) {
@@ -221,6 +227,17 @@ func (s *Store) RunWorkflow(ctx context.Context, workspaceRoot string, workflowI
 				n := nodeByID[nodeID]
 				manifest, execErr := exec.ExecuteNode(ctx, runningRun, n)
 
+				hardReport := ""
+				softReport := ""
+				if execErr == nil && opts.Gates != nil {
+					if p, err := opts.Gates.EvaluateHardGate(ctx, runningRun, n, manifest); err == nil {
+						hardReport = strings.TrimSpace(p)
+					}
+					if p, err := opts.Gates.EvaluateSoftGate(ctx, runningRun, n, manifest); err == nil {
+						softReport = strings.TrimSpace(p)
+					}
+				}
+
 				// Persist node result.
 				updatedRun, err := s.UpdateRun(ctx, workspaceRoot, workflowID, runID, func(cur *WorkflowRun) error {
 					nr := cur.NodeRuns[nodeID]
@@ -237,6 +254,8 @@ func (s *Store) RunWorkflow(ctx context.Context, workspaceRoot string, workflowI
 					} else {
 						nr.Status = NodeStatusSucceeded
 						nr.Artifacts = manifest
+						nr.HardGateReportPath = hardReport
+						nr.SoftGateReportPath = softReport
 					}
 					cur.NodeRuns[nodeID] = nr
 					return nil
