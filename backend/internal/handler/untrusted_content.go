@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -19,21 +20,12 @@ func wrapUntrustedToolOutput(toolName, toolCallID, raw string) string {
 	if raw == "" {
 		return raw
 	}
-	meta := make([]string, 0, 4)
-	toolName = strings.TrimSpace(toolName)
-	toolCallID = strings.TrimSpace(toolCallID)
-	if toolName != "" {
-		meta = append(meta, "tool="+toolName)
-	}
-	if toolCallID != "" {
-		meta = append(meta, "tool_call_id="+toolCallID)
-	}
-	sourceLine := ""
-	if len(meta) > 0 {
-		sourceLine = "source: " + strings.Join(meta, " ") + "\n"
-	}
 
-	return strings.TrimSpace(fmt.Sprintf("%s\n%scontent:\n%s\n%s", untrustedContentBegin, sourceLine, raw, untrustedContentEnd))
+	envelope := buildUntrustedToolEnvelope(toolName, toolCallID, raw)
+	if strings.TrimSpace(envelope) == "" {
+		return raw
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s\n%s\n%s", untrustedContentBegin, envelope, untrustedContentEnd))
 }
 
 type suspiciousMatch struct {
@@ -81,6 +73,106 @@ func detectSuspiciousPatterns(text string) []suspiciousMatch {
 		})
 	}
 	return out
+}
+
+type untrustedToolEnvelope struct {
+	Untrusted bool `json:"_untrusted"`
+	Source    struct {
+		Kind       string `json:"kind"`
+		Tool       string `json:"tool,omitempty"`
+		ToolCallID string `json:"tool_call_id,omitempty"`
+	} `json:"source"`
+
+	OK bool `json:"ok"`
+
+	Output json.RawMessage `json:"output,omitempty"`
+	Error  *struct {
+		ErrorCode string `json:"error_code,omitempty"`
+		Retryable bool   `json:"retryable,omitempty"`
+		Message   string `json:"message,omitempty"`
+		Hint      string `json:"hint,omitempty"`
+	} `json:"error,omitempty"`
+}
+
+func buildUntrustedToolEnvelope(toolName, toolCallID, raw string) string {
+	toolName = strings.TrimSpace(toolName)
+	toolCallID = strings.TrimSpace(toolCallID)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	out := untrustedToolEnvelope{
+		Untrusted: true,
+		OK:        true,
+	}
+	out.Source.Kind = "tool"
+	out.Source.Tool = toolName
+	out.Source.ToolCallID = toolCallID
+
+	// Keep tool output machine-parseable: embed as JSON when possible, otherwise as JSON string.
+	if json.Valid([]byte(raw)) {
+		out.Output = json.RawMessage(raw)
+	} else {
+		b, _ := json.Marshal(raw)
+		out.Output = b
+	}
+
+	// Best-effort "ok"/error extraction.
+	if strings.HasPrefix(strings.TrimSpace(raw), "{") {
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(raw), &obj); err == nil {
+			if v, ok := obj["ok"].(bool); ok {
+				out.OK = v
+			} else if _, ok := obj["error"]; ok {
+				out.OK = false
+			}
+			if !out.OK {
+				errMsg := ""
+				if s, ok := obj["error"].(string); ok {
+					errMsg = strings.TrimSpace(s)
+				}
+				code, hint, retryable := classifyToolOutputError(errMsg)
+				out.Error = &struct {
+					ErrorCode string `json:"error_code,omitempty"`
+					Retryable bool   `json:"retryable,omitempty"`
+					Message   string `json:"message,omitempty"`
+					Hint      string `json:"hint,omitempty"`
+				}{
+					ErrorCode: code,
+					Retryable: retryable,
+					Message:   errMsg,
+					Hint:      hint,
+				}
+			}
+		}
+	}
+
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+func classifyToolOutputError(message string) (code string, hint string, retryable bool) {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case msg == "":
+		return "tool_error", "", true
+	case strings.Contains(msg, "approval_required"):
+		return "approval_required", "该工具需要审批；请在“审批”中允许后重试", true
+	case strings.Contains(msg, "approval_denied"):
+		return "approval_denied", "该工具审批被拒绝；如需继续请调整权限策略后重试", false
+	case strings.Contains(msg, "unknown tool"):
+		return "unknown_tool", "模型调用了不存在的工具；请让模型改用可用工具或重试", false
+	case strings.Contains(msg, "not allowed") || strings.Contains(msg, "denied"):
+		return "policy_denied", "操作被策略拒绝；请调整工具权限/policy/profile 后重试", false
+	case strings.Contains(msg, "cannot unmarshal") || strings.Contains(msg, "invalid character") || strings.Contains(msg, "unexpected end of json"):
+		return "invalid_arguments", "工具参数不是合法 JSON；请只返回一个 JSON 对象，不要解释文本", true
+	default:
+		return "tool_error", "", true
+	}
 }
 
 func recordSuspiciousMatches(
@@ -143,4 +235,3 @@ func recordSuspiciousMatches(
 		})
 	}
 }
-
