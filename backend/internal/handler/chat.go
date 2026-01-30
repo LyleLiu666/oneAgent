@@ -289,6 +289,15 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		RespondError(c, http.StatusBadRequest, err)
 		return
 	}
+	if len(toolDefs) > 0 && strings.TrimSpace(workspaceRoot) == "" && toolSetRequiresWorkspace(toolDefs) {
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "workspace_required",
+			Public: "启用 tools 时必须先设置 workspace",
+			Hint:   "请先选择一个工作目录（workspace），或将 tool_ids 设为空以使用纯对话模式",
+		})
+		return
+	}
 	selectedToolIDs = toolIDsFromDefinitions(toolDefs)
 
 	toolNames := make([]string, 0, len(toolDefs))
@@ -1908,6 +1917,19 @@ func toolIDsFromDefinitions(defs []tool.Definition) []string {
 		ids = append(ids, def.ID)
 	}
 	return ids
+}
+
+func toolSetRequiresWorkspace(defs []tool.Definition) bool {
+	for _, def := range defs {
+		switch def.ID {
+		// Some tools can operate without a workspace (e.g., global skills).
+		case tool.ToolIDSkillRead:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // ============================================================================
