@@ -329,6 +329,50 @@ func (s *Store) GetRun(ctx context.Context, workspaceRoot string, workflowID str
 	return run, nil
 }
 
+func (s *Store) UpdateRun(ctx context.Context, workspaceRoot string, workflowID string, runID string, fn func(*WorkflowRun) error) (WorkflowRun, error) {
+	if s == nil {
+		return WorkflowRun{}, errors.New("store is nil")
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	workflowID = strings.TrimSpace(workflowID)
+	runID = strings.TrimSpace(runID)
+	if workspaceRoot == "" || workflowID == "" || runID == "" {
+		return WorkflowRun{}, errors.New("workspace_root, workflow_id, run_id are required")
+	}
+	if fn == nil {
+		return WorkflowRun{}, errors.New("update fn is required")
+	}
+
+	mu := s.lockWorkspace(workspaceRoot)
+	mu.Lock()
+	defer mu.Unlock()
+
+	cur, err := s.GetRun(ctx, workspaceRoot, workflowID, runID)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	before := cur
+
+	if cur.NodeRuns == nil {
+		cur.NodeRuns = map[string]NodeRun{}
+	}
+
+	if err := fn(&cur); err != nil {
+		return WorkflowRun{}, err
+	}
+
+	now := time.Now().UTC()
+	if cur.CreatedAt.IsZero() {
+		cur.CreatedAt = before.CreatedAt
+	}
+	cur.UpdatedAt = now
+
+	if err := writeJSONAtomic(s.runJSONPath(workspaceRoot, workflowID, runID), cur, 0o600); err != nil {
+		return WorkflowRun{}, err
+	}
+	return cur, nil
+}
+
 func (s *Store) ListRuns(ctx context.Context, workspaceRoot string, workflowID string, limit int) ([]WorkflowRun, error) {
 	if s == nil {
 		return nil, errors.New("store is nil")
