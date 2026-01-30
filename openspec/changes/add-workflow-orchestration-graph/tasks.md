@@ -1,6 +1,6 @@
 ## 1. Specs
-- [ ] 1.1 Add `system-workflow-orchestration` delta requirements (graph model, node execution, artifacts, gates, resume)
-- [ ] 1.2 Run `openspec validate add-workflow-orchestration-graph --strict --no-interactive`
+- [x] 1.1 Add `system-workflow-orchestration` delta requirements (graph model, node execution, artifacts, gates, resume)
+- [x] 1.2 Run `openspec validate add-workflow-orchestration-graph --strict --no-interactive`
 
 ## 2. Backend (MVP)
 - [ ] 2.1 Data model: workflow / workflow_version / workflow_run / node_run
@@ -19,4 +19,3 @@
 ## 4. Validation
 - [ ] 4.1 `cd backend && go test ./...`
 - [ ] 4.2 `cd frontend && npm test -- --run`
-

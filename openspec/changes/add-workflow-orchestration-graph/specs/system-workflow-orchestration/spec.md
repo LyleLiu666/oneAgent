@@ -1,54 +1,58 @@
 ## ADDED Requirements
 
-### Requirement: The system MUST support workflow definitions as explicit graphs
-系统必须 (MUST) 支持将一个“可执行委托”表达为显式 workflow graph，并作为**workspace 级资源**持久化：
-- workflow 具备稳定 ID（可被引用/复用）
-- workflow 有版本（workflow_version），run 必须绑定到一个版本快照（best-effort）
+### Requirement: The system MUST support workflow graphs with versioning (workspace-scoped)
+系统必须 (MUST) 支持工作流（workflow）的显式图表达，并提供版本化能力（workspace-scoped）：
+- workflow 包含 `workflow_id`、`workspace_root`、`name`（best-effort）
+- workflow_version 包含 `version_id`、`workflow_id`、`graph`（nodes/edges/config）与 `published_at`（best-effort）
+- 已发布（published）的 workflow_version 不得 (MUST NOT) 被修改（immutable snapshot）
 
-#### Scenario: A workflow can be created and listed per workspace
-- **GIVEN** 用户选择了一个 workspace
-- **WHEN** 用户创建一个 workflow 并保存
-- **THEN** 该 workflow 可在该 workspace 的 workflow 列表中被找到（best-effort）
+#### Scenario: Publish creates an immutable workflow_version
+- **GIVEN** 用户在某 workspace 创建 workflow 并编辑 graph（best-effort）
+- **WHEN** 用户发布一个新版本（publish）
+- **THEN** 系统创建一个新的 workflow_version（best-effort）
+- **AND** 后续编辑不得影响已发布版本的 graph（best-effort）
 
-### Requirement: A workflow graph MUST have deterministic dependency semantics
-系统必须 (MUST) 将 workflow graph 定义为有向图（DAG best-effort），并提供确定的依赖语义：
-- node 只能在其上游依赖 node 达到“完成”后才会被调度（best-effort）
-- 允许无依赖的 node 并行执行（受并发/预算限制）（best-effort）
+### Requirement: The system MUST support workflow runs and node runs with durable state (best-effort)
+系统必须 (MUST) 支持 workflow_run / node_run 的持久化状态（best-effort），用于可回放与可续跑：
+- workflow_run 引用一个已发布的 workflow_version（best-effort）
+- workflow_run 保存一份运行快照（graph snapshot + resolved inputs）（best-effort）
+- node_run 至少包含 `node_id`、`status`、`started_at/finished_at` 与错误信息（best-effort）
 
-#### Scenario: Downstream node runs only after upstream completion
-- **GIVEN** 一个 workflow 含 A→B 的依赖边
+#### Scenario: A workflow_run keeps a snapshot for replay
+- **GIVEN** 某 workflow_version 已发布（best-effort）
+- **WHEN** 用户启动一次 workflow_run
+- **THEN** 该 run 引用该版本并保存 graph snapshot（best-effort）
+- **AND** 后续 workflow 编辑不会影响该 run 的执行快照（best-effort）
+
+### Requirement: The system MUST execute DAG nodes with dependency-aware scheduling (best-effort)
+系统必须 (MUST) 以 DAG 调度方式执行节点（best-effort）：
+- 节点仅在其依赖节点满足完成条件后才可执行（best-effort）
+- 系统应支持并发限制（best-effort）
+- 支持 cancel 与 resume（best-effort）
+
+#### Scenario: Node scheduling respects dependencies
+- **GIVEN** workflow graph 中 B 依赖 A（A → B）
 - **WHEN** workflow_run 执行
-- **THEN** B 的 node_run 不会在 A 完成前启动（best-effort）
+- **THEN** B 不会在 A 未完成前进入 running（best-effort）
 
-### Requirement: Each workflow node MUST execute as a work-style agent and hand off file-set artifacts
-系统必须 (MUST) 将每个 workflow node 视为一个“工作型 agent”执行单元（而非函数调用），并满足：
-- node 运行产生可交付产物：**文件集 artifacts**（artifact manifest / pointers）与证据（trace/summary/findings）（best-effort）
-- node 的 outputs 可作为下游 node 的输入（best-effort）
+### Requirement: Node runs MUST produce artifact manifests for multi-file handoffs (best-effort)
+节点运行必须 (MUST) 产出“交付物清单”（artifact manifest best-effort），用于节点交接与审查：
+- artifact manifest 至少包含文件路径列表或指针（best-effort）
+- artifact manifest 必须可被前端展示并可点击打开（best-effort）
 
-#### Scenario: A node produces a multi-file artifact manifest
-- **GIVEN** 一个 node 的目标是“生成一组文件”（best-effort）
-- **WHEN** node_run 完成
-- **THEN** 系统保存该 node_run 的 artifact manifest（包含多个文件指针）（best-effort）
+#### Scenario: A node_run exposes a multi-file artifact list
+- **GIVEN** 某节点产出多个文件作为交付物（best-effort）
+- **WHEN** node_run 进入 succeeded
+- **THEN** 该 node_run 的 artifact manifest 记录这些文件（best-effort）
 
-### Requirement: Node completion MUST be defined by Hard Gate + Soft Gate
-系统必须 (MUST) 为 workflow node 提供双层完成判定（与 `openspec/project.md` 一致）：
-1) Hard Gate：可代码/规则校验的客观事实（例如文件存在、测试通过、schema valid）（best-effort）
-2) Soft Gate：按预设 rubric 的主观评分（LLM 评审；best-effort）
+### Requirement: Node completion MUST use Hard/Soft Gate with stored reports (best-effort)
+每个节点完成必须 (MUST) 有双层验收（best-effort）：
+- Hard Gate：客观可校验（测试/文件存在/Schema 等）并生成报告（best-effort）
+- Soft Gate：按预设 rubric 由模型打分，并生成评分报告（best-effort）
+- 两类 gate 的结果必须作为 evidence 被持久化并可在 UI 查看（best-effort）
 
-#### Scenario: Node is marked done only when both gates pass
-- **GIVEN** 一个 node 配置了 Hard Gate 与 Soft Gate（best-effort）
-- **WHEN** node_run 产出交付物并触发验收
-- **THEN** Hard Gate 与 Soft Gate 都通过时，node 才进入 done 状态（best-effort）
-- **AND** 任一 gate 未通过时，系统留下结构化报告以支持继续迭代（best-effort）
-
-### Requirement: Workflow runs MUST be observable and resumable
-系统必须 (MUST) 让 workflow_run 可被观察与续跑：
-- 每个 node_run 有明确状态（pending/running/done/failed/canceled best-effort）
-- 每个 node_run 的事件/日志可查看（waterfall best-effort）
-- workflow_run 可 resume，并复用已完成 node_run 的结果（best-effort）
-
-#### Scenario: A workflow run can be resumed without rerunning completed nodes
-- **GIVEN** 一个 workflow_run 中 A 已 done，B 尚未开始（best-effort）
-- **WHEN** 用户对该 workflow_run 执行 resume
-- **THEN** 系统不会重跑 A，而是继续调度 B（best-effort）
-
+#### Scenario: A node_run includes gate reports as evidence
+- **GIVEN** 某 node_run 需要验收（best-effort）
+- **WHEN** node_run 进入终态
+- **THEN** 系统写入 Hard Gate 与 Soft Gate 的报告（best-effort）
+- **AND** UI 可展示该报告指针（best-effort）
