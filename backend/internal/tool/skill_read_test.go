@@ -47,7 +47,7 @@ func TestSkillReadTool_ResolvesByNameWithPrecedence(t *testing.T) {
 	})
 	gotAny, err := runSkillReadTool(ctx, raw)
 	if err != nil {
-		t.Fatalf("skill.read: %v", err)
+		t.Fatalf("skill_read: %v", err)
 	}
 	got := gotAny.(skillReadResult)
 	if !got.OK {
@@ -85,7 +85,7 @@ func TestSkillReadTool_ReadsBuiltinSkillWithoutWorkspace(t *testing.T) {
 	})
 	gotAny, err := runSkillReadTool(ctx, raw)
 	if err != nil {
-		t.Fatalf("skill.read: %v", err)
+		t.Fatalf("skill_read: %v", err)
 	}
 	got := gotAny.(skillReadResult)
 	if !got.OK {

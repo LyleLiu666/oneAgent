@@ -74,7 +74,7 @@ func formatSkillSuggestion(s skill.Skill) string {
 	b.WriteString("  - 来源: ")
 	b.WriteString(string(s.Source))
 	b.WriteString("\n")
-	b.WriteString("  - 使用方式: 调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`，再遵循其中指令执行\n")
+	b.WriteString("  - 使用方式: 调用 `skill_read`（按技能名称）读取该技能的 `SKILL.md`，再遵循其中指令执行（兼容旧名：`skill.read`）\n")
 	return b.String()
 }
 
@@ -125,7 +125,7 @@ func formatSkillsHelpTurnContext(catalog *skill.Catalog) string {
 
 	var b strings.Builder
 	b.WriteString("## 技能帮助（可用 skills）\n")
-	b.WriteString("你似乎在询问当前环境有哪些 skills 可用。为了避免靠猜导致连续 `skill.read` 错误，请优先使用以下入口：\n\n")
+	b.WriteString("你似乎在询问当前环境有哪些 skills 可用。为了避免靠猜导致连续 `skill_read` 错误，请优先使用以下入口：\n\n")
 	b.WriteString("- UI：打开 Skills Governance 页面查看完整列表（/governance/skills）\n")
 	b.WriteString("- CLI：运行 `oneagent skills status` 检查可用性/缺失依赖\n\n")
 	b.WriteString("可用技能摘要（Top-10）：\n")
@@ -143,6 +143,6 @@ func formatSkillsHelpTurnContext(catalog *skill.Catalog) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\n提示：确定要用某个技能时，调用 `skill.read`（按技能名称或 skill_id）读取 `SKILL.md` 再执行。\n")
+	b.WriteString("\n提示：确定要用某个技能时，调用 `skill_read`（按技能名称或 skill_id）读取 `SKILL.md` 再执行（兼容旧名：`skill.read`）。\n")
 	return b.String()
 }

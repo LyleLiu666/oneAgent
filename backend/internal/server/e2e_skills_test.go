@@ -116,7 +116,7 @@ func TestE2E_Skills_TurnContextInjection_ExplicitSkillName(t *testing.T) {
 	for _, raw := range rawMsgs {
 		m, _ := raw.(map[string]any)
 		content, _ := m["content"].(string)
-		if strings.Contains(content, "## 技能建议") && strings.Contains(content, "skill.read") {
+		if strings.Contains(content, "## 技能建议") && strings.Contains(content, "skill_read") {
 			seen = true
 			break
 		}
@@ -233,7 +233,7 @@ requires:
 	for _, raw := range rawMsgs {
 		m, _ := raw.(map[string]any)
 		content, _ := m["content"].(string)
-		if strings.Contains(content, "## 技能建议") && strings.Contains(content, "skill.read") {
+		if strings.Contains(content, "## 技能建议") && strings.Contains(content, "skill_read") {
 			seen = true
 			break
 		}

@@ -43,7 +43,7 @@ func lspReferencesDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
-			Name:        "lsp.references",
+			Name:        "lsp_references",
 			Description: "语义级导航：查找符号的引用位置（只读）。结果会按固定上限截断并给出 refine 提示。要求 workspace 已启用，file_path 必须在 workspace 内。",
 			Parameters: map[string]any{
 				"type": "object",
@@ -177,4 +177,3 @@ func runLSPReferencesTool(ctx context.Context, raw json.RawMessage) (any, error)
 
 	return res, nil
 }
-

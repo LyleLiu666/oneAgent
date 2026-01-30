@@ -1515,7 +1515,8 @@ func runToolLoop(
 				stepTraceEntries = append(stepTraceEntries, entry)
 			}
 
-			def, ok := defsByName[call.Function.Name]
+			lookupName := tool.CanonicalToolName(call.Function.Name)
+			def, ok := defsByName[lookupName]
 			handler := def.Handler
 			var (
 				payload    any

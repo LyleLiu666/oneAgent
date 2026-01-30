@@ -20,11 +20,11 @@ func TestAssembleStablePrefix_IncludesToolManualsWhenEnabled(t *testing.T) {
 		"run_command",
 		"plan",
 		"subagent",
-		"skill.read",
-		"document.export",
-		"lsp.definition",
-		"lsp.references",
-		"lsp.rename_preview",
+		"skill_read",
+		"document_export",
+		"lsp_definition",
+		"lsp_references",
+		"lsp_rename_preview",
 	}
 
 	out, err := AssembleStablePrefix(AssembleInput{
@@ -45,8 +45,8 @@ func TestAssembleStablePrefix_IncludesToolManualsWhenEnabled(t *testing.T) {
 	if !strings.Contains(out.StablePrefix, "read_file 工具使用说明") {
 		t.Fatalf("expected read_file manual included")
 	}
-	if !strings.Contains(out.StablePrefix, "lsp.definition 工具使用说明") {
-		t.Fatalf("expected lsp.definition manual included")
+	if !strings.Contains(out.StablePrefix, "lsp_definition 工具使用说明") {
+		t.Fatalf("expected lsp_definition manual included")
 	}
 
 	expectModules := []string{
@@ -106,6 +106,16 @@ func TestAssembleStablePrefix_SortsToolsDeterministically(t *testing.T) {
 	}
 	if a.StablePrefix != b.StablePrefix {
 		t.Fatalf("expected stable output regardless of input order")
+	}
+}
+
+func TestAssembleStablePrefix_DottedToolNameLoadsUnderscoreManual(t *testing.T) {
+	out, err := AssembleStablePrefix(AssembleInput{ToolNames: []string{"skill.read"}})
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	if !strings.Contains(out.StablePrefix, "skill_read 工具使用说明") {
+		t.Fatalf("expected skill_read manual included for dotted tool name")
 	}
 }
 

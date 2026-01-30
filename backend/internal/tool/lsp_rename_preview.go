@@ -55,7 +55,7 @@ func lspRenamePreviewDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
-			Name:        "lsp.rename_preview",
+			Name:        "lsp_rename_preview",
 			Description: "语义级重命名预览：返回将修改的位置列表（只读，不写文件）。要求 workspace 已启用，file_path 必须在 workspace 内。",
 			Parameters: map[string]any{
 				"type": "object",
@@ -224,7 +224,7 @@ func runLSPRenamePreviewTool(ctx context.Context, raw json.RawMessage) (any, err
 	// Safety check: the tool MUST NOT modify files.
 	after, _ := os.ReadFile(absPath)
 	if string(before) != string(after) {
-		return nil, errors.New("lsp.rename_preview modified workspace files; this is not allowed")
+		return nil, errors.New("lsp_rename_preview modified workspace files; this is not allowed")
 	}
 
 	// Best-effort: normalize file path separators for downstream consumers.
@@ -234,4 +234,3 @@ func runLSPRenamePreviewTool(ctx context.Context, raw json.RawMessage) (any, err
 
 	return res, nil
 }
-

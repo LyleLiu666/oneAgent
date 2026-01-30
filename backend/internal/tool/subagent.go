@@ -94,7 +94,7 @@ func subagentDefinition() Definition {
 					},
 					"skill_ids": map[string]any{
 						"type":        "array",
-						"description": "（可选）显式指定要注入的技能（优先基于 skill_id 解析，找不到则按 name 尝试）。会以“摘要块”写入子 Agent TurnContext（volatile），并提示子 Agent 需要时自行调用 `skill.read` 读取完整 SKILL.md。",
+						"description": "（可选）显式指定要注入的技能（优先基于 skill_id 解析，找不到则按 name 尝试）。会以“摘要块”写入子 Agent TurnContext（volatile），并提示子 Agent 需要时自行调用 `skill_read` 读取完整 SKILL.md（兼容旧名：`skill.read`）。",
 						"items":       map[string]any{"type": "string"},
 					},
 				},
@@ -278,7 +278,7 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			}
 
 			if b.Len() > 0 {
-				b.WriteString("如需使用某个技能，请先调用 `skill.read`（按技能名称）读取该技能的 `SKILL.md`。\n")
+				b.WriteString("如需使用某个技能，请先调用 `skill_read`（按技能名称）读取该技能的 `SKILL.md`（兼容旧名：`skill.read`）。\n")
 				skillsSummary = b.String()
 			}
 		}
@@ -294,7 +294,7 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			b.WriteString("\n")
 		}
 		if b.Len() > 0 {
-			b.WriteString("（注意：当前环境无法加载技能目录；如可用请调用 `skill.read` 读取技能详情。）\n")
+			b.WriteString("（注意：当前环境无法加载技能目录；如可用请调用 `skill_read` 读取技能详情；兼容旧名：`skill.read`。）\n")
 			skillsSummary = b.String()
 		}
 	}

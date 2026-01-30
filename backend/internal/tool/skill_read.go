@@ -33,7 +33,7 @@ func skillReadDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
-			Name:        "skill.read",
+			Name:        "skill_read",
 			Description: "按技能名称/ID 读取该技能的 SKILL.md 原文（无需提供文件路径；同名冲突按优先级 .oneagent > .claude > .codex 选择最终生效版本）。返回 skill_md 作为工具输出，供你在后续执行中遵循其中的指令。",
 			Parameters: map[string]any{
 				"type": "object",

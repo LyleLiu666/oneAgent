@@ -43,7 +43,7 @@ func documentExportDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
-			Name:        "document.export",
+			Name:        "document_export",
 			Description: "导出文档：将 workspace 内的 Markdown 导出为 Office（docx/pptx）。依赖 pandoc；输出路径必须在 workspace 内。",
 			Parameters: map[string]any{
 				"type": "object",

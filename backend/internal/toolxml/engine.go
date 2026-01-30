@@ -230,6 +230,7 @@ func RunLoop(
 		recordedCalls := make([]llm.ToolCall, 0, len(calls))
 		for idx, call := range calls {
 			toolName := strings.TrimSpace(call.ToolName)
+			canonicalName := tool.CanonicalToolName(toolName)
 			toolCallID := fmt.Sprintf("xml_%d_%d", step, idx)
 			recordedCalls = append(recordedCalls, llm.ToolCall{
 				ID:   toolCallID,
@@ -240,7 +241,7 @@ func RunLoop(
 				},
 			})
 
-			handler, ok := handlers[toolName]
+			handler, ok := handlers[canonicalName]
 			if !ok {
 				err := fmt.Errorf("unknown tool: %s", toolName)
 				if onTrace != nil {
@@ -263,7 +264,7 @@ func RunLoop(
 				onTrace(fmt.Sprintf("Running tool: %s", toolName))
 			}
 
-			args, argsString, err := buildToolArgs(toolName, call.Fields)
+			args, argsString, err := buildToolArgs(canonicalName, call.Fields)
 			if err != nil {
 				if onTrace != nil {
 					onTrace(fmt.Sprintf("Tool %s args error: %v", toolName, err))
@@ -676,7 +677,7 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		data, err := json.Marshal(payload)
 		return data, string(data), err
 
-	case "skill.read":
+	case "skill_read":
 		payload := map[string]any{}
 		if name := strings.TrimSpace(fields["name"]); name != "" {
 			payload["name"] = name

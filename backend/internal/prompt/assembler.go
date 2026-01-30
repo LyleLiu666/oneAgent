@@ -17,7 +17,7 @@ type AssembleInput struct {
 	// BaseOverride, if non-empty, replaces the built-in base persona module.
 	BaseOverride string
 
-	// ToolNames are LLM tool function names (e.g. "bash", "write_file", "edit_v2", "lsp.definition").
+	// ToolNames are LLM tool function names (e.g. "bash", "write_file", "edit_v2", "lsp_definition").
 	// The assembler will include matching tool manual modules when available.
 	ToolNames []string
 }

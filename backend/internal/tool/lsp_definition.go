@@ -38,7 +38,7 @@ func lspDefinitionDefinition() Definition {
 	spec := llm.Tool{
 		Type: "function",
 		Function: llm.ToolFunction{
-			Name:        "lsp.definition",
+			Name:        "lsp_definition",
 			Description: "语义级导航：查找符号的定义位置（只读）。要求 workspace 已启用，file_path 必须在 workspace 内。",
 			Parameters: map[string]any{
 				"type": "object",
