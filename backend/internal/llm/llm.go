@@ -757,27 +757,87 @@ func normalizeToolArguments(args string) string {
 	if trimmed == "" {
 		return ""
 	}
+
+	// Special-case: models sometimes double-quote the entire JSON payload, which becomes a JSON string.
 	if json.Valid([]byte(trimmed)) {
+		if strings.HasPrefix(trimmed, "\"") {
+			var unquoted string
+			if err := json.Unmarshal([]byte(trimmed), &unquoted); err == nil {
+				unquoted = strings.TrimSpace(unquoted)
+				if unquoted != "" && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[")) && json.Valid([]byte(unquoted)) {
+					return unquoted
+				}
+			}
+		}
 		return trimmed
 	}
 
-	raw := []byte(trimmed)
-	for i := len(raw) - 1; i >= 0; i-- {
-		if raw[i] != '}' {
-			continue
+	if unfenced, ok := unwrapCodeFence(trimmed); ok {
+		trimmed = strings.TrimSpace(unfenced)
+		if trimmed == "" {
+			return ""
 		}
-		j := i + 1
-		for j < len(raw) && (raw[j] == ' ' || raw[j] == '\n' || raw[j] == '\r' || raw[j] == '\t') {
-			j++
-		}
-		if j >= len(raw) || raw[j] != '{' {
-			continue
-		}
-		candidate := strings.TrimSpace(string(raw[j:]))
-		if candidate != "" && json.Valid([]byte(candidate)) {
-			return candidate
-		}
+		// Re-run normalization on the unfenced payload (it may itself be quoted JSON).
+		return normalizeToolArguments(trimmed)
+	}
+
+	// Best-effort: extract the last valid JSON value from noisy output.
+	if extracted, ok := extractLastJSONValue(trimmed); ok {
+		return extracted
 	}
 
 	return trimmed
+}
+
+func unwrapCodeFence(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return "", false
+	}
+	close := strings.LastIndex(s, "```")
+	if close <= 0 {
+		return "", false
+	}
+
+	start := 3
+	if nl := strings.IndexByte(s, '\n'); nl != -1 {
+		start = nl + 1
+	} else {
+		for start < len(s) && s[start] != ' ' && s[start] != '\t' && s[start] != '\r' && s[start] != '\n' {
+			start++
+		}
+		for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n') {
+			start++
+		}
+	}
+
+	if start >= close {
+		return "", true
+	}
+	return s[start:close], true
+}
+
+func extractLastJSONValue(s string) (string, bool) {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] != '{' && s[i] != '[' {
+			continue
+		}
+		dec := json.NewDecoder(strings.NewReader(s[i:]))
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			continue
+		}
+		end := i + int(dec.InputOffset())
+		if end <= i {
+			continue
+		}
+		candidate := strings.TrimSpace(s[i:end])
+		if candidate == "" {
+			continue
+		}
+		if json.Valid([]byte(candidate)) {
+			return candidate, true
+		}
+	}
+	return "", false
 }
