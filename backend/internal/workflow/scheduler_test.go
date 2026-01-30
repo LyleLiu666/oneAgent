@@ -33,6 +33,16 @@ func (e *fakeExecutor) ExecuteNode(ctx context.Context, _ WorkflowRun, node Node
 	return ArtifactManifest{Artifacts: []Artifact{{Path: "out/" + id + ".txt", Kind: "file"}}}, nil
 }
 
+type fakeGates struct{}
+
+func (g *fakeGates) EvaluateHardGate(_ context.Context, _ WorkflowRun, node Node, _ ArtifactManifest) (string, error) {
+	return "hard:" + node.NodeID, nil
+}
+
+func (g *fakeGates) EvaluateSoftGate(_ context.Context, _ WorkflowRun, node Node, _ ArtifactManifest) (string, error) {
+	return "soft:" + node.NodeID, nil
+}
+
 func TestRunWorkflow_RespectsDependencies(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "workflows"))
 	if err != nil {
@@ -324,5 +334,58 @@ func TestRunWorkflow_ResumeSkipsSucceededNodes(t *testing.T) {
 done:
 	if len(started) != 1 || started[0] != "b" {
 		t.Fatalf("expected only b to execute, got %+v", started)
+	}
+}
+
+func TestRunWorkflow_PersistsArtifactManifestAndGatePointers(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "workflows"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	ws := filepath.Join(t.TempDir(), "ws")
+	ctx := context.Background()
+
+	wf, err := store.CreateWorkflow(ctx, ws, "Demo")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	v, err := store.PublishVersion(ctx, ws, wf.WorkflowID, Graph{
+		Nodes: []Node{{NodeID: "a"}},
+	})
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+	run, err := store.CreateRun(ctx, ws, wf.WorkflowID, v.VersionID, nil)
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	exec := &fakeExecutor{
+		started: make(chan string, 8),
+		block:   map[string]chan struct{}{},
+	}
+	gates := &fakeGates{}
+
+	final, err := store.RunWorkflow(ctx, ws, wf.WorkflowID, run.RunID, exec, RunOptions{Concurrency: 1, Gates: gates})
+	if err != nil {
+		t.Fatalf("RunWorkflow: %v", err)
+	}
+	if final.Status != RunStatusSucceeded {
+		t.Fatalf("expected succeeded, got %+v", final)
+	}
+
+	got, err := store.GetRun(ctx, ws, wf.WorkflowID, run.RunID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	nr := got.NodeRuns["a"]
+	if nr.Status != NodeStatusSucceeded {
+		t.Fatalf("expected node succeeded, got %+v", nr)
+	}
+	if len(nr.Artifacts.Artifacts) == 0 {
+		t.Fatalf("expected artifact manifest to be populated, got %+v", nr.Artifacts)
+	}
+	if nr.HardGateReportPath == "" || nr.SoftGateReportPath == "" {
+		t.Fatalf("expected gate pointers to be set, got %+v", nr)
 	}
 }
