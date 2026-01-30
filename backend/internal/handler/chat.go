@@ -1337,9 +1337,13 @@ func runToolLoop(
 	if sessions == nil {
 		return "", false, fmt.Errorf("session store not configured")
 	}
-	handlers := make(map[string]tool.Handler)
+	defsByName := make(map[string]tool.Definition, len(defs))
 	for _, def := range defs {
-		handlers[def.Spec.Function.Name] = def.Handler
+		name := strings.TrimSpace(def.Spec.Function.Name)
+		if name == "" {
+			continue
+		}
+		defsByName[name] = def
 	}
 
 	// Inject userID into context for tool handlers to access user-specific settings
@@ -1511,7 +1515,8 @@ func runToolLoop(
 				stepTraceEntries = append(stepTraceEntries, entry)
 			}
 
-			handler, ok := handlers[call.Function.Name]
+			def, ok := defsByName[call.Function.Name]
+			handler := def.Handler
 			var (
 				payload    any
 				toolErr    error
@@ -1526,6 +1531,20 @@ func runToolLoop(
 				recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
 				payload = map[string]string{"error": toolErr.Error()}
 			} else {
+				if argsErr := validateToolArgsRequired(call.Function.Name, def.Spec.Function.Parameters, call.Function.Arguments); argsErr != nil {
+					toolErr = argsErr
+					recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
+					payload = map[string]any{
+						"error":            "invalid_arguments",
+						"invalid_args":     true,
+						"message":          strings.TrimSpace(argsErr.Error()),
+						"missing_fields":   argsErr.MissingFields,
+						"raw_arguments":    call.Function.Arguments,
+						"tool_call_id":     call.ID,
+						"tool_name":        call.Function.Name,
+						"tool_schema_hint": "Ensure all required fields are present and JSON is a single object.",
+					}
+				} else {
 				broadcaster.Broadcast(StreamEvent{
 					Type: "trace",
 					Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
@@ -1544,7 +1563,6 @@ func runToolLoop(
 							"scope_id":          approvalRequired.ScopeID,
 							"arguments":         call.Function.Arguments,
 						}
-						toolErr = nil
 					} else if errors.As(toolErr, &approvalDenied) {
 						payload = map[string]any{
 							"error":           "approval_denied",
@@ -1555,7 +1573,6 @@ func runToolLoop(
 							"reason":          approvalDenied.Reason,
 							"arguments":       call.Function.Arguments,
 						}
-						toolErr = nil
 					} else {
 						broadcaster.Broadcast(StreamEvent{
 							Type: "error",
@@ -1568,6 +1585,7 @@ func runToolLoop(
 							"error": fmt.Sprintf("Tool execution failed: %v", toolErr),
 						}
 					}
+				}
 				}
 			}
 
@@ -1583,7 +1601,29 @@ func runToolLoop(
 				response = []byte(fmt.Sprintf(`{"error": "Failed to marshal tool response: %v"}`, marshalErr))
 			}
 
-			serialized, serializeErr := marshalPersistedToolResult("json", call.ID, call.Function.Name, call.Function.Arguments, string(response), nil)
+			ok, errMsg := deriveToolOutcome(response)
+			if errMsg == "" && toolErr != nil {
+				errMsg = toolErr.Error()
+			}
+			if marshalErr != nil {
+				if errMsg == "" {
+					errMsg = marshalErr.Error()
+				} else {
+					errMsg = errMsg + "; " + marshalErr.Error()
+				}
+			}
+			structured := []persistedToolResult{
+				{
+					ToolName:   call.Function.Name,
+					ToolCallID: call.ID,
+					Arguments:  call.Function.Arguments,
+					OK:         ok,
+					Output:     string(response),
+					Error:      strings.TrimSpace(errMsg),
+				},
+			}
+
+			serialized, serializeErr := marshalPersistedToolResult("json", call.ID, call.Function.Name, call.Function.Arguments, string(response), structured)
 			if serializeErr != nil {
 				serialized = string(response)
 			}
@@ -1609,6 +1649,7 @@ func runToolLoop(
 					Name:       call.Function.Name,
 					Arguments:  call.Function.Arguments,
 					Content:    string(response),
+					Results:    structured,
 				},
 			})
 
