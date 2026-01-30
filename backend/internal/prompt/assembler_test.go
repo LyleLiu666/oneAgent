@@ -6,8 +6,29 @@ import (
 )
 
 func TestAssembleStablePrefix_IncludesToolManualsWhenEnabled(t *testing.T) {
+	toolNames := []string{
+		"write_file",
+		"bash",
+		"read_file",
+		"edit",
+		"edit_v2",
+		"multiedit",
+		"ls",
+		"glob",
+		"rg",
+		"search",
+		"run_command",
+		"plan",
+		"subagent",
+		"skill.read",
+		"document.export",
+		"lsp.definition",
+		"lsp.references",
+		"lsp.rename_preview",
+	}
+
 	out, err := AssembleStablePrefix(AssembleInput{
-		ToolNames: []string{"write_file", "bash"},
+		ToolNames: toolNames,
 	})
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
@@ -20,6 +41,38 @@ func TestAssembleStablePrefix_IncludesToolManualsWhenEnabled(t *testing.T) {
 	}
 	if !strings.Contains(out.StablePrefix, "write_file 工具使用说明") {
 		t.Fatalf("expected write_file manual included")
+	}
+	if !strings.Contains(out.StablePrefix, "read_file 工具使用说明") {
+		t.Fatalf("expected read_file manual included")
+	}
+	if !strings.Contains(out.StablePrefix, "lsp.definition 工具使用说明") {
+		t.Fatalf("expected lsp.definition manual included")
+	}
+
+	expectModules := []string{
+		"assets/tools/bash.md",
+		"assets/tools/write_file.md",
+		"assets/tools/read_file.md",
+		"assets/tools/edit.md",
+		"assets/tools/edit_v2.md",
+		"assets/tools/multiedit.md",
+		"assets/tools/ls.md",
+		"assets/tools/glob.md",
+		"assets/tools/rg.md",
+		"assets/tools/search.md",
+		"assets/tools/run_command.md",
+		"assets/tools/plan.md",
+		"assets/tools/subagent.md",
+		"assets/tools/skill_read.md",
+		"assets/tools/document_export.md",
+		"assets/tools/lsp_definition.md",
+		"assets/tools/lsp_references.md",
+		"assets/tools/lsp_rename_preview.md",
+	}
+	for _, rel := range expectModules {
+		if !contains(out.Modules, rel) {
+			t.Fatalf("expected module injected: %s", rel)
+		}
 	}
 	// Key constraints must be present.
 	if !strings.Contains(out.StablePrefix, "CDATA") {
@@ -54,4 +107,13 @@ func TestAssembleStablePrefix_SortsToolsDeterministically(t *testing.T) {
 	if a.StablePrefix != b.StablePrefix {
 		t.Fatalf("expected stable output regardless of input order")
 	}
+}
+
+func contains(list []string, target string) bool {
+	for _, item := range list {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
