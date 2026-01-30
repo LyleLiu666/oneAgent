@@ -1,7 +1,7 @@
 ## 1. Specs
-- [ ] 1.1 Add `system-work-ledger` delta requirements for learning pipeline governance hints + evidence invariants
-- [ ] 1.2 Add `system-skill-management` delta requirements for staleness signals + deprecate/archive workflow
-- [ ] 1.3 Run `openspec validate update-sop-learning-pipeline-staleness --strict --no-interactive`
+- [x] 1.1 Add `system-work-ledger` delta requirements for learning pipeline governance hints + evidence invariants
+- [x] 1.2 Add `system-skill-management` delta requirements for staleness signals + deprecate/archive workflow
+- [x] 1.3 Run `openspec validate update-sop-learning-pipeline-staleness --strict --no-interactive`
 
 ## 2. Backend
 - [ ] 2.1 Record skill usage signals (last_used_at, used_count) (best-effort)
@@ -18,4 +18,3 @@
 ## 4. Validation
 - [ ] 4.1 `cd backend && go test ./...`
 - [ ] 4.2 `cd frontend && npm test -- --run`
-
