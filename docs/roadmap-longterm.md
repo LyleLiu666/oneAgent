@@ -18,11 +18,7 @@
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
-- [ ] `update-ux-error-surface`（0/11 tasks）：统一错误披露（安全/可追踪/可操作）+ 按 `docs/ux_critique.md` 逐步修 UX
-- [ ] `add-worktree-attempt-isolation`（2/8 tasks）：git worktree 隔离 attempt（执行根目录 + 生命周期管理）
-- [ ] `add-mcp-server`（2/7 tasks）：对外暴露 MCP server（local-only + auth/policy + events）
-- [ ] `add-secretary-mode-chat`（0/5 tasks）：提供“秘书模式”纯聊天体验（独立路由 + 低噪声 + 菜单可回完整模式）
-- [ ] `fix-skill-read-not-found-ux`（0/7 tasks）：skill.read not-found 的可行动 UX
+- （暂无；以 `openspec list` 为准。若要继续推进，请先在 `openspec/changes/review.md` 创建新的 active changes 并排序。）
 
 ### 0.2 Done（已交付，且已归档到 `openspec/changes/archive/`）
 - [x] `add-project-scripts`
