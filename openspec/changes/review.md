@@ -11,28 +11,26 @@
 - `add-toolcalling-metrics-regression`（2/6）：工具调用指标体系 + 脚本化回归（把成功率变成可回归数字）
 - `update-toolcalling-default-temperature`（2/5）：tools 启用时默认 temperature=0（提升结构化输出稳定性）
 - `update-toolcalling-arguments-normalization`（2/5）：增强 tool arguments JSON 修复（围栏/夹杂文本/quoted JSON）
+- `update-workspace-preflight-for-tools`（2/5）：tools 启用但 workspace 未设置时 fail-fast，避免模型白跑一轮
+- `update-tool-output-envelope`（2/6）：工具输出/错误统一 JSON envelope（可解析 + 可行动），降低自愈回合数
+- `add-core-tool-manuals`（2/5）：补齐核心工具手册（assets/tools），并用 prompt tests 防回归
 - `update-tool-names-openai-compatible`（2/7）：工具 function name 去点号（OpenAI-compatible）+ 保留 alias 兼容
-- `add-toolcalling-reliability-specs`（5/5）：整理工具调用专家建议为 OpenSpec，并增加 XML vs JSON 长文本专项回归测试（先测后改）
 
 ### P1（Prompt 基建 / 降低踩坑）
-- `add-core-tool-manuals`（2/5）：补齐核心工具手册（assets/tools），并用 prompt tests 防回归
 - `add-command-profile-coding`（2/6）：新增 `coding` 命令 profile（docker-only），让 coding agent 常用链路跑得起来
-- `update-tool-output-envelope`（2/6）：工具输出/错误统一 JSON envelope（可解析 + 可行动），降低自愈回合数
-- `update-workspace-preflight-for-tools`（2/5）：tools 启用但 workspace 未设置时 fail-fast，避免模型白跑一轮
+- `update-tool-protocol-boundaries`（2/7）：固化工具协议边界（JSON 默认 / XML fallback）+ XML 工具集 gating
 
 ### P2（对齐 Codex / 中长期）
 - `update-openai-responses-toolcalling`（2/7）：补齐 OpenAI Responses provider 的 tools loop（先 MVP 非流式，流式 best-effort）
-- `update-tool-protocol-boundaries`（2/7）：固化工具协议边界（JSON 默认 / XML fallback）+ XML 工具集 gating
 
 ## Snapshot（来自 `openspec list`）
 - `add-toolcalling-metrics-regression`：2/6 tasks
 - `update-toolcalling-default-temperature`：2/5 tasks
 - `update-toolcalling-arguments-normalization`：2/5 tasks
-- `add-toolcalling-reliability-specs`：5/5 tasks
+- `update-workspace-preflight-for-tools`：2/5 tasks
+- `update-tool-output-envelope`：2/6 tasks
 - `add-core-tool-manuals`：2/5 tasks
 - `add-command-profile-coding`：2/6 tasks
 - `update-tool-names-openai-compatible`：2/7 tasks
-- `update-tool-output-envelope`：2/6 tasks
 - `update-openai-responses-toolcalling`：2/7 tasks
 - `update-tool-protocol-boundaries`：2/7 tasks
-- `update-workspace-preflight-for-tools`：2/5 tasks
