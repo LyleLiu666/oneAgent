@@ -19,12 +19,14 @@ import {
   getSkill,
   readSkillFile,
   listSkillDuplicates,
+  listStaleSkills,
   listSkills,
   pinSkillCandidate,
   updateSkill,
   type SkillDuplicateGroup,
   type SkillCandidateInfo,
   type SkillInfo,
+  type StaleSkillInfo,
 } from "@/api/client";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
 
@@ -39,6 +41,12 @@ const duplicatesActionLoading = ref(false);
 const duplicatesActionError = ref<ParsedApiError | null>(null);
 const archiveShadowedBySkillID = ref<Record<string, boolean>>({});
 const advancedOpen = ref(false);
+
+const staleLoading = ref(false);
+const staleError = ref<ParsedApiError | null>(null);
+const staleSkills = ref<StaleSkillInfo[]>([]);
+const staleDays = ref<number>(30);
+const staleOpen = ref(false);
 
 const selectedID = ref("");
 const selectedLoading = ref(false);
@@ -64,6 +72,7 @@ const refresh = async () => {
   error.value = null;
   duplicatesError.value = null;
   duplicatesActionError.value = null;
+  staleError.value = null;
   loading.value = true;
   try {
     const list = await listSkills();
@@ -91,6 +100,18 @@ const refresh = async () => {
     duplicatesError.value = parseApiError(e, "加载重复项失败");
   } finally {
     duplicatesLoading.value = false;
+  }
+
+  staleLoading.value = true;
+  try {
+    const days = Math.max(1, Math.floor(Number(staleDays.value) || 30));
+    const list = await listStaleSkills({ days });
+    staleSkills.value = Array.isArray(list) ? list : [];
+  } catch (e: any) {
+    staleSkills.value = [];
+    staleError.value = parseApiError(e, "加载过时技能失败");
+  } finally {
+    staleLoading.value = false;
   }
 };
 
@@ -229,6 +250,31 @@ const doArchive = async (s: SkillInfo) => {
     loading.value = false;
   }
 };
+
+const doArchiveStale = async (s: StaleSkillInfo) => {
+  if (!s.archivable) return;
+  staleError.value = null;
+  staleLoading.value = true;
+  try {
+    const reasonParts = [
+      "stale",
+      s.stale_reason ? `reason=${String(s.stale_reason)}` : "",
+      typeof s.stale_threshold_days === "number"
+        ? `days=${s.stale_threshold_days}`
+        : `days=${Math.max(1, Math.floor(Number(staleDays.value) || 30))}`,
+    ].filter(Boolean);
+    await archiveSkill(String(s.skill_id || "").trim(), {
+      reason: reasonParts.join("; "),
+    });
+    await refresh();
+  } catch (e: any) {
+    staleError.value = parseApiError(e, "归档失败");
+  } finally {
+    staleLoading.value = false;
+  }
+};
+
+const safeFmt = (v: any) => String(v || "").trim();
 
 const doPin = async (skillID: string, c: SkillCandidateInfo) => {
   duplicatesActionError.value = null;
@@ -431,6 +477,107 @@ onMounted(async () => {
                 :disabled="selectedLoading"
                 placeholder="SKILL.md"
               />
+            </div>
+          </div>
+
+          <div class="glass rounded-2xl overflow-hidden">
+            <button
+              type="button"
+              data-testid="skill-governance-stale-toggle"
+              class="w-full px-5 py-4 border-b border-surface-700/50 flex items-center justify-between gap-3 text-left hover:bg-surface-900/30"
+              @click="staleOpen = !staleOpen"
+            >
+              <div class="flex items-center gap-3">
+                <Archive class="w-5 h-5 text-primary-400" />
+                <div>
+                  <p class="text-sm font-semibold text-surface-100">
+                    过时技能候选
+                  </p>
+                  <p class="text-xs text-surface-500">
+                    {{ staleSkills.length }} 个（阈值
+                    {{ Math.max(1, Math.floor(Number(staleDays) || 30)) }} 天）
+                  </p>
+                </div>
+              </div>
+              <ChevronDown v-if="staleOpen" class="w-4 h-4 text-surface-400" />
+              <ChevronRight v-else class="w-4 h-4 text-surface-400" />
+            </button>
+
+            <div
+              v-if="staleOpen"
+              class="p-5 space-y-4"
+              data-testid="skill-governance-stale"
+            >
+              <ErrorBanner v-if="staleError" :error="staleError" title="加载失败" />
+
+              <div class="flex flex-wrap items-center gap-3">
+                <label
+                  class="text-xs text-surface-500 inline-flex items-center gap-2"
+                >
+                  阈值（天）
+                  <input
+                    data-testid="stale-days"
+                    v-model.number="staleDays"
+                    type="number"
+                    min="1"
+                    class="w-24 px-3 py-2 rounded-xl bg-surface-950/60 border border-surface-800 text-surface-100 text-xs"
+                    :disabled="staleLoading || loading"
+                  />
+                </label>
+                <button
+                  data-testid="stale-refresh"
+                  class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
+                  :disabled="staleLoading || loading"
+                  @click="refresh"
+                >
+                  <RefreshCw class="w-4 h-4" />
+                  扫描
+                </button>
+              </div>
+
+              <div v-if="staleLoading" class="text-sm text-surface-500">
+                加载中…
+              </div>
+              <div
+                v-else-if="staleSkills.length === 0"
+                class="text-sm text-surface-500"
+              >
+                暂无过时技能候选。
+              </div>
+              <div v-else class="space-y-2">
+                <div
+                  v-for="s in staleSkills"
+                  :key="s.skill_id"
+                  class="glass-card p-4 flex items-start justify-between gap-4"
+                  data-testid="stale-skill-item"
+                >
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-surface-100 truncate">
+                      {{ displaySkillTitle(s as any) }}
+                    </p>
+                    <p class="text-xs text-surface-500 truncate">
+                      id={{ s.skill_id }} · used={{ s.used_count }} · last={{
+                        safeFmt(s.last_activity_at).slice(0, 19) || "—"
+                      }}
+                    </p>
+                    <p
+                      v-if="safeFmt(s.stale_reason)"
+                      class="text-[11px] text-surface-500 mt-1"
+                    >
+                      {{ safeFmt(s.stale_reason) }}
+                    </p>
+                  </div>
+                  <button
+                    data-testid="stale-skill-archive"
+                    class="px-3 py-2 rounded-xl text-xs font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2 whitespace-nowrap"
+                    :disabled="staleLoading || loading || !s.archivable"
+                    @click="doArchiveStale(s)"
+                  >
+                    <Archive class="w-4 h-4" />
+                    归档
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

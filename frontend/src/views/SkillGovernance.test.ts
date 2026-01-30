@@ -8,6 +8,7 @@ import * as apiClient from "@/api/client";
 vi.mock("@/api/client", () => ({
   listSkills: vi.fn(async () => []),
   listSkillDuplicates: vi.fn(async () => []),
+  listStaleSkills: vi.fn(async () => []),
   archiveSkill: vi.fn(async () => ({})),
   pinSkillCandidate: vi.fn(async () => ({})),
   archiveShadowedPersonalDuplicates: vi.fn(async () => ({})),
@@ -38,6 +39,7 @@ it("loads skills and renders list", async () => {
 
   expect(apiClient.listSkills).toHaveBeenCalled();
   expect((apiClient as any).listSkillDuplicates).toHaveBeenCalled();
+  expect((apiClient as any).listStaleSkills).toHaveBeenCalled();
   expect(wrapper.text()).toContain("A");
   expect(wrapper.find('[data-testid="skill-archive"]').exists()).toBe(true);
 
@@ -83,6 +85,7 @@ it("loads skill details when selected and saves with OCC", async () => {
   await flushPromises();
 
   expect((apiClient as any).listSkillDuplicates).toHaveBeenCalled();
+  expect((apiClient as any).listStaleSkills).toHaveBeenCalled();
 
   await wrapper.get('[data-testid="skill-item"]').trigger("click");
   await flushPromises();
@@ -218,6 +221,46 @@ it("allows viewing non-editable skill files", async () => {
   );
   expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toContain(
     "notes"
+  );
+
+  wrapper.unmount();
+});
+
+it("shows stale skills and can archive with reason", async () => {
+  const { default: SkillGovernance } =
+    await import("@/views/SkillGovernance.vue");
+
+  (apiClient.listSkills as any).mockResolvedValueOnce([]);
+  (apiClient.listSkillDuplicates as any).mockResolvedValueOnce([]);
+  (apiClient as any).listStaleSkills.mockResolvedValueOnce([
+    {
+      skill_id: "stale-1",
+      name: "Stale 1",
+      description: "d",
+      source: ".oneagent",
+      path: "/tmp/stale-1/SKILL.md",
+      archivable: true,
+      used_count: 0,
+      last_activity_at: "2026-01-01T00:00:00Z",
+      stale_reason: "inactive",
+      stale_threshold_days: 30,
+    },
+  ]);
+
+  const wrapper = shallowMount(SkillGovernance);
+  await flushPromises();
+
+  await wrapper.get('[data-testid="skill-governance-stale-toggle"]').trigger("click");
+  await flushPromises();
+
+  expect(wrapper.findAll('[data-testid="stale-skill-item"]').length).toBe(1);
+
+  await wrapper.get('[data-testid="stale-skill-archive"]').trigger("click");
+  await flushPromises();
+
+  expect(apiClient.archiveSkill).toHaveBeenCalledWith(
+    "stale-1",
+    expect.objectContaining({ reason: expect.stringContaining("stale") }),
   );
 
   wrapper.unmount();

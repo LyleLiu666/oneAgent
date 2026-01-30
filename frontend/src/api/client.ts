@@ -665,11 +665,32 @@ export async function listSkillDuplicates(params?: {
 
 export async function archiveSkill(
   skillId: string,
-): Promise<{ ok: boolean; skill_id: string; archived_path: string }> {
+  payload?: { reason?: string },
+): Promise<{ ok: boolean; skill_id: string; archived_path: string; reason?: string }> {
   return api(`/api/skills/${encodeURIComponent(skillId)}/archive`, {
     method: "POST",
-    body: {},
+    body: payload || {},
   });
+}
+
+export interface StaleSkillInfo extends SkillInfo {
+  used_count: number;
+  last_used_at?: string;
+  last_activity_at?: string;
+  stale_reason?: string;
+  recommended_action?: string;
+  stale_threshold_days?: number;
+}
+
+export async function listStaleSkills(params?: {
+  days?: number;
+}): Promise<StaleSkillInfo[]> {
+  const qs = new URLSearchParams();
+  if (typeof params?.days === "number" && Number.isFinite(params.days)) {
+    qs.set("days", String(Math.floor(params.days)));
+  }
+  const q = qs.toString();
+  return api(`/api/skills/stale${q ? `?${q}` : ""}`);
 }
 
 export interface PinSkillResult {
