@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.oneagent.fetch_agent_issues</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd "__REPO_ROOT__" &amp;&amp; TOP_N=10 FOCUS_ONLY=1 docs/opensource/agent_issues/fetch_agent_issues.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Daily at 03:15 local time -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>15</integer>
+  </dict>
+
+  <!-- Logs (repo-local runtime folder; ignored by git) -->
+  <key>StandardOutPath</key>
+  <string>__REPO_ROOT__/.oneagent/tmp/fetch_agent_issues.out</string>
+  <key>StandardErrorPath</key>
+  <string>__REPO_ROOT__/.oneagent/tmp/fetch_agent_issues.err</string>
+</dict>
+</plist>
+

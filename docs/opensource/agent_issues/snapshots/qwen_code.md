@@ -1,6 +1,6 @@
 # Qwen Code — Top Issues Snapshot (open, sorted by reactions)
 
-- Fetched at (UTC): 2026-01-30T14:44:25Z
+- Fetched at (UTC): 2026-01-30T14:57:24Z
 - Repo: https://github.com/QwenLM/qwen-code
 - Query: `repo:QwenLM/qwen-code is:issue is:open sort:reactions-desc`
 - Top N: 10

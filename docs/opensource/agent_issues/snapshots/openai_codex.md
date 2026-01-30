@@ -1,6 +1,6 @@
 # OpenAI Codex — Top Issues Snapshot (open, sorted by reactions)
 
-- Fetched at (UTC): 2026-01-30T14:44:21Z
+- Fetched at (UTC): 2026-01-30T14:57:17Z
 - Repo: https://github.com/openai/codex
 - Query: `repo:openai/codex is:issue is:open sort:reactions-desc`
 - Top N: 10

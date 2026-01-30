@@ -4,7 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="$ROOT_DIR/snapshots"
 
+# Defaults
 TOP_N="${TOP_N:-10}"
+FOCUS_ONLY="${FOCUS_ONLY:-1}"   # 1=only Codex/Kode/OpenCode/QwenCode
+EXTRA="${EXTRA:-0}"             # 1=also fetch secondary agent repos
+SLEEP_SECONDS="${SLEEP_SECONDS:-1}"
 
 mkdir -p "$OUT_DIR"
 
@@ -38,27 +42,39 @@ fetch_repo() {
   # GitHub Search API supports sort/order params.
   # NOTE: We use curl (not `gh api`) because some environments route `gh` to a GitHub Enterprise host
   # where search endpoints may not be available.
+  local q_encoded
   q_encoded="$(printf '%s' "$q" | jq -sRr @uri)"
-  url="https://api.github.com/search/issues?q=${q_encoded}&sort=reactions&order=desc&per_page=${TOP_N}"
+  local url="https://api.github.com/search/issues?q=${q_encoded}&sort=reactions&order=desc&per_page=${TOP_N}"
 
+  local json_path="$OUT_DIR/${slug}.json"
+  local headers_path
+  headers_path="$(mktemp)"
+
+  local -a curl_args
+  curl_args=(
+    -sS
+    -H "Accept: application/vnd.github+json"
+    -H "X-GitHub-Api-Version: 2022-11-28"
+  )
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    curl -sS \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-      "$url" \
-      > "$OUT_DIR/${slug}.json"
-  else
-    curl -sS \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$url" \
-      > "$OUT_DIR/${slug}.json"
+    curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
 
-  if ! jq -e '.items and (.items|type=="array")' "$OUT_DIR/${slug}.json" >/dev/null 2>&1; then
-    msg="$(jq -r '.message // empty' "$OUT_DIR/${slug}.json" 2>/dev/null || true)"
-    status="$(jq -r '.status // empty' "$OUT_DIR/${slug}.json" 2>/dev/null || true)"
+  curl "${curl_args[@]}" -D "$headers_path" "$url" -o "$json_path"
+
+  # Best-effort rate limit awareness (Search API is much stricter than core API).
+  # If we are rate-limited, we still keep the raw response and write a readable failure stub.
+  local remaining reset_at
+  remaining="$(awk -F': ' 'tolower($1)=="x-ratelimit-remaining"{print $2}' "$headers_path" | tail -n 1 | tr -d '\r' || true)"
+  reset_at="$(awk -F': ' 'tolower($1)=="x-ratelimit-reset"{print $2}' "$headers_path" | tail -n 1 | tr -d '\r' || true)"
+  if [[ "${remaining:-}" == "0" ]]; then
+    echo "Rate limit reached (remaining=0, reset=${reset_at})." >&2
+  fi
+
+  if ! jq -e '.items and (.items|type=="array")' "$json_path" >/dev/null 2>&1; then
+    local msg status
+    msg="$(jq -r '.message // empty' "$json_path" 2>/dev/null || true)"
+    status="$(jq -r '.status // empty' "$json_path" 2>/dev/null || true)"
 
     cat > "$OUT_DIR/${slug}.md" <<EOF
 # ${name} — Top Issues Snapshot (open, sorted by reactions)
@@ -72,9 +88,12 @@ fetch_repo() {
 
 - Status: ${status}
 - Message: ${msg}
+$(if [[ -n "${remaining:-}" ]]; then echo "- RateLimit-Remaining: ${remaining}"; fi)
+$(if [[ -n "${reset_at:-}" ]]; then echo "- RateLimit-Reset: ${reset_at}"; fi)
 
 Raw response saved at: \`${slug}.json\`
 EOF
+    rm -f "$headers_path"
     return 0
   fi
 
@@ -120,18 +139,30 @@ EOF
       + (if (.labels_md|length) > 0 then ("- Labels: " + .labels_md + "\n") else "" end)
       + "\n"
       + .body + "\n\n---\n"
-  ' "$OUT_DIR/${slug}.json" >> "$OUT_DIR/${slug}.md"
+  ' "$json_path" >> "$OUT_DIR/${slug}.md"
+  rm -f "$headers_path"
 }
 
 # Focus: agent / coding-agent 类产品（来自 docs/opensource/README.md 的同类项目）
 fetch_repo "openai/codex" "OpenAI Codex"
-fetch_repo "anomalyco/opencode" "OpenCode"
-fetch_repo "code-yeongyu/oh-my-opencode" "Oh My OpenCode"
-fetch_repo "QwenLM/qwen-code" "Qwen Code"
+sleep "$SLEEP_SECONDS"
 fetch_repo "shareAI-lab/Kode-cli" "Kode CLI"
-fetch_repo "continuedev/continue" "Continue"
-fetch_repo "Aider-AI/aider" "Aider"
-fetch_repo "OpenHands/OpenHands" "OpenHands"
-fetch_repo "microsoft/autogen" "Microsoft AutoGen"
+sleep "$SLEEP_SECONDS"
+fetch_repo "anomalyco/opencode" "OpenCode"
+sleep "$SLEEP_SECONDS"
+fetch_repo "QwenLM/qwen-code" "Qwen Code"
+
+if [[ "$FOCUS_ONLY" != "1" || "$EXTRA" == "1" ]]; then
+  sleep "$SLEEP_SECONDS"
+  fetch_repo "code-yeongyu/oh-my-opencode" "Oh My OpenCode"
+  sleep "$SLEEP_SECONDS"
+  fetch_repo "continuedev/continue" "Continue"
+  sleep "$SLEEP_SECONDS"
+  fetch_repo "Aider-AI/aider" "Aider"
+  sleep "$SLEEP_SECONDS"
+  fetch_repo "OpenHands/OpenHands" "OpenHands"
+  sleep "$SLEEP_SECONDS"
+  fetch_repo "microsoft/autogen" "Microsoft AutoGen"
+fi
 
 echo "Done. Output: $OUT_DIR"

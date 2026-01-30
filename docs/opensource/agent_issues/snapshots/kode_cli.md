@@ -1,6 +1,6 @@
 # Kode CLI — Top Issues Snapshot (open, sorted by reactions)
 
-- Fetched at (UTC): 2026-01-30T14:44:26Z
+- Fetched at (UTC): 2026-01-30T14:57:20Z
 - Repo: https://github.com/shareAI-lab/Kode-cli
 - Query: `repo:shareAI-lab/Kode-cli is:issue is:open sort:reactions-desc`
 - Top N: 10

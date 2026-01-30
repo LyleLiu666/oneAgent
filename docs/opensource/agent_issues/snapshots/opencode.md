@@ -1,6 +1,6 @@
 # OpenCode — Top Issues Snapshot (open, sorted by reactions)
 
-- Fetched at (UTC): 2026-01-30T14:44:23Z
+- Fetched at (UTC): 2026-01-30T14:57:22Z
 - Repo: https://github.com/anomalyco/opencode
 - Query: `repo:anomalyco/opencode is:issue is:open sort:reactions-desc`
 - Top N: 10
