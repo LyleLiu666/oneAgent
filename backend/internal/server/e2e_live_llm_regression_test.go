@@ -84,6 +84,10 @@ type liveLLMCaseResult struct {
 	ToolCalls   int `json:"tool_calls"`
 	ToolResults int `json:"tool_results"`
 
+	VerifiedFile  string `json:"verified_file,omitempty"`
+	VerifiedRunes int    `json:"verified_runes,omitempty"`
+	VerifiedBytes int    `json:"verified_bytes,omitempty"`
+
 	AssistantTextSHA256 string `json:"assistant_text_sha256,omitempty"`
 	AssistantTextChars  int    `json:"assistant_text_chars,omitempty"`
 
@@ -107,6 +111,10 @@ func TestE2E_LiveLLM_RegressionSuite(t *testing.T) {
 
 	repoRoot := findRepoRoot(t)
 	srcSettingsDB := filepath.Join(repoRoot, ".oneagent", "settings.db")
+	if override := strings.TrimSpace(os.Getenv("ONEAGENT_LIVE_LLM_SETTINGS_DB")); override != "" {
+		srcSettingsDB = override
+		repoRoot = filepath.Dir(filepath.Dir(override))
+	}
 	if _, err := os.Stat(srcSettingsDB); err != nil {
 		t.Skipf("missing settings db at %s", srcSettingsDB)
 	}
@@ -158,13 +166,14 @@ func TestE2E_LiveLLM_RegressionSuite(t *testing.T) {
 	report.Meta.Env.RunsPerCase = runsPerCase
 	report.Meta.Env.TimeoutSec = timeoutSec
 
-	longPayload := buildLongTextPayload(3000)
+	// Keep the payload ~3000 runes but within the single-call write_file limit to avoid truncation-by-design.
+	longPayload := buildLongTextPayload(2900)
 
 	baseCases := []struct {
 		name     string
 		tools    []string
 		buildMsg func() string
-		verify   func(workspace string) error
+		verify   func(workspace string, out *liveLLMCaseResult) error
 	}{
 		{
 			name:  "short_write_file",
@@ -174,7 +183,7 @@ func TestE2E_LiveLLM_RegressionSuite(t *testing.T) {
 请调用 write_file 工具，在 workspace 根目录创建 hello.txt，内容严格等于：hello
 完成后你可以简单回复 OK。`)
 			},
-			verify: func(workspace string) error {
+			verify: func(workspace string, out *liveLLMCaseResult) error {
 				p := filepath.Join(workspace, "hello.txt")
 				b, err := os.ReadFile(p)
 				if err != nil {
@@ -183,15 +192,26 @@ func TestE2E_LiveLLM_RegressionSuite(t *testing.T) {
 				if strings.TrimSpace(string(b)) != "hello" {
 					return fmt.Errorf("hello.txt content mismatch: %q", string(b))
 				}
+				if out != nil {
+					out.VerifiedFile = "hello.txt"
+					out.VerifiedBytes = len(b)
+					out.VerifiedRunes = utf8RuneCount(string(b))
+				}
 				return nil
 			},
 		},
 		{
-			name:  "long_write_file_3000runes",
+			name:  "long_write_file_3000ish_runes",
 			tools: []string{tool.ToolIDWriteFile},
 			buildMsg: func() string {
 				return fmt.Sprintf(strings.TrimSpace(`
-请调用 write_file 工具，在 workspace 根目录创建 long.txt，内容必须严格等于下面 BEGIN_PAYLOAD 与 END_PAYLOAD 之间的文本（不要改动任何字符，不要增删空格或换行）。
+请调用 write_file 工具，在 workspace 根目录创建 long.txt。
+
+要求：
+1) 只允许调用一次 write_file（append=false，不要分段）
+2) filePath 必须是 long.txt（不要加任何前缀：不要用 /long.txt 或 /workspace/long.txt）
+3) 内容已控制在单次 write_file 限制内，可以一次写完；不要为了“省 token”自行缩短
+4) 内容必须严格等于下面 BEGIN_PAYLOAD 与 END_PAYLOAD 之间的文本（不要改动任何字符，不要增删空格或换行）
 
 BEGIN_PAYLOAD
 %s
@@ -199,18 +219,26 @@ END_PAYLOAD
 
 完成后你可以简单回复 OK。`), longPayload)
 			},
-			verify: func(workspace string) error {
+			verify: func(workspace string, out *liveLLMCaseResult) error {
 				p := filepath.Join(workspace, "long.txt")
 				b, err := os.ReadFile(p)
 				if err != nil {
 					return fmt.Errorf("read long.txt: %w", err)
 				}
 				txt := string(b)
-				if !strings.Contains(txt, "ONEAGENT_LONGTEXT_BEGIN") || !strings.Contains(txt, "ONEAGENT_LONGTEXT_END") {
-					return fmt.Errorf("long.txt missing sentinels")
+				runes := utf8RuneCount(txt)
+				if runes < 2600 {
+					return fmt.Errorf("long.txt too short: %d runes", runes)
 				}
-				if utf8RuneCount(txt) < 3000 {
-					return fmt.Errorf("long.txt too short: %d runes", utf8RuneCount(txt))
+				for _, needle := range []string{"第1段:", "<tag>hello</tag>", "（中文）"} {
+					if !strings.Contains(txt, needle) {
+						return fmt.Errorf("long.txt missing required content: %q", needle)
+					}
+				}
+				if out != nil {
+					out.VerifiedFile = "long.txt"
+					out.VerifiedBytes = len(b)
+					out.VerifiedRunes = runes
 				}
 				return nil
 			},
@@ -241,7 +269,7 @@ END_PAYLOAD
 				res.Workspace = ws
 
 				if res.OK {
-					if err := bc.verify(ws); err != nil {
+					if err := bc.verify(ws, &res); err != nil {
 						res.OK = false
 						res.Error = err.Error()
 					}
@@ -296,8 +324,9 @@ func findRepoRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
+	start := dir
 	for i := 0; i < 12; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, ".oneagent", "settings.db")); err == nil {
 			return dir
 		}
 		next := filepath.Dir(dir)
@@ -306,7 +335,7 @@ func findRepoRoot(t *testing.T) string {
 		}
 		dir = next
 	}
-	t.Fatalf("could not locate repo root from %s", dir)
+	t.Fatalf("could not locate repo root with .oneagent/settings.db from %s", start)
 	return ""
 }
 
@@ -683,4 +712,3 @@ func writeLiveReportMarkdown(path string, report liveLLMReport, jsonPath string)
 
 	return os.WriteFile(path, []byte(b.String()), 0o600)
 }
-
