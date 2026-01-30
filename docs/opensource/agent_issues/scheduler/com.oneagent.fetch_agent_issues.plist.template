@@ -15,14 +15,9 @@
   <key>RunAtLoad</key>
   <true/>
 
-  <!-- Daily at 03:15 local time -->
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>3</integer>
-    <key>Minute</key>
-    <integer>15</integer>
-  </dict>
+  <!-- Every 30 minutes (best-effort; pauses while the machine is asleep) -->
+  <key>StartInterval</key>
+  <integer>1800</integer>
 
   <!-- Logs (repo-local runtime folder; ignored by git) -->
   <key>StandardOutPath</key>
@@ -31,4 +26,3 @@
   <string>__REPO_ROOT__/.oneagent/tmp/fetch_agent_issues.err</string>
 </dict>
 </plist>
-

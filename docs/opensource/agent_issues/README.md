@@ -28,7 +28,7 @@ docs/opensource/agent_issues/fetch_agent_issues.sh
 
 ## Scheduling (macOS)
 
-如果遇到 GitHub Search API 限流，最简单策略是 **定时拉取**（例如每天一次），避免频繁手动刷新。
+如果遇到 GitHub Search API 限流，最简单策略是 **定时拉取**，避免频繁手动刷新。
 
 已提供 launchd 模板（不会自动安装）：
 
@@ -37,7 +37,9 @@ chmod +x docs/opensource/agent_issues/scheduler/install_launchd.sh
 docs/opensource/agent_issues/scheduler/install_launchd.sh /Users/liu_y/code/goProject/oneAgent
 ```
 
-默认每天 03:15 拉取一次，日志写入：
+默认每 30 分钟拉取一次（`StartInterval=1800`）。注意：电脑睡眠期间 launchd 不会运行，醒来后会继续按间隔触发。
+
+日志写入：
 - `.oneagent/tmp/fetch_agent_issues.out`
 - `.oneagent/tmp/fetch_agent_issues.err`
 
