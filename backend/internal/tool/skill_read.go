@@ -118,6 +118,14 @@ func runSkillReadTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		content = truncated + "\n\n...(truncated)...\n"
 	}
 
+	// Record usage signals best-effort (does not fail the tool).
+	if db := SettingsDBFromContext(ctx); db != nil {
+		userID := strings.TrimSpace(UserIDFromContext(ctx))
+		if userID != "" && strings.TrimSpace(s.ID) != "" {
+			_ = db.RecordSkillUse(ctx, userID, s.ID, "tool:skill_read")
+		}
+	}
+
 	return skillReadResult{
 		OK:      true,
 		SkillID: s.ID,

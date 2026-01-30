@@ -4,7 +4,7 @@
 - [x] 1.3 Run `openspec validate update-sop-learning-pipeline-staleness --strict --no-interactive`
 
 ## 2. Backend
-- [ ] 2.1 Record skill usage signals (last_used_at, used_count) (best-effort)
+- [x] 2.1 Record skill usage signals (last_used_at, used_count) (best-effort)
 - [ ] 2.2 Staleness detection job (best-effort) + API to list stale candidates
 - [ ] 2.3 Learning job output: attach similar/merge hints and evidence summary (best-effort)
 - [ ] 2.4 Governance actions: deprecate/archive with reason; ensure recall excludes archived/deprecated

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 )
 
@@ -155,5 +156,42 @@ func TestSkillReadTool_NotFoundIncludesSuggestionsAndNextSteps(t *testing.T) {
 	}
 	if len(suggestions) > 5 {
 		t.Fatalf("expected <=5 suggestions, got %d: %q", len(suggestions), msg)
+	}
+}
+
+func TestSkillReadTool_RecordsUsageSignals_BestEffort(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := settingsdb.Open(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	manager := skill.NewManager(0)
+	ctx = ContextWithSkillManager(ctx, manager)
+	ctx = ContextWithSettingsDB(ctx, db)
+	ctx = ContextWithUserID(ctx, "alice")
+
+	raw, _ := json.Marshal(map[string]any{
+		"name": "create-skill",
+	})
+	_, err = runSkillReadTool(ctx, raw)
+	if err != nil {
+		t.Fatalf("skill_read: %v", err)
+	}
+
+	usage, ok, err := db.GetSkillUsage(ctx, "alice", "create-skill")
+	if err != nil {
+		t.Fatalf("get usage: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected usage row to exist")
+	}
+	if usage.UsedCount < 1 {
+		t.Fatalf("expected used_count>=1, got %d", usage.UsedCount)
+	}
+	if usage.LastUsedAt.IsZero() {
+		t.Fatalf("expected last_used_at to be set")
 	}
 }

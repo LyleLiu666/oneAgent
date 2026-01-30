@@ -154,6 +154,20 @@ CREATE TABLE IF NOT EXISTS tool_approvals (
 );
 `,
 		`CREATE INDEX IF NOT EXISTS idx_tool_approvals_lookup ON tool_approvals(principal_id, scope_id, tool_id, args_hash, status);`,
+		`
+CREATE TABLE IF NOT EXISTS skill_usage (
+  user_id TEXT NOT NULL,
+  skill_id TEXT NOT NULL,
+  used_count INTEGER NOT NULL,
+  last_used_at_ms INTEGER NOT NULL,
+  last_used_reason TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY(user_id, skill_id)
+);
+`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_usage_user_id ON skill_usage(user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_skill_usage_last_used_at_ms ON skill_usage(last_used_at_ms);`,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
