@@ -54,33 +54,35 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
 ### Requirement: 中文上下文注入 (Chinese Context Injection)
-系统必须 (MUST) 通过 TurnContext（volatile）消息使用中文提示词注入“推荐技能摘要”，以符合用户偏好，并引导 agent 在使用前先通过 `skill.read` 读取该技能的 `SKILL.md`；系统不得 (MUST NOT) 回写稳定 system prompt。
+系统必须 (MUST) 通过 TurnContext（volatile）消息使用中文提示词注入“推荐技能摘要”，以符合用户偏好，并引导 agent 在使用前先通过 `skill_read` 读取该技能的 `SKILL.md`；系统不得 (MUST NOT) 回写稳定 system prompt。
+
+系统必须 (MUST) 在过渡期内兼容历史名称 `skill.read`（alias，best-effort）。
 
 #### Scenario: 中文提示词标题 (Scenario: Chinese Prompt Header)
 - **GIVEN** 系统产生一个推荐技能
 - **WHEN** 生成 TurnContext（volatile）注入消息时
 - **THEN** 它**必须**包含 "## 技能建议"
-- **THEN** 它**必须**包含 "`skill.read`" 或等价表述（强调先通过 skill 读取工具读到 `SKILL.md` 再执行）
+- **THEN** 它**必须**包含 "`skill_read`" 或等价表述（强调先通过 skill 读取工具读到 `SKILL.md` 再执行）
 
 #### Scenario: 列表中的技能描述 (Scenario: Skill Description in List)
 - **GIVEN** 系统推荐技能 "Translator"，描述为 "Expert in translation"
 - **WHEN** 生成 TurnContext（volatile）注入消息时
 - **THEN** 它**必须**包含 "- Translator: Expert in translation"
-- **THEN** 它**必须**包含“如何读取该技能”的提示（例如包含 `skill.read("Translator")` 或等价表述）
+- **THEN** 它**必须**包含“如何读取该技能”的提示（例如包含 `skill_read(name="Translator")` 或等价表述）
 
 ### Requirement: Skill 读取工具（`skill.read`）
-系统必须 (MUST) 提供一个 skill 读取工具（例如 `skill.read`），使 agent 可仅凭技能名称/ID 读取对应技能的 `SKILL.md` 原文；该原文必须作为工具调用输出（tool output）进入对话上下文，以便 agent 在后续思考与回复中遵循该 Skill 的指令。
+系统必须 (MUST) 提供一个 skill 读取工具（canonical name 为 `skill_read`；并兼容 `skill.read` alias），使 agent 可仅凭技能名称/ID 读取对应技能的 `SKILL.md` 原文；该原文必须作为工具调用输出（tool output）进入对话上下文，以便 agent 在后续思考与回复中遵循该 Skill 的指令。
 
 该工具必须 (MUST) 按技能发现的同名覆盖规则返回“最终生效版本”（例如 `<workspace>/.oneagent` > `<workspace>/skills` > `<workspace>/.claude` > `~/.claude` > `~/.codex` > `.builtin`），且不得要求调用方提供文件路径。
 
 #### Scenario: 仅凭技能名称读取 SKILL.md
 - **GIVEN** 技能来源中存在技能 "Translator"
-- **WHEN** agent 调用 `skill.read("Translator")`
+- **WHEN** agent 调用 `skill_read(name="Translator")`
 - **THEN** 系统返回该技能的 `SKILL.md` 原文作为 tool output
 
 #### Scenario: 同名冲突时返回最终生效版本
 - **GIVEN** `~/.claude/skills/translator/SKILL.md` 与 `<workspace>/.oneagent/skills/translator/SKILL.md` 同时存在
-- **WHEN** agent 调用 `skill.read("translator")`
+- **WHEN** agent 调用 `skill_read(name="translator")`
 - **THEN** 系统返回 `.oneagent` 版本的 `SKILL.md` 原文作为 tool output
 
 ### Requirement: Skill Eligibility Metadata (requires/install)
@@ -197,4 +199,70 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **WHEN** 客户端请求 `PUT /api/skills/:id` 并携带 `expected_sha256`
 - **THEN** 当文件未变化时更新成功
 - **AND** 当文件已变化时必须拒绝并返回明确错误
+
+### Requirement: The system MUST record skill usage signals (best-effort)
+系统必须 (MUST) 记录技能使用信号（best-effort），用于后续 staleness 判断与治理：
+- `last_used_at`（最后一次被实际使用/执行的时间 best-effort）
+- `used_count`（累计使用次数 best-effort）
+
+#### Scenario: Skill usage updates last_used_at
+- **GIVEN** 某 skill 被一次 task/attempt 实际使用（best-effort）
+- **WHEN** 该次 attempt 进入终态并写入证据链（best-effort）
+- **THEN** 该 skill 的 `last_used_at` 被更新（best-effort）
+
+### Requirement: The system MUST support staleness detection and retirement actions (best-effort)
+系统必须 (MUST) 支持对个人 skills 的 staleness 检测与淘汰治理（best-effort）：
+- 系统可列出 stale candidates（best-effort）
+- 用户可对 stale skill 执行 deprecate/archive，并保留 `reason`（best-effort）
+- 被 deprecate/archive 的 skill 不得 (MUST NOT) 参与 discovery/recall（与现有 archived 语义一致）
+
+#### Scenario: Deprecated skill is excluded from recall
+- **GIVEN** 某 personal skill 被标记为 deprecated/archive（best-effort）
+- **WHEN** 系统进行 skills discovery/recall
+- **THEN** 该 skill 不出现在可用 skills 集合中（best-effort）
+
+### Requirement: Skill governance UI MUST display human-readable skill titles
+系统必须 (MUST) 在技能治理页面中将 skill 标识展示为更易读的形式（例如 Title Case、人类化分词），并在需要时仍可查看原始 `skill_id`（best-effort）。
+
+#### Scenario: Skill list shows readable name while preserving ID
+- **GIVEN** 存在 skill `code-review-excellence`
+- **WHEN** 用户浏览技能列表
+- **THEN** 列表展示一个可读标题（best-effort）
+- **AND** 用户仍可在详情中看到原始 `skill_id`
+
+### Requirement: Skill governance editor MUST have safe empty state and clear save affordance
+系统必须 (MUST) 在技能编辑器区域提供明确的空状态；当未选中可编辑 skill 时，“保存”按钮必须不可用且视觉上不应误导用户可点击。
+
+#### Scenario: Save is disabled and not misleading before selection
+- **GIVEN** 用户打开技能治理页面且未选中任何 skill
+- **WHEN** 页面渲染
+- **THEN** 编辑器展示“请选择技能”的空状态
+- **AND** 保存按钮处于禁用状态且具有清晰的禁用反馈（best-effort）
+
+### Requirement: The system MUST inject a "skills help" TurnContext when user asks about available skills
+当用户显式询问“有哪些/可用的 skills/技能”时，系统必须 (MUST) 在 TurnContext（volatile）注入一个“技能帮助”块，用于：
+- 引导用户在 UI 中查看 skills 列表（例如 `/governance/skills`）
+- 引导用户在 CLI 中检查可用性（例如 `oneagent skills status`）
+- （可选）展示 Top-N（N≤10）技能名称摘要，避免模型/用户靠猜
+
+该注入不得 (MUST NOT) 回写稳定 system prompt（避免破坏 KV cache）。
+
+#### Scenario: User asks about available skills triggers help block
+- **GIVEN** 用户输入包含“有哪些技能/skills 列表/可用 skills”等显式询问
+- **WHEN** 系统生成本轮 TurnContext（volatile）注入消息
+- **THEN** TurnContext 包含“技能帮助”块与下一步指引（UI + CLI）
+- **AND** （可选）包含 Top-N（N≤10）技能摘要
+
+### Requirement: Skill read tool (`skill.read`) MUST provide actionable not-found errors
+当 agent 调用 `skill.read` 且请求的 skill 不存在时，工具必须 (MUST) 返回**可行动**的错误信息，而不是仅返回“not found”。该错误信息应包含（best-effort）：
+- 规范化后的 skill 标识（normalized id）
+- 相似候选 suggestions（≤5）
+- 下一步指引（例如打开技能治理页面查看列表，或运行 `oneagent skills status` 检查可用性）
+
+#### Scenario: skill.read not-found includes normalized id, suggestions, and next steps
+- **GIVEN** skill `translator` 不存在
+- **WHEN** agent 调用 `skill.read`（name 或 skill_id 为 `translator`）
+- **THEN** 工具返回的错误信息包含 normalized id
+- **AND** 错误信息包含 ≤5 个相似候选（best-effort）
+- **AND** 错误信息包含可执行的 next steps（best-effort）
 

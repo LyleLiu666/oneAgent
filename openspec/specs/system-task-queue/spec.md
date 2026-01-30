@@ -348,3 +348,122 @@ TBD - created by archiving change add-autonomous-task-queue. Update Purpose afte
 - **AND** 将 stdout/stderr 写入 attempt artifacts（或等价可追溯路径）
 - **AND** `cleanup_script` 的失败不得 (MUST NOT) 覆盖 attempt 的终态（但必须记录原因）
 
+### Requirement: The system MUST support configurable queue governance policies (optional)
+系统必须 (MUST) 支持可配置的队列治理策略（best-effort），用于在多 workspace 并行时控制资源消耗，同时保持默认体验不受影响：
+- 默认行为保持现状（不同 workspace 可并行且不设固定上限）（best-effort）
+- 用户可配置全局并发上限（例如 max_running_tasks / max_running_workspaces）（best-effort）
+- 用户可为特定 workspace 覆盖策略（best-effort）
+
+#### Scenario: Global concurrency cap queues additional workspaces
+- **GIVEN** 用户配置 `max_running_workspaces=2`（best-effort）
+- **WHEN** 三个不同 workspace 的任务同时存在可运行项
+- **THEN** 同时最多 2 个 workspace 处于 running，剩余 workspace 任务保持 queued（best-effort）
+
+### Requirement: The system MUST provide workspace queue controls (pause/resume, priority)
+系统必须 (MUST) 提供 workspace 队列控制能力（best-effort）：
+- pause：暂停该 workspace 的调度（不影响已完成 attempts）
+- resume：恢复调度
+- priority：支持对 workspace 设定优先级以影响全局调度（best-effort）
+
+#### Scenario: Paused workspace does not start new tasks
+- **GIVEN** workspace A 被设置为 paused（best-effort）
+- **WHEN** workspace A 的队列中存在 queued tasks
+- **THEN** 系统不会为 workspace A 启动新的 running task（best-effort）
+
+### Requirement: The system MUST support scheduled enqueues (best-effort)
+系统必须 (MUST) 支持将任务以 schedule 的方式入队（best-effort），用于日程化自动运行（例如每日收割、每周检查等）：
+- schedule 至少支持按时间触发（cron/interval 任一即可 best-effort）
+- 触发后创建一个普通 task，并进入标准队列策略（best-effort）
+
+#### Scenario: A schedule triggers task enqueue
+- **GIVEN** 用户创建一个 schedule（best-effort）
+- **WHEN** 触发时间到达
+- **THEN** 系统创建一个新 task 并入队（best-effort）
+
+### Requirement: Task Workbench MUST have a meaningful empty state in the detail pane
+系统必须 (MUST) 在 Task Workbench 的“未选中任务”状态下提供有引导性的空状态，而不是空白死区；空状态至少包含：
+- 提示用户选择一个任务或创建新任务
+- 指向高频动作的入口（例如聚焦到“新建任务”输入框）
+
+#### Scenario: No selected task shows guided empty state
+- **GIVEN** 用户打开 Task Workbench 且当前未选中任何 task
+- **WHEN** 详情面板渲染
+- **THEN** 详情面板展示空状态引导文案与可执行入口（best-effort）
+
+### Requirement: Task Workbench workspace selector MUST support folder choosing
+系统必须 (MUST) 提供比“手输绝对路径”更友好的 workspace 选择方式（例如 folder chooser + 最近使用列表/补全）。
+
+#### Scenario: User chooses workspace via folder picker
+- **GIVEN** 用户在 Task Workbench 选择 workspace
+- **WHEN** 用户触发“选择文件夹”（或等价入口）
+- **THEN** 系统返回并填充标准化的 workspace 路径（best-effort）
+
+### Requirement: Task Workbench MUST not display raw internal error strings
+系统必须 (MUST) 在 Task Workbench 中避免展示后端内部错误串；应使用 `system-error-surface` 定义的安全错误披露。
+
+#### Scenario: Create task error is user-safe
+- **GIVEN** 用户在 Task Workbench 入队任务失败
+- **WHEN** UI 展示错误
+- **THEN** 展示安全错误文案与 `request_id`（best-effort）
+- **AND** 不直接展示 `err.Error()` 原文
+
+### Requirement: TaskQueue Workbench MUST provide a waterfall-style events/log view
+系统必须 (MUST) 在 TaskQueue Workbench 中提供一个“瀑布式”的事件/日志视图，用于降低长任务等待期间的不确定性与用户流失风险。
+
+该视图至少应 (SHOULD) 支持：
+- `Pretty` / `Raw` 两种展示模式（默认 `Pretty`）
+- 按 `attempt_id` 与 `type` 过滤（best-effort）
+- 文本搜索（best-effort）
+- 展示 `filtered / total` 计数
+- 查看单条事件的完整信息（包含完整时间戳、`attempt_id`、以及 `data`）
+- Copy filtered（best-effort）
+
+#### Scenario: User filters and inspects event details
+- **GIVEN** 某 task 存在多条 events，且部分 events 包含 `data`
+- **WHEN** 用户打开该 task 的事件视图并按 `type` 过滤
+- **THEN** 列表仅显示匹配的事件（best-effort）
+- **WHEN** 用户展开其中一条事件
+- **THEN** UI 展示该事件的完整时间戳、`attempt_id` 与 `data`（best-effort）
+
+#### Scenario: Background refresh does not blank the list
+- **GIVEN** 用户已打开事件视图并看到事件列表
+- **WHEN** 客户端执行后台轮询刷新
+- **THEN** UI 不应 (SHOULD NOT) 用“加载中”清空/替换已有列表
+- **AND** UI 以轻量方式提示正在刷新（best-effort）
+
+### Requirement: Task attempt artifacts MUST support tail reading for log-like artifacts (best-effort)
+系统必须 (MUST) 支持通过 API 获取 attempt 的 log-like artifacts 的“尾部内容”（tail），用于运行中查看最新日志（best-effort）。
+
+系统必须 (MUST) 至少支持对 `trace_log_path`（`trace` artifact）进行 tail 读取；系统应该 (SHOULD) 同样支持 project scripts 的 log artifacts（例如 `setup_script_log` / `test_script_log`）。
+
+#### Scenario: Client requests tail of trace log
+- **GIVEN** 某 attempt 已生成并持续写入 `trace_log_path`
+- **WHEN** 客户端请求 `GET /api/tasks/:id/attempts/:attempt_id/artifacts/trace?tail=1`
+- **THEN** 返回内容包含 trace 文件的最新部分（best-effort）
+- **AND** 当文件过大时，响应标记 `truncated=true`（best-effort）
+
+### Requirement: Attempt execution root MUST be isolated when worktree mode is enabled
+系统必须 (MUST) 在 worktree 模式启用时，为每个 attempt 创建并使用一个隔离的 git worktree：
+- worktree 必须 (MUST) 基于 attempt 启动时的 base commit/ref 创建（记录 base SHA/branch 作为证据）
+- worktree 路径必须 (MUST) 被记录到 attempt artifacts（例如 `worktree_root`）以便 UI 打开与审计
+- 系统必须 (MUST) 确保 attempt 的文件写入只发生在该 worktree root 内（仍遵循 tool permissions）
+
+#### Scenario: 创建 worktree 并记录 base SHA 与 worktree_root
+- **GIVEN** workspace 是 git repo 且启用 worktree mode
+- **WHEN** 系统启动一个新的 attempt
+- **THEN** 系统创建一个新的 git worktree（best-effort）
+- **AND** attempt artifacts 包含 `worktree_root`
+- **AND** attempt artifacts 包含 `base_commit_sha`（或等价字段）
+
+### Requirement: Worktree lifecycle MUST be managed with evidence
+系统必须 (MUST) 管理 worktree 生命周期，避免“孤儿 worktree”堆积并保证可回溯：
+- 系统必须 (MUST) 在 attempt 终态后按策略清理 worktree（默认清理；可配置保留用于调试）
+- 当清理失败时，系统必须 (MUST) 记录失败原因并提供可操作提示（例如提示手工清理命令）
+- 系统应该 (SHOULD) 提供一个 best-effort 的 orphan worktree cleanup 机制（例如启动时扫描并清理过期 worktrees）
+
+#### Scenario: attempt 完成后按策略清理 worktree
+- **GIVEN** attempt 在 worktree mode 下运行并进入终态
+- **WHEN** 系统执行 attempt 收尾流程
+- **THEN** 系统按策略清理或保留该 worktree
+- **AND** receipt/trace 记录该决策与结果（best-effort）
+

@@ -29,12 +29,19 @@ TBD - created by archiving change add-tool-permissions-system. Update Purpose af
 - **THEN** 错误中包含“由哪条规则拒绝”的解释信息（rule id 或等价）
 
 ### Requirement: Command tools MUST support profiles (readonly/dev/full)
-系统必须 (MUST) 为 `bash`/`run_command` 提供可配置的命令 profile（`readonly/dev/full`），默认使用最小权限集合，并优先采用 allowlist。
+系统必须 (MUST) 为 `bash`/`run_command` 提供可配置的命令 profile（`readonly/dev/coding/full`），默认使用最小权限集合，并优先采用 allowlist。
+
+其中 `coding` profile 仅用于 coding agent 场景，必须 (MUST) 结合强隔离 sandbox（例如 `sandbox_mode=docker`）使用；当环境不满足时必须 fail-closed 并返回可操作错误（best-effort）。
 
 #### Scenario: readonly profile blocks interpreters
 - **GIVEN** 当前 profile 为 `readonly`
 - **WHEN** 调用 `bash` 执行 `python`/`node` 等解释器
 - **THEN** 系统拒绝该命令并返回可解释错误
+
+#### Scenario: coding profile requires docker sandbox
+- **GIVEN** 当前 profile 为 `coding` 且 policy 要求 `sandbox_mode=docker`
+- **WHEN** 调用 `run_command` 执行 `git status`（best-effort）
+- **THEN** 系统在 docker sandbox 中执行或返回可操作的环境缺失错误（best-effort）
 
 ### Requirement: Command tools MUST support sandbox_mode constraints
 系统必须 (MUST) 在 tool permissions policy 的 constraints 中支持对命令类工具（`bash`/`run_command`）指定 `sandbox_mode`（例如 `none`/`docker`），并在执行时强制遵守。
@@ -98,4 +105,20 @@ TBD - created by archiving change add-tool-permissions-system. Update Purpose af
 - **WHEN** attempt B 中 LLM 触发“相同 tool 但不同 attempt_id”的调用
 - **THEN** 系统不得复用 attempt A 的审批结果
 - **AND** 必须再次进入审批或按策略拒绝
+
+### Requirement: Tool permissions UI MUST clearly show the current principal context
+系统必须 (MUST) 在工具权限治理页面清晰标识当前正在编辑/查看的 `principal_id` 以及该 principal 的生效策略快照信息（best-effort）。
+
+#### Scenario: Principal context is visible
+- **GIVEN** 用户在工具权限页面查看策略
+- **WHEN** 页面渲染完成
+- **THEN** 页面清晰展示当前 `principal_id` 与 policy snapshot 基本信息（best-effort）
+
+### Requirement: Tool policy editor MUST be usable for real JSON
+系统必须 (MUST) 提供一个可用的策略编辑体验：足够高度、等宽字体、格式化/校验入口（best-effort）；避免“迷你 textarea”导致不可用。
+
+#### Scenario: Policy editor supports formatting and comfortable editing
+- **GIVEN** 用户编辑 tool policy JSON
+- **WHEN** 用户输入/粘贴策略内容
+- **THEN** 编辑器区域具备足够高度且可一键格式化（best-effort）
 

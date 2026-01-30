@@ -210,3 +210,74 @@ SOP Suggestion 必须包含至少：`suggestion_id`、`title`、`description`、
 - **THEN** 系统持久化该 comment 并关联到对应 receipt_id/attempt_id
 - **AND** comment 可在后续查询 receipt 详情时被读取（best-effort）
 
+### Requirement: Learning jobs MUST produce governance hints for dedupe/merge (best-effort)
+系统必须 (MUST) 在学习管线（learning job）中为每条 SOP suggestion 产出可用于治理的线索（best-effort），以降低人工去重成本：
+- 至少包含一个 `similar_suggestion_ids[]` 或等价结构（best-effort）
+- 当系统能找到明显的 merge 目标时，输出 `recommended_merge_target_id`（best-effort）
+- hints 不得替代证据：suggestion 仍必须包含 `evidence_receipt_ids[]`（best-effort）
+
+#### Scenario: Suggestion includes similar hints and preserves evidence
+- **GIVEN** 系统生成了一条 SOP suggestion（best-effort）
+- **WHEN** 客户端获取该 suggestion 详情
+- **THEN** 返回包含 `evidence_receipt_ids[]`（best-effort）
+- **AND** 返回包含 `similar_*` 治理线索字段（best-effort）
+
+### Requirement: Digest MUST persist a structured representation (in addition to markdown)
+系统必须 (MUST) 在生成 Digest 时，除 `markdown` 外还产出结构化 Digest（best-effort），用于 UI 的筛选/聚类/批处理动作：
+- 至少包含条目列表（items），每条指向一个 receipt（receipt_id）并含可展示的摘要字段（best-effort）
+- 结构化 Digest 必须可被读取而不触发 refresh（best-effort）
+
+#### Scenario: Developer can fetch a structured digest for a day
+- **GIVEN** 某天存在 Digest（best-effort）
+- **WHEN** 客户端请求该天的结构化 Digest
+- **THEN** 返回包含 `items[]` 的 JSON（best-effort）
+- **AND** 不会隐式触发 digest refresh（best-effort）
+
+### Requirement: Digest MUST provide failure clustering for harvest mode (best-effort)
+系统必须 (MUST) 在结构化 Digest 中提供失败聚类（best-effort），用于用户快速定位“同类问题批量处理”：
+- clusters 至少可按 `error_code` / `failure_reason` / `tool_name` 等维度聚合（best-effort）
+- cluster 条目包含 count 与 receipt_ids 指针（best-effort）
+
+#### Scenario: Failures are grouped into clusters
+- **GIVEN** 当天存在多条 failed receipts，且部分失败原因相同（best-effort）
+- **WHEN** 系统生成结构化 Digest
+- **THEN** 返回的 `clusters[]` 至少包含一个 cluster，`count>=2`（best-effort）
+
+### Requirement: The system MUST support batch follow-up creation from receipts
+系统必须 (MUST) 支持用户从一组 receipts 创建 follow-up（批处理下一轮）：
+- 输入是 `receipt_ids[]` + 用户补充指令（可选）（best-effort）
+- 输出是一个已入队的 task（或等价执行单元），并保留这次 follow-up 的证据（best-effort）
+
+#### Scenario: User creates a follow-up task from selected receipts
+- **GIVEN** 用户选中若干 receipt_ids（>=2 best-effort）
+- **WHEN** 用户提交 batch follow-up
+- **THEN** 系统创建并入队一个新 task（best-effort）
+- **AND** 该 task 的上下文包含所选 receipts 的证据指针（best-effort）
+
+### Requirement: SOP governance UI MUST avoid “ghost actions” and provide helpful empty states
+系统必须 (MUST) 在 SOP 治理页面对空列表/未选中状态提供友好的空状态，并避免展示无意义或不可用的“幽灵按钮”（例如无数据时的加载更多）。
+
+#### Scenario: Empty SOP list shows guidance and hides irrelevant actions
+- **GIVEN** SOP 建议列表为空
+- **WHEN** 用户打开 SOP 治理页面
+- **THEN** 页面展示引导性空状态（例如说明何时产生建议）
+- **AND** 无意义的操作按钮默认不展示或明确禁用（best-effort）
+
+### Requirement: SOP governance copy MUST be user-centered by default
+系统必须 (MUST) 在 SOP 治理页面默认文案中避免暴露实现术语（例如“稀缺性/know-how/证据排序”）；可将解释放入可选的帮助入口（例如 tooltip/info，best-effort）。
+
+#### Scenario: Default subtitle is understandable without implementation jargon
+- **WHEN** 用户打开 SOP 治理页面
+- **THEN** 页面默认副标题使用用户可理解的表述（best-effort）
+
+### Requirement: Receipt MUST reference worktree evidence when used
+系统必须 (MUST) 在 attempt 使用 worktree mode 时，将 worktree 相关证据写入 Receipt，以便复盘与恢复：
+- `worktree_root`（路径）
+- `base_commit_sha`（或等价字段）
+
+#### Scenario: Receipt includes worktree_root and base_commit_sha
+- **GIVEN** 某次 attempt 在 worktree mode 下运行且 artifacts 中包含 `worktree_root/base_commit_sha`
+- **WHEN** 系统持久化该次交付的 receipt
+- **THEN** receipt artifacts 包含 `worktree_root`
+- **AND** receipt artifacts 包含 `base_commit_sha`
+

@@ -44,3 +44,41 @@ The Work Ledger UI MUST surface badges that make today's status visible at a gla
 - **WHEN** 用户打开任意页面（Chat/Tasks/Governance 等）
 - **THEN** Sidebar 必须在相关导航项上展示 SOP 数量 badge（例如 `Governance` 或 `Ledger`）
 
+### Requirement: Digest UI MUST support harvest mode (filter + cluster + quick open)
+Work Ledger 的 Digest UI 必须 (MUST) 提供面向“收割”的视图能力（best-effort）：
+- 按 workspace/status/关键词进行筛选与检索（best-effort）
+- 支持按 failure clusters 快速聚合查看（best-effort）
+- 每条条目可以一键打开 receipt 详情与关键证据（best-effort）
+
+#### Scenario: User filters digest items and opens receipts quickly
+- **GIVEN** Digest 包含多条 items（best-effort）
+- **WHEN** 用户选择 `status=failed` 并输入关键词过滤
+- **THEN** 列表结果收敛到匹配条目（best-effort）
+- **AND** 用户可从条目一键打开对应 receipt（best-effort）
+
+### Requirement: Digest UI MUST provide batch follow-up action
+Digest UI 必须 (MUST) 支持用户多选条目并批量发起 follow-up（best-effort）：
+- UI 提供多选与计数反馈
+- 提供 “Create follow-up task” 主操作，并展示将要发送的概览（best-effort）
+
+#### Scenario: User selects multiple items and creates a follow-up task
+- **GIVEN** Digest 视图中存在若干条目（best-effort）
+- **WHEN** 用户多选并点击 “Create follow-up task”
+- **THEN** UI 发起 batch follow-up 请求并显示成功反馈（best-effort）
+
+### Requirement: Ledger receipts list MUST be scannable
+系统必须 (MUST) 在 Ledger 的回执列表中优先呈现可扫描信息（summary/status/time），对长文本进行摘要/截断，避免“纯文本堆砌”。
+
+#### Scenario: Receipt list uses summary-first layout
+- **GIVEN** 存在多条 receipt 且 summary 较长
+- **WHEN** 用户查看 receipt 列表
+- **THEN** 列表项展示摘要/状态/时间并对长文本截断（best-effort）
+
+### Requirement: Receipt detail view MUST provide incremental context
+系统必须 (MUST) 在回执详情中提供相对于列表的增量信息（例如 artifacts 入口、关联 task/attempt 的可追溯引用），避免仅复读列表内容（best-effort）。
+
+#### Scenario: Receipt detail includes artifacts references
+- **GIVEN** 用户打开某条 receipt 的详情
+- **WHEN** 详情渲染完成
+- **THEN** 详情包含可追溯的 artifacts 引用入口（best-effort）
+

@@ -14,8 +14,6 @@
 - **THEN** TurnContext 包含“技能帮助”块与下一步指引（UI + CLI）
 - **AND** （可选）包含 Top-N（N≤10）技能摘要
 
-## MODIFIED Requirements
-
 ### Requirement: Skill read tool (`skill.read`) MUST provide actionable not-found errors
 当 agent 调用 `skill.read` 且请求的 skill 不存在时，工具必须 (MUST) 返回**可行动**的错误信息，而不是仅返回“not found”。该错误信息应包含（best-effort）：
 - 规范化后的 skill 标识（normalized id）

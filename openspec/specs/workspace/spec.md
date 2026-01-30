@@ -135,3 +135,35 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **WHEN** 系统读取并解析该文件
 - **THEN** 系统拒绝该 config 并返回可操作错误（指出字段与非法条目）
 
+### Requirement: Tool-enabled sessions MUST preflight workspace requirements
+当会话请求启用工具（例如 `tool_ids` 非空）且所启用工具依赖 workspaceRoot 作为默认作用域时，系统必须 (MUST) 在调用 LLM 前执行 workspace 前置校验：
+- workspace 未设置 → fail-fast 返回可操作错误
+- workspace 已设置 → 正常进入 LLM / tool loop（best-effort）
+
+#### Scenario: Tools enabled but workspace missing fails fast
+- **GIVEN** 用户发起聊天请求并启用 tools
+- **AND** 当前会话未设置 workspaceRoot
+- **WHEN** 系统准备调用 LLM
+- **THEN** 系统直接返回“workspace 未设置”的可操作错误
+- **AND** 系统不应调用 LLM（best-effort）
+
+### Requirement: Workspace MUST support optional worktree execution mode for attempts
+系统必须 (MUST) 支持为 workspace 配置一种可选的 task attempt 执行模式 `worktree`（仅在 workspace 是 git repo 时生效）。
+
+当 `worktree` 模式启用时，系统必须 (MUST) 为每个 attempt 选择一个独立的“执行根目录”（worktree root），并把它作为文件/搜索/命令工具的默认作用域与写入边界。
+
+当 workspace 不是 git repo 时，系统必须 (MUST) 明确返回可操作错误或按配置退化到 `workspace` 模式（不得 silent fallback）。
+
+#### Scenario: git workspace 启用 worktree mode 后 attempt 使用独立执行根目录
+- **GIVEN** workspace 是 git repo
+- **AND** workspace 启用了 attempt 执行模式 `worktree`
+- **WHEN** 系统创建一个新的 task attempt
+- **THEN** 该 attempt 的执行根目录为一个独立 worktree 路径（不等于 workspace root）
+- **AND** 文件/命令工具默认在该 worktree 路径下执行
+
+#### Scenario: non-git workspace 启用 worktree mode 返回可操作错误
+- **GIVEN** workspace 不是 git repo
+- **AND** workspace 启用了 attempt 执行模式 `worktree`
+- **WHEN** 系统尝试创建一个新的 task attempt
+- **THEN** 系统返回清晰错误（指出“workspace 非 git repo，无法创建 worktree”）
+
