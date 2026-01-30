@@ -93,6 +93,7 @@ func parsePersistedToolResult(raw string) (persistedToolResultMessage, bool) {
 func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol string) []llm.ChatMessage {
 	protocol := strings.ToLower(strings.TrimSpace(toolProtocol))
 	out := make([]llm.ChatMessage, 0, len(messages))
+	seenToolCallIDs := make(map[string]struct{})
 
 	for _, msg := range messages {
 		switch msg.Type {
@@ -115,6 +116,11 @@ func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol stri
 			llmMsg := llm.ChatMessage{Role: msg.Role, Content: content}
 			if protocol == "json" && len(toolCalls) > 0 {
 				llmMsg.ToolCalls = toolCalls
+				for _, call := range toolCalls {
+					if id := strings.TrimSpace(call.ID); id != "" {
+						seenToolCallIDs[id] = struct{}{}
+					}
+				}
 			}
 			out = append(out, llmMsg)
 
@@ -131,6 +137,13 @@ func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol stri
 
 			llmMsg := llm.ChatMessage{Role: msg.Role, Content: content}
 			if protocol == "json" && ok {
+				toolCallID := strings.TrimSpace(payload.ToolCallID)
+				if toolCallID == "" {
+					continue
+				}
+				if _, seen := seenToolCallIDs[toolCallID]; !seen {
+					continue
+				}
 				llmMsg.Content = wrapUntrustedToolOutput(payload.Name, payload.ToolCallID, llmMsg.Content)
 				llmMsg.ToolCallID = payload.ToolCallID
 				llmMsg.Name = payload.Name

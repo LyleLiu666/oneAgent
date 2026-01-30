@@ -33,14 +33,16 @@ func applyBlock(block EditBlock) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read file error: %w", err)
 	}
-	sourceLines := strings.Split(string(contentBytes), "\n")
+	newline := detectNewlineForWrite(contentBytes)
+	content := normalizeNewlines(string(contentBytes))
+	sourceLines := strings.Split(content, "\n")
 
 	if block.ReplaceAll {
 		updated, replacements, err := replaceAllMatches(sourceLines, block.Search, block.Replace, block.FilePath)
 		if err != nil {
 			return 0, err
 		}
-		if err := writeLines(block.FilePath, updated); err != nil {
+		if err := writeLines(block.FilePath, updated, newline); err != nil {
 			return 0, err
 		}
 		return replacements, nil
@@ -52,7 +54,7 @@ func applyBlock(block EditBlock) (int, error) {
 	}
 
 	updated := applyReplacement(sourceLines, match, block.Replace)
-	if err := writeLines(block.FilePath, updated); err != nil {
+	if err := writeLines(block.FilePath, updated, newline); err != nil {
 		return 0, err
 	}
 
@@ -92,8 +94,40 @@ func applyReplacement(sourceLines []string, match *MatchResult, replacement []st
 	return updated
 }
 
-func writeLines(filePath string, lines []string) error {
-	output := strings.Join(lines, "\n")
+func detectNewlineForWrite(content []byte) string {
+	if len(content) == 0 {
+		return "\n"
+	}
+	crlf := 0
+	bareLF := 0
+	for i := 0; i < len(content); i++ {
+		if content[i] != '\n' {
+			continue
+		}
+		if i > 0 && content[i-1] == '\r' {
+			crlf++
+		} else {
+			bareLF++
+		}
+	}
+	if crlf > 0 && bareLF == 0 {
+		return "\r\n"
+	}
+	return "\n"
+}
+
+func normalizeNewlines(value string) string {
+	if value == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, "\r\n", "\n")
+}
+
+func writeLines(filePath string, lines []string, newline string) error {
+	if newline != "\r\n" {
+		newline = "\n"
+	}
+	output := strings.Join(lines, newline)
 	if err := fsutil.AtomicWriteFile(filePath, []byte(output), 0644); err != nil {
 		return fmt.Errorf("write file error: %w", err)
 	}
