@@ -8,7 +8,7 @@
 - [x] 2.3 Execution: DAG scheduling (deps, concurrency limit, cancel/resume)
 - [x] 2.4 Artifacts: node_run produces artifact manifest (multi-file pointers)
 - [x] 2.5 Gates: run hard/soft evaluation and attach report to node_run evidence
-- [ ] 2.6 Backend tests: persistence + scheduler + resume invariants
+- [x] 2.6 Backend tests: persistence + scheduler + resume invariants
 
 ## 3. Frontend (MVP)
 - [ ] 3.1 Workflow list/create/rename/delete (workspace-scoped)
