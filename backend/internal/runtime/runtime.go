@@ -16,6 +16,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
+	"github.com/liu_y/oneAgent/backend/internal/workflow"
 	"github.com/liu_y/oneAgent/backend/internal/workledger"
 )
 
@@ -36,6 +37,7 @@ type Runtime struct {
 	TaskRunner *taskqueue.TaskRunner
 
 	WorkLedger *workledger.Store
+	Workflows  *workflow.Store
 
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
@@ -105,6 +107,12 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		return nil, err
 	}
 
+	workflows, err := workflow.NewStore(layout.WorkflowsDir)
+	if err != nil {
+		_ = settings.Close()
+		return nil, err
+	}
+
 	rt := &Runtime{
 		Config:     cfg,
 		Layout:     layout,
@@ -116,6 +124,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		Skills:     skill.NewManager(30 * time.Second),
 		Tasks:      tasks,
 		WorkLedger: ledger,
+		Workflows:  workflows,
 	}
 	rt.bgCtx, rt.bgCancel = context.WithCancel(context.Background())
 	return rt, nil

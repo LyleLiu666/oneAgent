@@ -156,6 +156,15 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Workspace helpers (local-tool mode).
 		api.POST("/workspace/choose", handler.ChooseWorkspace)
 
+		// Workflow orchestration (MVP, workspace-scoped).
+		api.GET("/workflows", handler.ListWorkflows)
+		api.POST("/workflows", handler.CreateWorkflow)
+		api.POST("/workflows/:id/publish", handler.PublishWorkflowVersion)
+		api.POST("/workflows/:id/runs", handler.CreateWorkflowRun)
+		api.GET("/workflows/:id/runs/:run_id", handler.GetWorkflowRun)
+		api.POST("/workflows/:id/runs/:run_id/execute", handler.ExecuteWorkflowRun)
+		api.POST("/workflows/:id/runs/:run_id/cancel", handler.CancelWorkflowRun)
+
 		// Bocha search services.
 		api.GET("/bocha/settings", bocha.GetSettingsHandler)
 		api.PUT("/bocha/settings", bocha.UpdateSettingsHandler)

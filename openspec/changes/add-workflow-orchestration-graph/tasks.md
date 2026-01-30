@@ -9,6 +9,8 @@
 - [x] 2.4 Artifacts: node_run produces artifact manifest (multi-file pointers)
 - [x] 2.5 Gates: run hard/soft evaluation and attach report to node_run evidence
 - [x] 2.6 Backend tests: persistence + scheduler + resume invariants
+- [x] 2.7 API: workflow CRUD + publish + run endpoints (workspace-scoped)
+- [x] 2.8 API tests: workflows + runs basics
 
 ## 3. Frontend (MVP)
 - [ ] 3.1 Workflow list/create/rename/delete (workspace-scoped)
