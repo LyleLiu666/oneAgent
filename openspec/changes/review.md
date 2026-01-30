@@ -14,9 +14,11 @@
 
 ### P1（Prompt 基建 / 降低踩坑）
 - `add-core-tool-manuals`（2/5）：补齐核心工具手册（assets/tools），并用 prompt tests 防回归
+- `add-command-profile-coding`（2/6）：新增 `coding` 命令 profile（docker-only），让 coding agent 常用链路跑得起来
 
 ## Snapshot（来自 `openspec list`）
 - `update-toolcalling-default-temperature`：2/5 tasks
 - `update-toolcalling-arguments-normalization`：2/5 tasks
 - `add-toolcalling-reliability-specs`：5/5 tasks
 - `add-core-tool-manuals`：2/5 tasks
+- `add-command-profile-coding`：2/6 tasks
