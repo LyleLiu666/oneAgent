@@ -82,6 +82,9 @@ func TestReadFileTool_Paging(t *testing.T) {
 	if page1.StartLine != 1 || page1.EndLine != 200 {
 		t.Fatalf("expected 1..200, got %d..%d", page1.StartLine, page1.EndLine)
 	}
+	if !page1.Truncated {
+		t.Fatalf("expected page1 truncated=true (more content after limit_lines)")
+	}
 	if !strings.Contains(page1.Content, "line 200\n") {
 		t.Fatalf("expected line 200 present")
 	}
@@ -100,8 +103,32 @@ func TestReadFileTool_Paging(t *testing.T) {
 	if page2.StartLine != 201 || page2.EndLine != 400 {
 		t.Fatalf("expected 201..400, got %d..%d", page2.StartLine, page2.EndLine)
 	}
+	if !page2.Truncated {
+		t.Fatalf("expected page2 truncated=true (more content after limit_lines)")
+	}
 	if !strings.Contains(page2.Content, "line 201\n") {
 		t.Fatalf("expected line 201 present")
+	}
+
+	raw3, _ := json.Marshal(map[string]any{
+		"filePath":     "big.txt",
+		"offset_lines": 400,
+		"limit_lines":  200,
+		"max_bytes":    1024 * 1024,
+	})
+	gotAny, err = runReadFileTool(ctx, raw3)
+	if err != nil {
+		t.Fatalf("read page3: %v", err)
+	}
+	page3 := gotAny.(readFileResult)
+	if page3.StartLine != 401 || page3.EndLine != 500 {
+		t.Fatalf("expected 401..500, got %d..%d", page3.StartLine, page3.EndLine)
+	}
+	if page3.Truncated {
+		t.Fatalf("expected page3 truncated=false (EOF reached)")
+	}
+	if !strings.Contains(page3.Content, "line 500\n") {
+		t.Fatalf("expected line 500 present")
 	}
 }
 

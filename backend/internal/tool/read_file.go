@@ -218,6 +218,13 @@ func runReadFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		endLine = offset + linesRead
 	}
 
+	// If we hit limit_lines, treat as truncated unless we are at EOF.
+	if !truncated && linesRead >= limit {
+		if _, err := r.Peek(1); err == nil {
+			truncated = true
+		}
+	}
+
 	// If we exactly hit maxBytes, treat as truncated unless we are at EOF.
 	if !truncated && writtenBytes >= maxBytes {
 		if _, err := r.Peek(1); err == nil {
