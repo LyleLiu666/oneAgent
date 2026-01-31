@@ -25,18 +25,12 @@ func TestOpenAIResponsesClient_ChatCompletionWithTools_ParsesFunctionCall(t *tes
 		requests = append(requests, body)
 		mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-  "id": "resp_1",
-  "output": [
-    {
-      "type": "function_call",
-      "call_id": "call_1",
-      "name": "ls",
-      "arguments": "{\"path\":\".\"}"
-    }
-  ]
-}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"ls\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 	}))
 	t.Cleanup(mock.Close)
 
@@ -92,8 +86,8 @@ func TestOpenAIResponsesClient_ChatCompletionWithTools_ParsesFunctionCall(t *tes
 	if err := json.Unmarshal(requests[0], &parsed); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
-	if got, ok := parsed["stream"].(bool); !ok || got != false {
-		t.Fatalf("expected stream=false, got %#v", parsed["stream"])
+	if got, ok := parsed["stream"].(bool); !ok || got != true {
+		t.Fatalf("expected stream=true, got %#v", parsed["stream"])
 	}
 	tools, ok := parsed["tools"].([]any)
 	if !ok || len(tools) == 0 {
@@ -114,6 +108,109 @@ func TestOpenAIResponsesClient_ChatCompletionWithTools_ParsesFunctionCall(t *tes
 	}
 }
 
+func TestOpenAIResponsesClient_ChatCompletionWithTools_EmitsTraceTokensForToolCall(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"ls\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	var (
+		mu             sync.Mutex
+		startCalled    bool
+		firstTokenHits int
+		tokens         []string
+		completeOut    string
+		completeErr    error
+	)
+
+	opts := &ChatCompletionOptions{
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "ls",
+				Parameters: map[string]any{
+					"type": "object",
+				},
+			},
+		}},
+		Trace: &TraceCallback{
+			OnStart: func(ctx context.Context, input []ChatMessage) {
+				_ = ctx
+				_ = input
+				mu.Lock()
+				startCalled = true
+				mu.Unlock()
+			},
+			OnFirstToken: func(ctx context.Context) {
+				_ = ctx
+				mu.Lock()
+				firstTokenHits++
+				mu.Unlock()
+			},
+			OnToken: func(ctx context.Context, token string) {
+				_ = ctx
+				mu.Lock()
+				tokens = append(tokens, token)
+				mu.Unlock()
+			},
+			OnComplete: func(ctx context.Context, fullOutput string, err error) {
+				_ = ctx
+				mu.Lock()
+				completeOut = fullOutput
+				completeErr = err
+				mu.Unlock()
+			},
+		},
+	}
+
+	result, err := client.ChatCompletionWithTools(
+		context.Background(),
+		[]ChatMessage{{Role: "system", Content: "sys"}, {Role: "user", Content: "hi"}},
+		opts,
+	)
+	if err != nil {
+		t.Fatalf("ChatCompletionWithTools: %v", err)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !startCalled {
+		t.Fatalf("expected OnStart to be called")
+	}
+	if firstTokenHits == 0 {
+		t.Fatalf("expected OnFirstToken to be called at least once")
+	}
+	if len(tokens) == 0 {
+		t.Fatalf("expected OnToken to be called at least once")
+	}
+	if completeErr != nil {
+		t.Fatalf("expected OnComplete err=nil, got %v", completeErr)
+	}
+	if completeOut != "" {
+		t.Fatalf("expected OnComplete fullOutput to be empty for tool-only response, got %q", completeOut)
+	}
+}
+
 func TestOpenAIResponsesClient_ChatCompletionWithTools_IncludesFunctionCallOutputInInput(t *testing.T) {
 	var (
 		mu       sync.Mutex
@@ -129,17 +226,12 @@ func TestOpenAIResponsesClient_ChatCompletionWithTools_IncludesFunctionCallOutpu
 		requests = append(requests, body)
 		mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-  "id": "resp_1",
-  "output": [
-    {
-      "type": "message",
-      "role": "assistant",
-      "content": [{"type":"output_text","text":"ok"}]
-    }
-  ]
-}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 	}))
 	t.Cleanup(mock.Close)
 

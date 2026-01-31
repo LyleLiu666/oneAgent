@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -14,6 +15,53 @@ import (
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
+
+func readAssistantTextAndUsageFromChat(t *testing.T, body io.Reader) (assistantText string, lastResponseTokens int) {
+	t.Helper()
+	var out strings.Builder
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		var evt streamEvent
+		if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+			continue
+		}
+
+		switch evt.Type {
+		case "usage":
+			var usagePayload struct {
+				ResponseTokens int `json:"response_tokens"`
+			}
+			if err := json.Unmarshal([]byte(evt.Data), &usagePayload); err != nil {
+				continue
+			}
+			if usagePayload.ResponseTokens > 0 {
+				lastResponseTokens = usagePayload.ResponseTokens
+			}
+		case "msg":
+			var msg streamMsg
+			if err := json.Unmarshal([]byte(evt.Data), &msg); err != nil {
+				continue
+			}
+			if msg.MsgType != "text" || msg.Role != "assistant" {
+				continue
+			}
+			if msg.Op == "delta" && msg.Delta != "" {
+				out.WriteString(msg.Delta)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan chat stream: %v", err)
+	}
+	return out.String(), lastResponseTokens
+}
 
 func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 	home := t.TempDir()
@@ -52,31 +100,17 @@ func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 		n := call
 		mu.Unlock()
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "text/event-stream")
 		switch n {
 		case 1:
-			_, _ = w.Write([]byte(`{
-  "id": "resp_1",
-  "output": [
-    {
-      "type": "function_call",
-      "call_id": "call_1",
-      "name": "ls",
-      "arguments": "{\"path\":\".\"}"
-    }
-  ]
-}`))
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"ls\",\"arguments\":\"{\\\"path\\\":\\\".\\\"}\"}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
 		default:
-			_, _ = w.Write([]byte(`{
-  "id": "resp_2",
-  "output": [
-    {
-      "type": "message",
-      "role": "assistant",
-      "content": [{"type":"output_text","text":"DONE"}]
-    }
-  ]
-}`))
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"DONE\"}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		}
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
 		}
 	}))
 	t.Cleanup(mock.Close)
@@ -130,9 +164,12 @@ func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 		t.Fatalf("chat status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	got := readAssistantTextFromChat(t, resp.Body)
+	got, tokens := readAssistantTextAndUsageFromChat(t, resp.Body)
 	if strings.TrimSpace(got) != "DONE" {
 		t.Fatalf("expected assistant=DONE, got %q", got)
+	}
+	if tokens <= 0 {
+		t.Fatalf("expected chat SSE to include usage response_tokens > 0, got %d", tokens)
 	}
 
 	mu.Lock()

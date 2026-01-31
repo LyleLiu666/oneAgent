@@ -120,7 +120,168 @@ func RunLoop(
 
 		toolBlock, ok := ExtractLatestToolData(raw.String())
 		if !ok {
-			if indexCaseInsensitive(StripThinking(raw.String()), toolDataStart) != -1 {
+			cleaned := StripThinking(raw.String())
+			if indexCaseInsensitive(cleaned, toolDataStart) != -1 {
+				if recovered, ok := recoverTruncatedWriteFileAppend(cleaned); ok {
+					toolName := "write_file"
+					canonicalName := tool.CanonicalToolName(toolName)
+					handler, handlerOK := handlers[canonicalName]
+					if handlerOK {
+						fields := map[string]string{
+							"filePath": recovered.FilePath,
+							"content":  recovered.Content,
+							"append":   "true",
+						}
+
+						args, argsString, argsErr := buildToolArgs(canonicalName, fields)
+						if argsErr == nil {
+							toolCallID := fmt.Sprintf("xml_%d_%d", step, 0)
+							recordedCalls := []llm.ToolCall{
+								{
+									ID:   toolCallID,
+									Type: "function",
+									Function: llm.ToolCallFunction{
+										Name:      toolName,
+										Arguments: argsString,
+									},
+								},
+							}
+
+							payload, handlerErr := handler(ctx, args)
+							if handlerErr != nil {
+								if recordFailure != nil {
+									recordFailure(toolName, toolCallID, argsString, handlerErr)
+								}
+								var approvalRequired *tool.ApprovalRequiredError
+								var approvalDenied *tool.ApprovalDeniedError
+								var invalidArgs *tool.InvalidArgumentsError
+								if errors.As(handlerErr, &approvalRequired) {
+									payload = map[string]any{
+										"error":             "approval_required",
+										"approval_required": true,
+										"approval_id":       approvalRequired.ApprovalID,
+										"tool_id":           approvalRequired.ToolID,
+										"scope_id":          approvalRequired.ScopeID,
+										"arguments":         argsString,
+									}
+								} else if errors.As(handlerErr, &approvalDenied) {
+									payload = map[string]any{
+										"error":           "approval_denied",
+										"approval_denied": true,
+										"approval_id":     approvalDenied.ApprovalID,
+										"tool_id":         approvalDenied.ToolID,
+										"scope_id":        approvalDenied.ScopeID,
+										"reason":          approvalDenied.Reason,
+										"arguments":       argsString,
+									}
+								} else if errors.As(handlerErr, &invalidArgs) {
+									payload = map[string]any{
+										"error":            "invalid_arguments",
+										"invalid_args":     true,
+										"message":          strings.TrimSpace(handlerErr.Error()),
+										"missing_fields":   invalidArgs.MissingFields,
+										"raw_arguments":    argsString,
+										"tool_call_id":     toolCallID,
+										"tool_name":        toolName,
+										"tool_schema_hint": "Ensure all required fields are present and XML fields are correctly filled.",
+									}
+								} else {
+									payload = map[string]string{
+										"error": fmt.Sprintf("Tool execution failed: %v", handlerErr),
+									}
+								}
+							}
+
+							response, marshalErr := json.Marshal(payload)
+							if marshalErr != nil {
+								if recordFailure != nil {
+									recordFailure(toolName, toolCallID, argsString, marshalErr)
+								}
+								response = []byte(fmt.Sprintf(`{"error":"failed to marshal tool response: %v"}`, marshalErr))
+							}
+
+							writeResult := ToolResult{
+								ToolName:   toolName,
+								ToolCallID: toolCallID,
+								OK:         handlerErr == nil && marshalErr == nil,
+								OutputJSON: string(response),
+							}
+							if handlerErr != nil {
+								writeResult.Error = handlerErr.Error()
+							}
+							if marshalErr != nil {
+								if writeResult.Error == "" {
+									writeResult.Error = marshalErr.Error()
+								} else {
+									writeResult.Error = writeResult.Error + "; " + marshalErr.Error()
+								}
+							}
+
+							protoToolName := "tool_protocol"
+							protoToolCallID := fmt.Sprintf("xml_%d_protocol", step)
+							warnMsg := "truncated <tool_data> block repaired; write_file executed in append mode"
+							warnPayload := map[string]any{
+								"warning":     warnMsg,
+								"recovered":   true,
+								"tool":        toolName,
+								"filePath":    recovered.FilePath,
+								"append_only": true,
+								"write_ok":    writeResult.OK,
+								"advice":      "Continue with write_file append=true to finish remaining content; ensure </tool_data> is present and keep each chunk reasonably small.",
+							}
+							if !writeResult.OK && strings.TrimSpace(writeResult.Error) != "" {
+								warnPayload["write_error"] = writeResult.Error
+								warnPayload["warning"] = "truncated <tool_data> block repaired; attempted write_file append but tool returned error"
+							}
+							warnBytes, _ := json.Marshal(warnPayload)
+							warnJSON := string(warnBytes)
+
+							results := []ToolResult{
+								writeResult,
+								{
+									ToolName:   protoToolName,
+									ToolCallID: protoToolCallID,
+									OK:         true,
+									OutputJSON: warnJSON,
+								},
+							}
+
+							recordedCalls = append(recordedCalls, llm.ToolCall{
+								ID:   protoToolCallID,
+								Type: "function",
+								Function: llm.ToolCallFunction{
+									Name:      protoToolName,
+									Arguments: warnJSON,
+								},
+							})
+
+							toolResultMsg := buildToolResultMessage(results)
+							if onTrace != nil {
+								onTrace("Tool protocol: recovered truncated <tool_data> for write_file append")
+							}
+							if observeStep != nil {
+								observeStep(StepRecord{
+									VisibleContent:    stepVisible,
+									AssistantContent:  recovered.RepairedAssistantContent,
+									ToolCalls:         recordedCalls,
+									ToolResults:       results,
+									ToolResultMessage: toolResultMsg,
+								})
+							}
+
+							messages = append(messages, llm.ChatMessage{
+								Role:    "assistant",
+								Content: recovered.RepairedAssistantContent,
+							})
+							messages = append(messages, llm.ChatMessage{
+								Role:    "user",
+								Content: toolResultMsg,
+							})
+							continue
+						}
+					}
+				}
+
 				protoErr := errors.New("truncated <tool_data> block")
 				if onTrace != nil {
 					onTrace(fmt.Sprintf("Tool protocol error: %v", protoErr))
