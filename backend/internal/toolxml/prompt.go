@@ -109,7 +109,7 @@ func SystemPrompt(defs []tool.Definition) string {
 		case "plan":
 			b.WriteString("- plan（计划管理）：\n")
 			b.WriteString("  <tool_name>plan</tool_name>\n")
-			b.WriteString("  <action>start|update|complete</action>\n")
+			b.WriteString("  <action>init|get|mark_done</action>（兼容旧 action：start|update|complete）\n")
 			b.WriteString("  <task_id>...</task_id>（可选）\n")
 			b.WriteString("  <template>...</template>（可选）\n")
 			b.WriteString("  <overwrite>true</overwrite>（可选）\n")

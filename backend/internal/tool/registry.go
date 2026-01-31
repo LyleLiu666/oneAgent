@@ -26,6 +26,7 @@ const (
 	ToolIDSubagent   = "subagent"
 	ToolIDWriteFile  = "write_file"
 	ToolIDReadFile   = "read_file"
+	ToolIDTrashFile  = "trash_file"
 )
 
 // Context keys for passing user information to tool handlers
@@ -93,6 +94,7 @@ var registry = map[string]Definition{
 	ToolIDSkillRead:        skillReadDefinition(),
 	ToolIDReadFile:         readFileDefinition(),
 	ToolIDWriteFile:        writeFileDefinition(),
+	ToolIDTrashFile:        trashFileDefinition(),
 }
 
 func init() {

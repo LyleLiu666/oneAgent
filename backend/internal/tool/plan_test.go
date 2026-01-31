@@ -75,6 +75,70 @@ func TestPlanTool_InitGetMarkDone_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestPlanTool_AcceptsLegacyActions_StartUpdateComplete(t *testing.T) {
+	root := t.TempDir()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+
+	template := `# PLAN
+- [ ] Create file <!-- id: 1 -->
+  - scope:
+    - backend/**
+  - acceptance:
+    - files:
+      - backend/a.txt
+    - must_contain:
+      - backend/a.txt: "ok"
+`
+
+	rawStart, _ := json.Marshal(map[string]any{
+		"action":   "start",
+		"template": template,
+	})
+	if _, err := runPlanTool(ctx, rawStart); err != nil {
+		t.Fatalf("plan start: %v", err)
+	}
+
+	rawUpdate, _ := json.Marshal(map[string]any{"action": "update"})
+	gotAny, err := runPlanTool(ctx, rawUpdate)
+	if err != nil {
+		t.Fatalf("plan update: %v", err)
+	}
+	got := gotAny.(planToolResult)
+	if !got.OK || len(got.Tasks) != 1 || got.Tasks[0].ID != "1" {
+		t.Fatalf("unexpected update result: %+v", got)
+	}
+
+	rawComplete, _ := json.Marshal(map[string]any{
+		"action":  "complete",
+		"task_id": "1",
+	})
+	doneAny, err := runPlanTool(ctx, rawComplete)
+	if err != nil {
+		t.Fatalf("plan complete: %v", err)
+	}
+	done := doneAny.(planToolResult)
+	if done.OK || done.Pass {
+		t.Fatalf("expected complete to fail when file missing, got %+v", done)
+	}
+
+	// Create required file.
+	if err := os.MkdirAll(filepath.Join(root, "backend"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "backend", "a.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	doneAny, err = runPlanTool(ctx, rawComplete)
+	if err != nil {
+		t.Fatalf("plan complete: %v", err)
+	}
+	done = doneAny.(planToolResult)
+	if !done.OK || !done.Pass || !done.Updated {
+		t.Fatalf("expected complete pass, got %+v", done)
+	}
+}
+
 func TestPlanScope_RejectsOutOfScopeWriteThenAllowsRetry(t *testing.T) {
 	root := t.TempDir()
 
@@ -110,4 +174,3 @@ func mustJSON(v any) json.RawMessage {
 	}
 	return data
 }
-

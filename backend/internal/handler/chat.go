@@ -49,6 +49,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
 	"github.com/liu_y/oneAgent/backend/internal/toolxml"
+	"github.com/liu_y/oneAgent/backend/internal/trash"
 )
 
 // ============================================================================
@@ -646,6 +647,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				Enabled: strings.TrimSpace(workspaceRoot) != "",
 				Root:    workspaceRoot,
 			})
+			if strings.TrimSpace(workspaceRoot) != "" {
+				h.rt.GoOnceKey("trash-cleanup:"+workspaceRoot, func(bg context.Context) {
+					trash.RunCleanupLoop(bg, workspaceRoot, trash.DefaultRetention, trash.DefaultCleanupInterval)
+				})
+			}
 			ctx = tool.ContextWithOCC(ctx, strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_OCC")) != "1")
 
 			opts := &llm.ChatCompletionOptions{

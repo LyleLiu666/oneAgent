@@ -43,6 +43,7 @@ func SafetyForToolID(toolID string) SafetyMetadata {
 		ToolIDEdit,
 		ToolIDEditV2,
 		ToolIDMultiEdit,
+		ToolIDTrashFile,
 		ToolIDDocumentExport:
 		return SafetyMetadata{
 			Effect:        SafetyEffectMutating,

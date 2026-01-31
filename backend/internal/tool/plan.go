@@ -47,14 +47,14 @@ func planDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "plan",
-			Description: "计划模块：init/get/mark_done。计划文件固定为 $WORKSPACE_ROOT/.oneagent/PLAN.md。mark_done 会触发 observer 只读验收（仅文件/内容校验，不执行命令），通过后才会把任务写为 done；失败会返回 `【plan中某个任务标记done失败】` 与原因且不写回。",
+			Description: "计划模块：init|get|mark_done（兼容旧 action：start→init、update→get、complete→mark_done）。计划文件固定为 $WORKSPACE_ROOT/.oneagent/PLAN.md。mark_done 会触发 observer 只读验收（仅文件/内容校验，不执行命令），通过后才会把任务写为 done；失败会返回 `【plan中某个任务标记done失败】` 与原因且不写回。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"description": "init|get|mark_done",
-						"enum":        []string{"init", "get", "mark_done"},
+						"description": "init|get|mark_done（兼容 start|update|complete）",
+						"enum":        []string{"init", "get", "mark_done", "start", "update", "complete"},
 					},
 					"task_id": map[string]any{
 						"type":        "string",
@@ -87,6 +87,15 @@ func runPlanTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	action := strings.ToLower(strings.TrimSpace(req.Action))
 	if action == "" {
 		return nil, errors.New("action is required")
+	}
+
+	switch action {
+	case "start":
+		action = "init"
+	case "update":
+		action = "get"
+	case "complete":
+		action = "mark_done"
 	}
 
 	root, err := resolveWorkspaceRoot(ctx)
