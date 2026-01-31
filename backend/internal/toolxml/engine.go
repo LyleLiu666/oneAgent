@@ -587,6 +587,37 @@ func buildToolArgs(toolName string, fields map[string]string) (json.RawMessage, 
 		data, err := json.Marshal(payload)
 		return data, string(data), err
 
+	case "read_file":
+		filePath := strings.TrimSpace(fields["filePath"])
+		if filePath == "" {
+			filePath = strings.TrimSpace(fields["path"])
+		}
+		if filePath == "" {
+			return nil, "", errors.New("read_file 缺少 filePath")
+		}
+
+		payload := map[string]any{
+			"filePath": filePath,
+		}
+		if rawOffset := strings.TrimSpace(fields["offset_lines"]); rawOffset != "" {
+			if offset, err := strconv.Atoi(rawOffset); err == nil && offset >= 0 {
+				payload["offset_lines"] = offset
+			}
+		}
+		if rawLimit := strings.TrimSpace(fields["limit_lines"]); rawLimit != "" {
+			if limit, err := strconv.Atoi(rawLimit); err == nil && limit > 0 {
+				payload["limit_lines"] = limit
+			}
+		}
+		if rawMaxBytes := strings.TrimSpace(fields["max_bytes"]); rawMaxBytes != "" {
+			if maxBytes, err := strconv.Atoi(rawMaxBytes); err == nil && maxBytes > 0 {
+				payload["max_bytes"] = maxBytes
+			}
+		}
+
+		data, err := json.Marshal(payload)
+		return data, string(data), err
+
 	case "glob":
 		pattern := strings.TrimSpace(fields["pattern"])
 		if pattern == "" {

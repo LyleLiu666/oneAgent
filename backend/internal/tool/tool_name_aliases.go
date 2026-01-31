@@ -9,6 +9,10 @@ var legacyToolNameAliases = map[string]string{
 	// Document export.
 	"document.export": "document_export",
 
+	// Compatibility with common agent tool names.
+	"read":  "read_file",
+	"write": "write_file",
+
 	// Code intelligence (LSP).
 	"lsp.definition":     "lsp_definition",
 	"lsp.references":     "lsp_references",
@@ -27,4 +31,3 @@ func CanonicalToolName(name string) string {
 	}
 	return name
 }
-

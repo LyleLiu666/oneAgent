@@ -74,6 +74,14 @@ func SystemPrompt(defs []tool.Definition) string {
 			b.WriteString("     <filePath>path/to/file</filePath>\n")
 			b.WriteString("     <content>...</content>\n")
 			b.WriteString("     <append>true</append>（可选；true=追加写入，用于分段写入大文件）\n")
+		case "read_file":
+			b.WriteString("- read_file（读取文件内容，支持按行分页与输出限流）：\n")
+			b.WriteString("     <tool_name>read_file</tool_name>\n")
+			b.WriteString("     <filePath>path/to/file</filePath>\n")
+			b.WriteString("     <offset_lines>0</offset_lines>（可选，默认 0）\n")
+			b.WriteString("     <limit_lines>200</limit_lines>（可选，最大 2000）\n")
+			b.WriteString("     <max_bytes>65536</max_bytes>（可选，最大 1048576）\n")
+			b.WriteString("  说明：workspace 启用时允许相对路径且必须在 workspace 内；绝对路径只读允许。\n")
 		case "glob":
 			b.WriteString("- glob:\n")
 			b.WriteString("  <tool_name>glob</tool_name>\n")

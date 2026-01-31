@@ -13,6 +13,7 @@ var supportedToolNames = map[string]struct{}{
 	"ls":          {},
 	"multiedit":   {},
 	"plan":        {},
+	"read_file":   {},
 	"rg":          {},
 	"run_command": {},
 	"search":      {},

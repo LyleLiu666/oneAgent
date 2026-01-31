@@ -153,6 +153,12 @@ func parseCall(callInner string, raw string) (Call, error) {
 		"skillIds",
 		"filePath",
 		"file_path",
+		"offset_lines",
+		"offsetLines",
+		"limit_lines",
+		"limitLines",
+		"max_bytes",
+		"maxBytes",
 		"oldcontent",
 		"newcontent",
 		"replaceAll",
@@ -276,6 +282,21 @@ func parseCall(callInner string, raw string) (Call, error) {
 	if _, ok := fields["task_id"]; !ok {
 		if v, ok := fields["taskId"]; ok {
 			fields["task_id"] = v
+		}
+	}
+	if _, ok := fields["offset_lines"]; !ok {
+		if v, ok := fields["offsetLines"]; ok {
+			fields["offset_lines"] = v
+		}
+	}
+	if _, ok := fields["limit_lines"]; !ok {
+		if v, ok := fields["limitLines"]; ok {
+			fields["limit_lines"] = v
+		}
+	}
+	if _, ok := fields["max_bytes"]; !ok {
+		if v, ok := fields["maxBytes"]; ok {
+			fields["max_bytes"] = v
 		}
 	}
 

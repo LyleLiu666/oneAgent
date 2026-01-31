@@ -11,6 +11,10 @@ func TestCanonicalToolName_AliasMapping(t *testing.T) {
 		{"skill_read", "skill_read"},
 		{"document.export", "document_export"},
 		{"document_export", "document_export"},
+		{"read", "read_file"},
+		{"read_file", "read_file"},
+		{"write", "write_file"},
+		{"write_file", "write_file"},
 		{"lsp.definition", "lsp_definition"},
 		{"lsp_definition", "lsp_definition"},
 		{"lsp.references", "lsp_references"},
@@ -27,4 +31,3 @@ func TestCanonicalToolName_AliasMapping(t *testing.T) {
 		}
 	}
 }
-
