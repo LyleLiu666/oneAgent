@@ -86,3 +86,42 @@ it('keeps session header above messages (for tool popover)', async () => {
     expect(header.classes()).toContain('relative')
     expect(header.classes()).toContain('z-30')
 })
+
+it('does not render tool_result output as a giant text bubble in secretary mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+    chat.setMessages([
+        {
+            id: 1,
+            role: 'tool',
+            type: 'tool_result',
+            content: 'HUGE_TOOL_OUTPUT_SHOULD_NOT_RENDER',
+            createdAt: new Date(),
+            tool: { name: 'bash', output: 'HUGE_TOOL_OUTPUT_SHOULD_NOT_RENDER' },
+        },
+    ])
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('HUGE_TOOL_OUTPUT_SHOULD_NOT_RENDER')
+})

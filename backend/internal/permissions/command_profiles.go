@@ -146,6 +146,13 @@ func ValidateCommand(profile string, command string, allowlist []string) error {
 	return nil
 }
 
+// ExtractCommands returns the first token of each command segment, using the same logic as ValidateCommand.
+//
+// This is useful for higher-level safety checks (e.g., high-risk command classification).
+func ExtractCommands(command string) []string {
+	return extractCommands(command)
+}
+
 // extractCommands returns the first token of each command segment.
 func extractCommands(command string) []string {
 	repl := strings.NewReplacer(

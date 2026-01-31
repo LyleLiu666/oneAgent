@@ -10,6 +10,7 @@ import (
 
 const (
 	SettingKeyBochaAPIKey = "bocha_api_key"
+	SettingKeyCommandApprovalMode = "command_approval_mode" // auto|manual
 )
 
 func (d *DB) GetUserSetting(ctx context.Context, userID, key string) (string, error) {
@@ -88,4 +89,3 @@ func (d *DB) TouchHealthCheck(ctx context.Context) error {
 }
 
 var _ = sql.ErrNoRows
-

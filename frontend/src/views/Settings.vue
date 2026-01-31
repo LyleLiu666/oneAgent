@@ -9,6 +9,7 @@ import {
   Search,
   FileText,
   ListChecks,
+  Shield,
 } from 'lucide-vue-next'
 import {
   getProviders,
@@ -17,6 +18,8 @@ import {
   createModel,
   deleteModel,
   updateModel,
+  getCommandApprovalSettings,
+  updateCommandApprovalSettings,
   getBochaSettings,
   updateBochaSettings,
   bochaSearch,
@@ -68,7 +71,7 @@ const providerTypeOptions = [
 ]
 
 // Tab state
-const activeTab = ref<'providers' | 'search' | 'digest' | 'sop'>('providers')
+const activeTab = ref<'providers' | 'security' | 'search' | 'digest' | 'sop'>('providers')
 
 // LLM Providers state
 const providers = ref<LLMProvider[]>([])
@@ -91,6 +94,48 @@ const settingsLoading = ref(false)
 const settingsSaving = ref(false)
 const settingsSuccess = ref('')
 const settingsError = ref('')
+
+// Command approval settings state
+const commandApprovalMode = ref<'auto' | 'manual'>('auto')
+const commandApprovalLoading = ref(false)
+const commandApprovalSaving = ref(false)
+const commandApprovalError = ref('')
+const commandApprovalSuccess = ref('')
+
+const loadCommandApprovalMode = async () => {
+  commandApprovalLoading.value = true
+  commandApprovalError.value = ''
+  try {
+    const res: any = await getCommandApprovalSettings()
+    const mode = String(res?.command_approval_mode || '').trim().toLowerCase()
+    commandApprovalMode.value = mode === 'manual' ? 'manual' : 'auto'
+  } catch (e: any) {
+    commandApprovalError.value = e?.message || '加载命令审批设置失败'
+    commandApprovalMode.value = 'auto'
+  } finally {
+    commandApprovalLoading.value = false
+  }
+}
+
+const setCommandApprovalMode = async (mode: 'auto' | 'manual') => {
+  if (commandApprovalSaving.value) return
+  commandApprovalError.value = ''
+  commandApprovalSuccess.value = ''
+  commandApprovalSaving.value = true
+  try {
+    const res: any = await updateCommandApprovalSettings({ command_approval_mode: mode })
+    const saved = String(res?.command_approval_mode || '').trim().toLowerCase()
+    commandApprovalMode.value = saved === 'manual' ? 'manual' : 'auto'
+    commandApprovalSuccess.value = '已保存'
+    setTimeout(() => {
+      commandApprovalSuccess.value = ''
+    }, 2000)
+  } catch (e: any) {
+    commandApprovalError.value = e?.message || '保存命令审批设置失败'
+  } finally {
+    commandApprovalSaving.value = false
+  }
+}
 
 // Test search state
 const testQuery = ref('今天天气怎么样')
@@ -389,7 +434,7 @@ const runTestSearch = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadProviders(), loadSettings()])
+  await Promise.all([loadProviders(), loadSettings(), loadCommandApprovalMode()])
 })
 </script>
 
@@ -409,6 +454,7 @@ onMounted(async () => {
       <div class="flex gap-1 mb-6 p-1 bg-surface-900/50 rounded-xl w-fit">
         <button
           @click="activeTab = 'providers'"
+          data-testid="settings-tab-providers"
           :class="[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
             activeTab === 'providers'
@@ -420,7 +466,21 @@ onMounted(async () => {
           模型服务商
         </button>
         <button
+          @click="activeTab = 'security'"
+          data-testid="settings-tab-security"
+          :class="[
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+            activeTab === 'security'
+              ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+              : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/50'
+          ]"
+        >
+          <Shield class="w-4 h-4" />
+          安全
+        </button>
+        <button
           @click="activeTab = 'search'"
+          data-testid="settings-tab-search"
           :class="[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
             activeTab === 'search'
@@ -433,6 +493,7 @@ onMounted(async () => {
         </button>
         <button
           @click="activeTab = 'digest'; if (!digestMarkdown) loadDigest(false)"
+          data-testid="settings-tab-digest"
           :class="[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
             activeTab === 'digest'
@@ -445,6 +506,7 @@ onMounted(async () => {
         </button>
         <button
           @click="activeTab = 'sop'; if (sopItems.length === 0) loadSopSuggestionsList()"
+          data-testid="settings-tab-sop"
           :class="[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
             activeTab === 'sop'
@@ -669,6 +731,66 @@ onMounted(async () => {
                   </form>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Security Tab -->
+        <div v-show="activeTab === 'security'" class="glass rounded-2xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-surface-700/50">
+            <div class="flex items-center gap-3">
+              <Shield class="w-5 h-5 text-primary-400" />
+              <div>
+                <h2 class="font-semibold text-surface-100">安全</h2>
+                <p class="text-sm text-surface-500">高风险命令审批与执行留痕</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="p-6 space-y-4">
+            <div class="space-y-2">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <div class="text-sm font-medium text-surface-200">高风险命令审批</div>
+                  <div class="text-xs text-surface-500">
+                    默认由秘书自动审批（会留痕）；开启“手动审批”后，每次高风险命令会提示你确认。
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="command-approval-auto"
+                    :disabled="commandApprovalLoading || commandApprovalSaving"
+                    @click="setCommandApprovalMode('auto')"
+                    :class="[
+                      'px-3 py-1.5 rounded-lg text-sm border transition-colors',
+                      commandApprovalMode === 'auto'
+                        ? 'bg-primary-600 text-white border-primary-500'
+                        : 'bg-surface-900/70 text-surface-200 border-surface-700 hover:bg-surface-800/60'
+                    ]"
+                  >
+                    自动
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="command-approval-manual"
+                    :disabled="commandApprovalLoading || commandApprovalSaving"
+                    @click="setCommandApprovalMode('manual')"
+                    :class="[
+                      'px-3 py-1.5 rounded-lg text-sm border transition-colors',
+                      commandApprovalMode === 'manual'
+                        ? 'bg-primary-600 text-white border-primary-500'
+                        : 'bg-surface-900/70 text-surface-200 border-surface-700 hover:bg-surface-800/60'
+                    ]"
+                  >
+                    手动
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="commandApprovalLoading" class="text-xs text-surface-500">加载中…</div>
+              <div v-if="commandApprovalError" class="text-xs text-red-400">{{ commandApprovalError }}</div>
+              <div v-if="commandApprovalSuccess" class="text-xs text-green-400">{{ commandApprovalSuccess }}</div>
             </div>
           </div>
         </div>

@@ -207,6 +207,7 @@ const isToolCallPending = (message: ChatMessage, index: number) => {
 
 const shouldRenderToolMessage = (message: ChatMessage, index: number) => {
   if (message.type !== 'tool_call' && message.type !== 'tool_result') return false
+  if (message.type === 'tool_result') return true
   if (!isSecretaryMode.value) return true
   return isToolCallPending(message, index)
 }
@@ -1330,7 +1331,11 @@ onUnmounted(() => {
           <div
             v-if="shouldRenderToolMessage(message, index)"
             class="max-w-3xl"
-            :data-testid="isSecretaryMode ? 'chat-secretary-tool-progress' : undefined"
+            :data-testid="
+              isSecretaryMode && message.type === 'tool_call' && isToolCallPending(message, index)
+                ? 'chat-secretary-tool-progress'
+                : undefined
+            "
           >
             <ToolMessage
               :message="message"

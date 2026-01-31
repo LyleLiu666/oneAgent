@@ -82,3 +82,16 @@ func TestValidateCommand_Coding_DeniesSudo(t *testing.T) {
 		t.Fatalf("expected deny for sudo")
 	}
 }
+
+func TestExtractCommands_SplitsCommandSegments(t *testing.T) {
+	got := ExtractCommands(`A=1 echo hi && rm -rf a | grep x; python -V`)
+	want := []string{"echo", "rm", "grep", "python"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected tokens: got=%v want=%v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected tokens: got=%v want=%v", got, want)
+		}
+	}
+}

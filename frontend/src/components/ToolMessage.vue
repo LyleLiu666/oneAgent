@@ -150,14 +150,26 @@ const formatMaybeJson = (raw: string): string => {
         <button
           @click="toggle"
           class="w-full flex items-center justify-between px-4 py-3 bg-surface-800/30 hover:bg-surface-800/50 transition-colors text-left"
-        >
-          <div class="flex items-center gap-2 text-xs text-surface-300">
-            <span class="font-medium">{{ title }}</span>
-            <span class="text-[11px] text-surface-500">{{ subtitle }}</span>
-            <span
-              v-if="isPending"
-              data-testid="tool-pending-badge"
-              class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-surface-900/60 border border-surface-700/40 text-[11px] text-surface-200"
+	        >
+	          <div class="flex items-center gap-2 text-xs text-surface-300">
+	            <span class="font-medium">{{ title }}</span>
+	            <span class="text-[11px] text-surface-500">{{ subtitle }}</span>
+	            <span
+	              v-if="approvalInfo?.kind === 'required'"
+	              class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px]"
+	            >
+	              需要审批
+	            </span>
+	            <span
+	              v-else-if="approvalInfo?.kind === 'denied'"
+	              class="px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 text-[10px]"
+	            >
+	              审批已拒绝
+	            </span>
+	            <span
+	              v-if="isPending"
+	              data-testid="tool-pending-badge"
+	              class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-surface-900/60 border border-surface-700/40 text-[11px] text-surface-200"
             >
               <Loader2 class="w-3 h-3 animate-spin text-primary-300" />
               <span>执行中</span>
@@ -177,22 +189,59 @@ const formatMaybeJson = (raw: string): string => {
               {{ message.tool.toolCallId }}
             </span>
           </div>
-          <component :is="isExpanded ? ChevronDown : ChevronRight" class="w-4 h-4 text-surface-500" />
-        </button>
+	          <component :is="isExpanded ? ChevronDown : ChevronRight" class="w-4 h-4 text-surface-500" />
+	        </button>
 
-        <div
-          v-if="!isExpanded && isToolCall && message.content && message.content.trim()"
-          class="px-4 pb-3 text-xs text-surface-400 whitespace-pre-wrap break-words line-clamp-3"
-        >
+	        <div v-if="approvalInfo" class="px-4 pt-3">
+	          <div class="p-3 rounded-md border border-surface-700/40 bg-surface-900/40">
+	            <div class="flex items-start justify-between gap-3">
+	              <div class="min-w-0">
+	                <div class="text-xs text-surface-300">
+	                  <span v-if="approvalInfo.kind === 'required'">需要审批</span>
+	                  <span v-else>审批已拒绝</span>
+	                </div>
+	                <div class="mt-1 text-[11px] text-surface-500 font-mono break-all">
+	                  {{ approvalInfo.approvalId }}
+	                </div>
+	              </div>
+	              <div v-if="approvalInfo.kind === 'required'" class="flex gap-2 flex-shrink-0">
+	                <button
+	                  data-testid="tool-approval-approve"
+	                  class="px-3 py-1 rounded-md bg-primary-600 hover:bg-primary-500 text-white text-xs disabled:opacity-50"
+	                  :disabled="approvalBusy"
+	                  @click="onApprove"
+	                >
+	                  批准
+	                </button>
+	                <button
+	                  data-testid="tool-approval-deny"
+	                  class="px-3 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-200 text-xs disabled:opacity-50"
+	                  :disabled="approvalBusy"
+	                  @click="onDeny"
+	                >
+	                  拒绝
+	                </button>
+	              </div>
+	            </div>
+	            <div v-if="approvalInfo.kind === 'denied' && approvalInfo.reason" class="mt-2 text-xs text-red-400">
+	              拒绝原因：{{ approvalInfo.reason }}
+	            </div>
+	          </div>
+	        </div>
+
+	        <div
+	          v-if="!isExpanded && isToolCall && message.content && message.content.trim()"
+	          class="px-4 pb-3 text-xs text-surface-400 whitespace-pre-wrap break-words line-clamp-3"
+	        >
           {{ message.content }}
-        </div>
+	        </div>
 
-        <!-- Content -->
-        <div v-show="isExpanded" class="px-4 py-3 border-t border-surface-700/30">
-          <template v-if="isToolCall">
-            <div v-if="message.content && message.content.trim()" class="space-y-1 mb-3">
-              <div class="text-[11px] text-surface-500">assistant_visible</div>
-              <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ message.content }}</pre>
+	        <!-- Content -->
+	        <div v-if="isExpanded" class="px-4 py-3 border-t border-surface-700/30">
+	          <template v-if="isToolCall">
+	            <div v-if="message.content && message.content.trim()" class="space-y-1 mb-3">
+	              <div class="text-[11px] text-surface-500">assistant_visible</div>
+	              <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ message.content }}</pre>
             </div>
 
             <div
@@ -229,51 +278,15 @@ const formatMaybeJson = (raw: string): string => {
             </div>
           </template>
 
-          <template v-else-if="isToolResult">
-            <div v-if="message.tool?.arguments" class="space-y-1 mb-3">
-              <div class="text-[11px] text-surface-500">arguments</div>
-              <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.arguments) }}</pre>
-            </div>
+	          <template v-else-if="isToolResult">
+	            <div v-if="message.tool?.arguments" class="space-y-1 mb-3">
+	              <div class="text-[11px] text-surface-500">arguments</div>
+	              <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[260px] overflow-y-auto custom-scrollbar shadow-inner">{{ formatMaybeJson(message.tool.arguments) }}</pre>
+	            </div>
 
-            <div
-              v-if="approvalInfo"
-              class="p-3 mb-3 rounded-md border border-surface-700/40 bg-surface-900/40"
-            >
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="text-xs text-surface-300">
-                    <span v-if="approvalInfo.kind === 'required'">需要审批</span>
-                    <span v-else>审批已拒绝</span>
-                  </div>
-                  <div class="mt-1 text-[11px] text-surface-500 font-mono break-all">
-                    {{ approvalInfo.approvalId }}
-                  </div>
-                </div>
-                <div v-if="approvalInfo.kind === 'required'" class="flex gap-2 flex-shrink-0">
-                  <button
-                    class="px-3 py-1 rounded-md bg-primary-600 hover:bg-primary-500 text-white text-xs disabled:opacity-50"
-                    :disabled="approvalBusy"
-                    @click="onApprove"
-                  >
-                    批准
-                  </button>
-                  <button
-                    class="px-3 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-200 text-xs disabled:opacity-50"
-                    :disabled="approvalBusy"
-                    @click="onDeny"
-                  >
-                    拒绝
-                  </button>
-                </div>
-              </div>
-              <div v-if="approvalInfo.kind === 'denied' && approvalInfo.reason" class="mt-2 text-xs text-red-400">
-                拒绝原因：{{ approvalInfo.reason }}
-              </div>
-            </div>
-
-            <div
-              v-if="message.tool?.results && message.tool.results.length"
-              class="space-y-4"
+	            <div
+	              v-if="message.tool?.results && message.tool.results.length"
+	              class="space-y-4"
             >
               <div
                 v-for="(r, idx) in message.tool.results"

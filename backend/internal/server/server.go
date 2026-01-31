@@ -123,6 +123,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/tools", handler.ListTools)
 		api.POST("/approvals/:id/approve", handler.ApproveToolApproval)
 		api.POST("/approvals/:id/deny", handler.DenyToolApproval)
+		api.GET("/command_approvals/settings", handler.GetCommandApprovalSettings)
+		api.PUT("/command_approvals/settings", handler.UpdateCommandApprovalSettings)
 
 		// MCP server (local-only by default).
 		mcp := api.Group("/mcp")

@@ -259,6 +259,26 @@ export async function denyToolApproval(approvalId: string, reason: string = "") 
   });
 }
 
+// ============================================================================
+// Command approval settings
+// ============================================================================
+
+export type CommandApprovalMode = "auto" | "manual";
+
+export interface CommandApprovalSettings {
+  command_approval_mode: CommandApprovalMode;
+}
+
+export async function getCommandApprovalSettings(): Promise<CommandApprovalSettings> {
+  return api("/api/command_approvals/settings");
+}
+
+export async function updateCommandApprovalSettings(
+  payload: CommandApprovalSettings,
+): Promise<CommandApprovalSettings> {
+  return api("/api/command_approvals/settings", { method: "PUT", body: payload });
+}
+
 export async function getProviders() {
   return api("/api/llm/providers");
 }

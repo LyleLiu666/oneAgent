@@ -65,6 +65,7 @@ func DefaultPolicy() Policy {
 				ToolID: "bash",
 				Constraints: Constraints{
 					CommandProfile: "dev",
+					Approval:       "high_risk",
 				},
 			},
 			{
@@ -73,6 +74,7 @@ func DefaultPolicy() Policy {
 				ToolID: "run_command",
 				Constraints: Constraints{
 					CommandProfile: "dev",
+					Approval:       "high_risk",
 				},
 			},
 		},
