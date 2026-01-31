@@ -16,5 +16,4 @@ oneAgent 的核心价值是“用户把任务丢给 agent 后可以离开，回�
 ## Impact
 - Affected specs: `system-work-ledger`, `work-ledger-ux`
 - Affected code (expected): `backend/internal/workledger/*`, `backend/internal/handler/ledger*.go`, `frontend/src/views/Ledger*.vue`
-- Related docs: `docs/roadmap-longterm.md`, `docs/ux-vision.md`
-
+- Related docs: `openspec/roadmap-longterm.md`, `docs/ux-vision.md`

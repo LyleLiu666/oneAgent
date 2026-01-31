@@ -18,5 +18,4 @@
 ## Impact
 - Affected specs: `system-workflow-orchestration` (new)
 - Affected code (expected): `backend/internal/workflow/*`, `backend/internal/handler/*`, `frontend/src/views/*`
-- Related docs: `openspec/project.md`, `docs/ux-vision.md`, `docs/roadmap-longterm.md`, `docs/opensource/README.md`
-
+- Related docs: `openspec/project.md`, `docs/ux-vision.md`, `openspec/roadmap-longterm.md`, `docs/opensource/README.md`

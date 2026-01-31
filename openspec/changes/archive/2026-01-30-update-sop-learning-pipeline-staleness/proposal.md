@@ -19,5 +19,4 @@
 ## Impact
 - Affected specs: `system-work-ledger`, `system-skill-management`
 - Affected code (expected): `backend/internal/workledger/*`, `backend/internal/skill/*`, `frontend/src/views/Governance*`
-- Related docs: `docs/roadmap-longterm.md`
-
+- Related docs: `openspec/roadmap-longterm.md`

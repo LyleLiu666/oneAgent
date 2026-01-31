@@ -17,5 +17,4 @@
 ## Impact
 - Affected specs: `system-task-queue`
 - Affected code (expected): `backend/internal/taskqueue/*`, `backend/internal/handler/*`, `frontend/src/components/TaskQueuePanel.vue`
-- Related docs: `docs/roadmap-longterm.md`
-
+- Related docs: `openspec/roadmap-longterm.md`

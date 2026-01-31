@@ -8,7 +8,7 @@
 ## Priority（高 → 低）
 
 ### P0（核心体验 / 高 ROI）
-- （暂无）
+- `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除、不断网）；不依赖 Docker 也能安全启用写能力命令
 
 ### P1（治理与自动化 / 降低损耗）
 - （暂无）
@@ -18,3 +18,5 @@
 
 ## Snapshot（来自 `openspec list`）
 - `add-workflow-orchestration-graph`：12/16 tasks
+- `add-native-command-sandbox`：0/13 tasks
+- `add-trash-file-tool`：0/7 tasks

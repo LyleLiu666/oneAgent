@@ -18,7 +18,9 @@
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
-- （暂无；以 `openspec list` 为准。若要继续推进，请先在 `openspec/changes/review.md` 创建新的 active changes 并排序。）
+- `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除、不断网）
+- `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
+- `add-trash-file-tool`：软删除（回收站）工具（已实现，待归档）
 
 ### 0.2 Done（已交付，且已归档到 `openspec/changes/archive/`）
 - [x] `add-project-scripts`
@@ -121,6 +123,7 @@
 **迭代点（典型）**：
 - attempt 在 git worktree 执行，记录 base SHA / worktree_root / diff / tests。
 - worktree 生命周期管理（清理/孤儿回收）要稳定、可解释。
+- 对非 git / 不适合复制的大型 workspace：提供 `sandbox_mode=native` 作为硬边界执行后端（workspaceRoot 内可真删除，如 `rm -rf`）。
 
 ### P5. 长任务自治与收割体验（挂机、日报、通知）
 **目标**：用户把任务丢给 agent 后可以离开；回来能“收割成果”，失败点也能集中处理。
@@ -156,7 +159,7 @@
 | --- | --- | --- | --- |
 | **L0** | 项目可运行/可测试（可复现） | `add-project-scripts`（已完成） | tool permissions 不可绕过；失败留痕完整 |
 | **L1** | 交付可审查（评论→下一轮） | `add-diff-review-loop`（已完成） | 具备 diff/test evidence 的可打开指针 |
-| **L2** | 执行隔离 + 易回滚 | `add-worktree-attempt-isolation` | git repo 检测稳定；生命周期清理可解释 |
+| **L2** | 执行隔离 + 易回滚 | `add-worktree-attempt-isolation` + `add-native-command-sandbox` | git repo 检测稳定；生命周期清理可解释；命令执行硬边界（无 Docker） |
 | **L3** | 对外编排入口 | `add-mcp-server` | local-only + auth/policy；事件流与证据链打通 |
 
 辅助但低风险的“体验修补”（可穿插）：
@@ -198,6 +201,14 @@
 - 非 git workspace：必须给出明确错误或按配置退化（不得 silent fallback）。
 - 生命周期：孤儿 worktree 的识别与清理需要证据与可操作提示。
 
+##### `add-native-command-sandbox`（命令执行硬边界：workspaceRoot 内真删除）
+**价值**：在不依赖 Docker、不复制 workspace 的前提下，让 agent 可以像开发者一样使用控制台命令（例如 `rm -rf`），但把破坏范围严格限定在 workspaceRoot 内。
+
+**关键坑**
+- 跨平台实现复杂：macOS（Seatbelt）/Linux（Landlock）/Windows（Restricted Token + ACL）需要不同后端；Windows 风险最高。
+- fallback 策略要一致且可解释：native sandbox 不可用时必须 fail-closed（或明确降级只读），不得 silent fallback 为宿主写执行。
+- “不断网”带来数据外泄风险：第一版不做断网，但必须配合 tool permissions / allowlist 治理（后续可加审批/规则）。
+
 ##### `update-ux-error-surface`（安全错误面 + 统一错误展示 + 逐步修 UX）
 **价值**：把“报错直出/不可操作/信息暴露风险”系统性解决；同时把 `docs/ux_critique.md` 落到可验收的最小改动集（逐页推进）。
 
@@ -231,11 +242,12 @@
 
 #### 执行顺序（建议）
 按“地基 → 上层（L0→L3）”综合排序：
-1) `add-worktree-attempt-isolation`
-2) `update-ux-error-surface`（先做错误披露契约与统一组件，再逐页修 UX）
-3) `add-mcp-server`（建议先只读，逐步扩展）
-4) `add-secretary-mode-chat`（体验线：可并行推进）
-5) `fix-skill-read-not-found-ux`（穿插做，随时可落地）
+1) `add-native-command-sandbox`
+2) `add-worktree-attempt-isolation`
+3) `update-ux-error-surface`（先做错误披露契约与统一组件，再逐页修 UX）
+4) `add-mcp-server`（建议先只读，逐步扩展）
+5) `add-secretary-mode-chat`（体验线：可并行推进）
+6) `fix-skill-read-not-found-ux`（穿插做，随时可落地）
 
 ---
 
