@@ -18,7 +18,7 @@ func writeFileDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "write_file",
-			Description: "写入文件内容（创建/覆盖或追加）。路径必须在沙箱根目录内。强烈建议分段、小步：单次 content 建议 ≤3000 字；超过上限会自动截断写入并在结果里标记 truncated/continue_append，后续用 append=true 继续追加。结果会返回 ok、written_bytes、total_lines/total_bytes 等统计信息。",
+			Description: "写入文件内容（创建/覆盖或追加）。路径必须在沙箱根目录内。建议分段、小步：单次 content 建议 ≤3000 字；单次上限为 200000 字，超过会直接失败且不会写入（避免产生半成品），请改用 append=true 分段追加。结果会返回 ok、written_bytes、total_lines/total_bytes 等统计信息。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -28,7 +28,7 @@ func writeFileDefinition() Definition {
 					},
 					"content": map[string]any{
 						"type":        "string",
-						"description": "要写入的内容（建议单次 ≤3000 字；超过上限会自动截断；大文件用 append=true 分段写入）。",
+						"description": "要写入的内容（建议单次 ≤3000 字；单次上限 200000 字，超过会失败且不会写入；大文件用 append=true 分段写入）。",
 					},
 					"append": map[string]any{
 						"type":        "boolean",
@@ -60,9 +60,9 @@ func writeFileDefinition() Definition {
 }
 
 type writeFileRequest struct {
-	FilePath string `json:"filePath"`
-	Content  string `json:"content"`
-	Append   bool   `json:"append,omitempty"`
+	FilePath      string             `json:"filePath"`
+	Content       string             `json:"content"`
+	Append        bool               `json:"append,omitempty"`
 	Preconditions *FilePreconditions `json:"preconditions,omitempty"`
 }
 
@@ -125,19 +125,19 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
+	content := req.Content
+	contentRunes := runeCount(content)
+	if contentRunes > maxWriteFileRunesPerCall {
+		return nil, &InvalidArgumentsError{
+			ToolName: "write_file",
+			Message:  fmt.Sprintf("content 过长（%d 字），单次上限为 %d 字；请分段写入（使用 append=true 追加）", contentRunes, maxWriteFileRunesPerCall),
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	content := req.Content
-	truncatedContent, truncated, originalRunes := truncateToRunes(content, maxWriteFileRunesPerCall)
-	if truncated {
-		if cut := strings.LastIndexByte(truncatedContent, '\n'); cut > 0 {
-			truncatedContent = truncatedContent[:cut+1]
-		}
-		content = truncatedContent
-	}
-	writtenRunes := runeCount(content)
 	contentBytes := []byte(content)
 	writtenLines := countLines(contentBytes)
 
@@ -180,12 +180,6 @@ func runWriteFileTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		result.TotalBytes = int64(len(contentBytes))
 		result.TotalLines = writtenLines
-	}
-	if truncated {
-		result.Truncated = true
-		result.OriginalRunes = originalRunes
-		result.WrittenRunes = writtenRunes
-		result.ContinueAppend = true
 	}
 
 	if OCCFromContext(ctx) != nil {

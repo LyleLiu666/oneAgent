@@ -158,6 +158,59 @@ const showSkillsHelpHint = computed(() => {
 
 const isSecretaryMode = computed(() => chatUIMode.value === 'secretary')
 
+const extractToolCallIDs = (msg: ChatMessage): string[] => {
+  const calls = Array.isArray(msg.tool?.toolCalls) ? msg.tool?.toolCalls : []
+  return calls.map((c: any) => String(c?.id || '').trim()).filter((id: string) => !!id)
+}
+
+const extractToolResultIDs = (msg: ChatMessage): string[] => {
+  const ids: string[] = []
+  const direct = String(msg.tool?.toolCallId || '').trim()
+  if (direct) ids.push(direct)
+  const results = Array.isArray(msg.tool?.results) ? msg.tool?.results : []
+  for (const r of results) {
+    const id = String((r as any)?.tool_call_id || '').trim()
+    if (id) ids.push(id)
+  }
+  return ids
+}
+
+// A tool call is considered "in-flight" if any of its call IDs does not yet have a matching tool_result
+// after it (best-effort, using reverse scan so duplicate call IDs in earlier history won't break it).
+const pendingToolCallIndexSet = computed(() => {
+  const pending = new Set<number>()
+  const seenResults = new Set<string>()
+  const messages = chatStore.messages
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (!m) continue
+    if (m.type === 'tool_result') {
+      for (const id of extractToolResultIDs(m)) seenResults.add(id)
+      continue
+    }
+    if (m.type === 'tool_call') {
+      const callIDs = extractToolCallIDs(m)
+      if (callIDs.length === 0 || callIDs.some((id) => !seenResults.has(id))) {
+        pending.add(i)
+      }
+    }
+  }
+
+  return pending
+})
+
+const isToolCallPending = (message: ChatMessage, index: number) => {
+  if (message.type !== 'tool_call') return false
+  return pendingToolCallIndexSet.value.has(index)
+}
+
+const shouldRenderToolMessage = (message: ChatMessage, index: number) => {
+  if (message.type !== 'tool_call' && message.type !== 'tool_result') return false
+  if (!isSecretaryMode.value) return true
+  return isToolCallPending(message, index)
+}
+
 // Computed
 const workspaceOnboardingBlocking = computed(() => {
   if (isSecretaryMode.value) return false
@@ -629,6 +682,7 @@ const sendChat = async (rawMessage: string) => {
   scrollToBottom()
 
   chatStore.setLoading(true)
+  chatStore.setLastResponseTokens(0)
 
   try {
     let sawMsgEvents = false
@@ -817,6 +871,7 @@ const sendChat = async (rawMessage: string) => {
              // Expecting {"response_tokens": 123}
              const data = JSON.parse(event.data)
              if (typeof data.response_tokens === 'number') {
+               chatStore.setLastResponseTokens(data.response_tokens)
                for (let i = chatStore.messages.length - 1; i >= 0; i--) {
                  const msg = chatStore.messages[i]
                  if (msg.role === 'assistant' && msg.isStreaming) {
@@ -1273,10 +1328,15 @@ onUnmounted(() => {
         >
           <!-- Tool message -->
           <div
-            v-if="!isSecretaryMode && (message.type === 'tool_call' || message.type === 'tool_result')"
+            v-if="shouldRenderToolMessage(message, index)"
             class="max-w-3xl"
+            :data-testid="isSecretaryMode ? 'chat-secretary-tool-progress' : undefined"
           >
-            <ToolMessage :message="message" />
+            <ToolMessage
+              :message="message"
+              :pending="isToolCallPending(message, index)"
+              :progress-tokens="chatStore.lastResponseTokens"
+            />
           </div>
 
           <!-- System message -->

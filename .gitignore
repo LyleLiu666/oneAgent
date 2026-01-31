@@ -58,6 +58,7 @@ docker-compose.override.yml
 
 .agent
 .claude
+.codex
 /docs/*
 
 # Allow curated open-source reference snapshots under docs/opensource

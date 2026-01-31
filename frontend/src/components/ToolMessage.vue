@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Cpu, ChevronDown, ChevronRight } from 'lucide-vue-next'
+import { Cpu, ChevronDown, ChevronRight, Loader2 } from 'lucide-vue-next'
 import type { ChatMessage } from '@/stores/chat'
 import { approveToolApproval, denyToolApproval } from '@/api/client'
 
 const props = defineProps<{
   message: ChatMessage
+  pending?: boolean
+  progressTokens?: number
 }>()
 
 const isExpanded = ref(false)
@@ -51,6 +53,8 @@ const isPermissionDenied = computed(() => {
 const toggle = () => {
   isExpanded.value = !isExpanded.value
 }
+
+const isPending = computed(() => props.pending === true)
 
 type ApprovalInfo =
   | { kind: 'required'; approvalId: string }
@@ -150,6 +154,21 @@ const formatMaybeJson = (raw: string): string => {
           <div class="flex items-center gap-2 text-xs text-surface-300">
             <span class="font-medium">{{ title }}</span>
             <span class="text-[11px] text-surface-500">{{ subtitle }}</span>
+            <span
+              v-if="isPending"
+              data-testid="tool-pending-badge"
+              class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 bg-surface-900/60 border border-surface-700/40 text-[11px] text-surface-200"
+            >
+              <Loader2 class="w-3 h-3 animate-spin text-primary-300" />
+              <span>执行中</span>
+              <span
+                v-if="typeof progressTokens === 'number'"
+                data-testid="tool-progress-tokens"
+                class="text-surface-400"
+              >
+                {{ progressTokens }} tokens
+              </span>
+            </span>
             <span
               v-if="message.tool?.toolCallId"
               class="text-surface-500 font-mono text-[11px] truncate max-w-[150px]"

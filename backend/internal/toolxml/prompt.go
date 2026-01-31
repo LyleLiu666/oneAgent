@@ -22,7 +22,7 @@ func SystemPrompt(defs []tool.Definition) string {
 	b.WriteString("你可以通过输出 XML 的 <tool_data>...</tool_data> 来调用工具。\n")
 	b.WriteString("当你需要调用工具时：只输出 <tool_data> 块（不要输出其它文本）。\n")
 	b.WriteString("同一步内需要调用多个工具：在一个 <tool_data> 里放多个 <call>...</call>。\n")
-	b.WriteString("重要：请小步、分段、多次调用；编辑/写入内容建议每段 ≤3000 字，避免一次性输出过长（可能超出 LLM 最大 token，导致工具调用失败）。\n")
+	b.WriteString("重要：请小步、分段、多次调用；编辑/写入内容建议每段 ≤6000 字（write_file 单次最多 200000 字，超出会失败且不会写入），避免一次性输出过长（可能超出 LLM 最大 token，导致工具调用失败）。\n")
 	b.WriteString("\n")
 	b.WriteString("XML 结构：\n")
 	b.WriteString("<tool_data>\n")

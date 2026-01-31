@@ -70,3 +70,13 @@ func TestGuardCommand_AllowsRedirectToDevNull(t *testing.T) {
 		t.Fatalf("expected dev/null redirect allowed, got %v", err)
 	}
 }
+
+func TestGuardCommand_AllowsGrepPatternWithSlashAndAngleBrackets(t *testing.T) {
+	root, err := ResolveBashRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveBashRoot: %v", err)
+	}
+	if err := GuardCommand(`grep -c "</html>" a.txt`, root); err != nil {
+		t.Fatalf("expected grep pattern allowed, got %v", err)
+	}
+}

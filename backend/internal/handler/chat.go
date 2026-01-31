@@ -47,6 +47,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
+	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
 	"github.com/liu_y/oneAgent/backend/internal/toolxml"
 )
 
@@ -1368,7 +1369,7 @@ func runToolLoop(
 	var combined strings.Builder
 	var persisted bool
 
-	const maxSteps = 20
+	maxSteps := toolcalling.ChatToolMaxSteps()
 	for step := 0; step < maxSteps; step++ {
 		stepStreamID := uuid.NewString()
 		broadcastMsg(broadcaster, streamMsg{
@@ -1569,6 +1570,7 @@ func runToolLoop(
 					if toolErr != nil {
 						var approvalRequired *tool.ApprovalRequiredError
 						var approvalDenied *tool.ApprovalDeniedError
+						var invalidArgs *tool.InvalidArgumentsError
 						if errors.As(toolErr, &approvalRequired) {
 							payload = map[string]any{
 								"error":             "approval_required",
@@ -1587,6 +1589,23 @@ func runToolLoop(
 								"scope_id":        approvalDenied.ScopeID,
 								"reason":          approvalDenied.Reason,
 								"arguments":       call.Function.Arguments,
+							}
+						} else if errors.As(toolErr, &invalidArgs) {
+							broadcaster.Broadcast(StreamEvent{
+								Type: "error",
+								Data: fmt.Sprintf("Tool %s invalid arguments: %v", call.Function.Name, toolErr),
+							})
+							recordToolFailure(sessionID, userID, resolved, call.Function.Name, call.ID, call.Function.Arguments, toolErr)
+
+							payload = map[string]any{
+								"error":            "invalid_arguments",
+								"invalid_args":     true,
+								"message":          strings.TrimSpace(toolErr.Error()),
+								"missing_fields":   invalidArgs.MissingFields,
+								"raw_arguments":    call.Function.Arguments,
+								"tool_call_id":     call.ID,
+								"tool_name":        call.Function.Name,
+								"tool_schema_hint": "Ensure all required fields are present and JSON is a single object.",
 							}
 						} else {
 							broadcaster.Broadcast(StreamEvent{
@@ -1757,8 +1776,8 @@ func runToolLoop(
 		}
 	}
 
-	recordToolFailure(sessionID, userID, resolved, "", "", "", fmt.Errorf("tool call limit reached"))
-	err := fmt.Errorf("tool call limit reached")
+	err := fmt.Errorf("tool call limit reached (max_steps=%d)", maxSteps)
+	recordToolFailure(sessionID, userID, resolved, "", "", "", err)
 	entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
 	entry.Error = err.Error()
 	entry.Complete()

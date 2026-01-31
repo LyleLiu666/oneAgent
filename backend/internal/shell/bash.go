@@ -977,9 +977,17 @@ func normalizePathToken(token, root string) (string, error) {
 
 	if idx := strings.Index(trimmed, "="); idx > 0 && strings.HasPrefix(trimmed, "-") {
 		suffix := trimmed[idx+1:]
-		if looksLikePath(suffix) {
+		if looksLikePath(suffix) || strings.Contains(suffix, "..") {
 			return normalizePathToken(suffix, root)
 		}
+		// Not a path-like flag value (e.g. grep patterns). Skip path normalization.
+		return "", nil
+	}
+
+	isCandidate := looksLikePath(trimmed) || strings.Contains(trimmed, "..")
+	if !isCandidate {
+		// Skip non-path tokens; GuardCommand validates expansions separately.
+		return "", nil
 	}
 
 	if (strings.Contains(trimmed, "/") || strings.Contains(trimmed, "..")) && !isPlainPathToken(trimmed) {
@@ -1008,10 +1016,21 @@ func looksLikePath(value string) bool {
 	if value == "" {
 		return false
 	}
+
+	// Absolute/home/relative paths.
 	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "~") {
 		return true
 	}
-	return strings.Contains(value, "/")
+
+	// Relative paths like "dir/file". Avoid treating obvious non-path tokens (e.g. "</html>") as paths.
+	if !strings.Contains(value, "/") {
+		return false
+	}
+	first := value[0]
+	if first >= 'a' && first <= 'z' || first >= 'A' && first <= 'Z' || first >= '0' && first <= '9' || first == '_' {
+		return true
+	}
+	return false
 }
 
 func isPlainPathToken(value string) bool {

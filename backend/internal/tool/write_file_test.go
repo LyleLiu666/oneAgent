@@ -125,7 +125,7 @@ func TestWriteFileTool_AppendsFile(t *testing.T) {
 	}
 }
 
-func TestWriteFileTool_TruncatesLargeContent(t *testing.T) {
+func TestWriteFileTool_RejectsLargeContentWithoutWrite(t *testing.T) {
 	root := t.TempDir()
 	prevCfg := config.AppConfig
 	config.AppConfig = &config.Config{}
@@ -137,39 +137,29 @@ func TestWriteFileTool_TruncatesLargeContent(t *testing.T) {
 		t.Fatalf("resolve workspace root: %v", err)
 	}
 
+	// Seed existing file to ensure we don't partially overwrite it on error.
+	initialRaw, _ := json.Marshal(map[string]any{
+		"filePath": "a.txt",
+		"content":  "old",
+	})
+	if _, err := runWriteFileTool(ctx, initialRaw); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
 	raw, _ := json.Marshal(map[string]any{
 		"filePath": "a.txt",
 		"content":  strings.Repeat("a", maxWriteFileRunesPerCall+10),
 	})
-	gotAny, err := runWriteFileTool(ctx, raw)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-	got, ok := gotAny.(writeFileResult)
-	if !ok {
-		t.Fatalf("expected writeFileResult, got %T", gotAny)
-	}
-	if !got.OK {
-		t.Fatalf("expected ok=true, got %+v", got)
-	}
-	if got.Mode != "overwrite" {
-		t.Fatalf("expected mode=%q, got %q", "overwrite", got.Mode)
-	}
-	if !got.Truncated || !got.ContinueAppend {
-		t.Fatalf("expected truncated + continue_append, got %+v", got)
-	}
-	if got.TotalBytes > int64(maxWriteFileRunesPerCall) {
-		t.Fatalf("expected total_bytes <= %d, got %d", maxWriteFileRunesPerCall, got.TotalBytes)
-	}
-	if got.TotalLines != 1 {
-		t.Fatalf("expected total_lines=%d, got %d", 1, got.TotalLines)
+	_, err = runWriteFileTool(ctx, raw)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 
 	content, err := os.ReadFile(filepath.Join(resolvedRoot, "a.txt"))
 	if err != nil {
 		t.Fatalf("read file: %v", err)
 	}
-	if runeCount(string(content)) > maxWriteFileRunesPerCall {
-		t.Fatalf("expected content <= %d runes, got %d", maxWriteFileRunesPerCall, runeCount(string(content)))
+	if string(content) != "old" {
+		t.Fatalf("expected file content to remain %q, got %q", "old", string(content))
 	}
 }

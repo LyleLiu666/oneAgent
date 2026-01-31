@@ -105,6 +105,8 @@ go run ./cmd/oneagent skills status --workspace "$(pwd)/.."          # 可用性
 | `ENABLE_TRACE` | 是否启用 trace | `false` |
 | `BASH_ROOT_DIR` | （可选）显式覆盖工具根目录（未设置时使用会话 workspace） | _unset_ |
 | `LOG_RETENTION_DAYS` | 日志保留天数 | `30` |
+| `ONEAGENT_CHAT_TOOL_MAX_STEPS` | chat 工具 loop 最大 steps（JSON tool calling + XML fallback） | `200` |
+| `ONEAGENT_CHAT_TOOL_MAX_STEPS_CAP` | chat 工具 loop steps 上限（强制 clamp） | `2000` |
 
 注意：`DATABASE_URL`（Postgres）在本地工具模式下不支持，设置后会拒绝启动。
 

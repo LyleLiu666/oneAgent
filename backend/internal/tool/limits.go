@@ -3,10 +3,12 @@ package tool
 import "unicode/utf8"
 
 const (
-	maxEditOpsPerCall          = 10
-	maxEditSnippetRunes        = 3000
-	maxEditTotalRunesPerCall   = 12000
-	maxWriteFileRunesPerCall   = 3000
+	maxEditOpsPerCall        = 10
+	maxEditSnippetRunes      = 3000
+	maxEditTotalRunesPerCall = 12000
+	// write_file is frequently used for generating HTML/markdown artifacts; keep this large enough
+	// to avoid excessive append loops under XML tool protocol, but still bounded for safety.
+	maxWriteFileRunesPerCall   = 200000
 	maxWriteFilePathRunesLimit = 512
 )
 

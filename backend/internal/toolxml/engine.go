@@ -10,6 +10,7 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
+	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
 )
 
 type FailureRecorder func(toolName, toolCallID, args string, err error)
@@ -73,7 +74,7 @@ func RunLoop(
 
 	var combined strings.Builder
 
-	const maxSteps = 20
+	maxSteps := toolcalling.ChatToolMaxSteps()
 	for step := 0; step < maxSteps; step++ {
 		if onStepStart != nil {
 			onStepStart(step)
@@ -293,6 +294,7 @@ func RunLoop(
 				}
 				var approvalRequired *tool.ApprovalRequiredError
 				var approvalDenied *tool.ApprovalDeniedError
+				var invalidArgs *tool.InvalidArgumentsError
 				if errors.As(handlerErr, &approvalRequired) {
 					payload = map[string]any{
 						"error":             "approval_required",
@@ -311,6 +313,17 @@ func RunLoop(
 						"scope_id":        approvalDenied.ScopeID,
 						"reason":          approvalDenied.Reason,
 						"arguments":       argsString,
+					}
+				} else if errors.As(handlerErr, &invalidArgs) {
+					payload = map[string]any{
+						"error":            "invalid_arguments",
+						"invalid_args":     true,
+						"message":          strings.TrimSpace(handlerErr.Error()),
+						"missing_fields":   invalidArgs.MissingFields,
+						"raw_arguments":    argsString,
+						"tool_call_id":     toolCallID,
+						"tool_name":        toolName,
+						"tool_schema_hint": "Ensure all required fields are present and XML fields are correctly filled.",
 					}
 				} else {
 					payload = map[string]string{
@@ -366,7 +379,7 @@ func RunLoop(
 		})
 	}
 
-	err := errors.New("xml tool call limit reached")
+	err := fmt.Errorf("xml tool call limit reached (max_steps=%d)", maxSteps)
 	if recordFailure != nil {
 		recordFailure("", "", "", err)
 	}

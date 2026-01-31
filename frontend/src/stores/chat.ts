@@ -54,6 +54,8 @@ export const useChatStore = defineStore(
         const messages = ref<ChatMessage[]>([])
         const isLoading = ref(false)
         const streamingContent = ref('')
+        // Latest known response token count from the streaming channel (best-effort).
+        const lastResponseTokens = ref<number | undefined>(undefined)
 
         // Getters
         const currentSession = computed(() =>
@@ -110,6 +112,10 @@ export const useChatStore = defineStore(
             isLoading.value = loading
         }
 
+        function setLastResponseTokens(tokens: number | undefined) {
+            lastResponseTokens.value = tokens
+        }
+
         function setStreamingContent(content: string) {
             streamingContent.value = content
         }
@@ -142,6 +148,7 @@ export const useChatStore = defineStore(
             messages,
             isLoading,
             streamingContent,
+            lastResponseTokens,
             currentSession,
             sortedSessions,
             setSessions,
@@ -153,6 +160,7 @@ export const useChatStore = defineStore(
             addMessage,
             updateLastMessage,
             setLoading,
+            setLastResponseTokens,
             setStreamingContent,
             appendStreamingContent,
             clearStreamingContent,

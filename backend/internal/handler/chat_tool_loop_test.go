@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -110,5 +111,195 @@ func TestRunToolLoop_SelfHeal_UnknownTool(t *testing.T) {
 	}
 	if !strings.Contains(last.Content, "unknown tool") {
 		t.Fatalf("expected unknown tool error payload, got %q", last.Content)
+	}
+}
+
+func TestRunToolLoop_StopsAfterMaxStepsEnvOverride(t *testing.T) {
+	t.Setenv("ONEAGENT_CHAT_TOOL_MAX_STEPS", "3")
+
+	defs, err := tool.Mount([]string{tool.ToolIDRunCommand})
+	if err != nil {
+		t.Fatalf("mount tools: %v", err)
+	}
+
+	client := &scriptedToolClient{
+		results: []llm.ChatCompletionResult{
+			{
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_0",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "does_not_exist",
+						Arguments: `{}`,
+					},
+				}},
+			},
+			{
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_1",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "does_not_exist",
+						Arguments: `{}`,
+					},
+				}},
+			},
+			{
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_2",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "does_not_exist",
+						Arguments: `{}`,
+					},
+				}},
+			},
+		},
+	}
+
+	sm := NewStreamManager()
+	broadcaster := sm.GetOrCreate("session-1")
+
+	store, err := sessionstore.New(filepath.Join(t.TempDir(), "sessions"))
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	if _, err := store.GetOrCreateSession("session-1", "user-1", ChatModule, "title"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, _, err = runToolLoop(
+		context.Background(),
+		client,
+		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
+		nil,
+		defs,
+		broadcaster,
+		"session-1",
+		"user-1",
+		nil,
+		"model-1",
+		false,
+		store,
+	)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "tool call limit reached") {
+		t.Fatalf("expected tool call limit reached error, got %v", err)
+	}
+	if client.index != 3 {
+		t.Fatalf("expected 3 llm calls, got %d", client.index)
+	}
+}
+
+func TestRunToolLoop_MapsInvalidArgumentsErrorToStructuredPayload(t *testing.T) {
+	defs := []tool.Definition{
+		{
+			ID: "dummy",
+			Spec: llm.Tool{
+				Type: "function",
+				Function: llm.ToolFunction{
+					Name:        "dummy",
+					Description: "dummy tool",
+					Parameters: map[string]any{
+						"type":                 "object",
+						"properties":           map[string]any{},
+						"required":             []string{},
+						"additionalProperties": false,
+					},
+				},
+			},
+			Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+				_ = ctx
+				_ = raw
+				return nil, &tool.InvalidArgumentsError{ToolName: "dummy", Message: "bad args"}
+			},
+		},
+	}
+
+	client := &scriptedToolClient{
+		results: []llm.ChatCompletionResult{
+			{
+				Content: "",
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_0",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "dummy",
+						Arguments: `{}`,
+					},
+				}},
+			},
+			{
+				Content:   "done",
+				ToolCalls: nil,
+			},
+		},
+	}
+
+	sm := NewStreamManager()
+	broadcaster := sm.GetOrCreate("session-1")
+
+	store, err := sessionstore.New(filepath.Join(t.TempDir(), "sessions"))
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	if _, err := store.GetOrCreateSession("session-1", "user-1", ChatModule, "title"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, _, err = runToolLoop(
+		context.Background(),
+		client,
+		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
+		nil,
+		defs,
+		broadcaster,
+		"session-1",
+		"user-1",
+		nil,
+		"model-1",
+		false,
+		store,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	_, msgs, err := store.GetSessionWithMessages("session-1", "user-1")
+	if err != nil {
+		t.Fatalf("GetSessionWithMessages: %v", err)
+	}
+
+	var found model.ChatMessage
+	for _, msg := range msgs {
+		if msg.Type == model.MessageTypeToolResult {
+			found = msg
+			break
+		}
+	}
+	if found.ID == 0 {
+		t.Fatalf("expected a tool result message")
+	}
+
+	payload, ok := parsePersistedToolResult(found.Content)
+	if !ok {
+		t.Fatalf("expected persisted tool result payload JSON, got: %q", found.Content)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(payload.Content), &decoded); err != nil {
+		t.Fatalf("expected tool result content to be json, got %v (%q)", err, payload.Content)
+	}
+	if decoded["error"] != "invalid_arguments" {
+		t.Fatalf("expected error=invalid_arguments, got %+v", decoded)
+	}
+	if decoded["invalid_args"] != true {
+		t.Fatalf("expected invalid_args=true, got %+v", decoded)
+	}
+	msg, _ := decoded["message"].(string)
+	if !strings.Contains(msg, "bad args") {
+		t.Fatalf("expected message to contain %q, got %q", "bad args", msg)
 	}
 }
