@@ -189,6 +189,7 @@ func ExtractCommands(command string) []string {
 
 // extractCommands returns the first token of each command segment.
 func extractCommands(command string) []string {
+	command = protectRedirectionAmpersands(command)
 	repl := strings.NewReplacer(
 		"&&", " && ",
 		"||", " || ",
@@ -226,6 +227,19 @@ func extractCommands(command string) []string {
 		expectCommand = false
 	}
 	return out
+}
+
+func protectRedirectionAmpersands(command string) string {
+	// Avoid treating `&` in common redirection forms (e.g., `2>&1`, `&>out.txt`) as a command separator.
+	//
+	// This is a best-effort lexical tweak for our command token extraction; it does not change execution.
+	const sentinel = "§"
+	return strings.NewReplacer(
+		"&>>", sentinel+">>",
+		"&>", sentinel+">",
+		">&", ">"+sentinel,
+		"<&", "<"+sentinel,
+	).Replace(command)
 }
 
 func isSeparatorToken(token string) bool {

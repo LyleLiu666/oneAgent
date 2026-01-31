@@ -77,6 +77,20 @@ func TestValidateCommand_Coding_AllowsRm(t *testing.T) {
 	}
 }
 
+func TestValidateCommand_Coding_AllowsFdRedirectionToStdout(t *testing.T) {
+	cases := []string{
+		"python3 -V 2>&1",
+		"echo hi 2>&1",
+		"python3 -m py_compile main.py 2>&1",
+		"echo A && python3 -V 2>&1",
+	}
+	for _, cmd := range cases {
+		if err := ValidateCommand("coding", cmd, nil); err != nil {
+			t.Fatalf("expected allow for %q, got %v", cmd, err)
+		}
+	}
+}
+
 func TestValidateCommand_Coding_DeniesSudo(t *testing.T) {
 	if err := ValidateCommand("coding", "sudo ls", nil); err == nil {
 		t.Fatalf("expected deny for sudo")
@@ -84,7 +98,7 @@ func TestValidateCommand_Coding_DeniesSudo(t *testing.T) {
 }
 
 func TestExtractCommands_SplitsCommandSegments(t *testing.T) {
-	got := ExtractCommands(`A=1 echo hi && rm -rf a | grep x; python -V`)
+	got := ExtractCommands(`A=1 echo hi 2>&1 && rm -rf a | grep x; python -V`)
 	want := []string{"echo", "rm", "grep", "python"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected tokens: got=%v want=%v", got, want)

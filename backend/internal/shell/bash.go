@@ -926,7 +926,7 @@ func validatePathWithinRoot(root, token string) error {
 
 	if !isWithinRoot(root, absPath) {
 		return &UnsafeCommandError{
-			Reason: fmt.Sprintf("path %q is outside bash root", token),
+			Reason: fmt.Sprintf("path %q is outside bash root (%s)", token, root),
 		}
 	}
 

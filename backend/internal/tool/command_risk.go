@@ -100,6 +100,7 @@ type commandSegment struct {
 func extractCommandSegments(command string) []commandSegment {
 	// Keep behavior in sync with permissions.ExtractCommands (best-effort), but preserve arguments
 	// so we can detect subcommand-style dangerous operations (e.g., `git reset`, `find -delete`).
+	command = protectRedirectionAmpersands(command)
 	repl := strings.NewReplacer(
 		"&&", " && ",
 		"||", " || ",
@@ -146,6 +147,17 @@ func extractCommandSegments(command string) []commandSegment {
 		out = append(out, current)
 	}
 	return out
+}
+
+func protectRedirectionAmpersands(command string) string {
+	// Avoid treating `&` in common redirection forms (e.g., `2>&1`, `&>out.txt`) as a command separator.
+	const sentinel = "§"
+	return strings.NewReplacer(
+		"&>>", sentinel+">>",
+		"&>", sentinel+">",
+		">&", ">"+sentinel,
+		"<&", "<"+sentinel,
+	).Replace(command)
 }
 
 func normalizeCommandToken(raw string) string {
