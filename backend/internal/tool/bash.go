@@ -72,7 +72,7 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	mode, err := shell.ParseSandboxMode(SandboxMode(dec, "none"))
+	mode, err := commandToolSandboxMode(dec)
 	if err != nil {
 		return nil, err
 	}

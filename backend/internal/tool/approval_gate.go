@@ -217,7 +217,7 @@ func commandCallWouldBeDenied(ctx context.Context, dec permissions.Decision, com
 	if strings.TrimSpace(command) == "" {
 		return true
 	}
-	mode, err := shell.ParseSandboxMode(SandboxMode(dec, "none"))
+	mode, err := commandToolSandboxMode(dec)
 	if err != nil {
 		return true
 	}
