@@ -20,17 +20,28 @@ func TestValidateCommand_Readonly_DeniesRedirection(t *testing.T) {
 	}
 }
 
-func TestValidateCommand_Dev_DeniesInterpretersInChains(t *testing.T) {
+func TestValidateCommand_Dev_AllowsCommonDevCommands(t *testing.T) {
 	cases := []string{
-		"echo A; python -V",
-		"echo A;python -V",
-		"echo A && python -V",
-		"echo A || python -V",
-		"echo A | python -V",
+		"git status",
+		"git diff --name-only",
+		"find . -name \"*.go\"",
+		"go test ./...",
+		"gofmt -w .",
+		"python -V",
+		"python3 -V 2>&1",
+		"pip -V",
+		"pytest -q",
+		"node -v",
+		"npm test",
+		"npx -v",
+		"pnpm -v",
+		"yarn -v",
+		"cargo init --name epub_reader",
+		"make test",
 	}
 	for _, cmd := range cases {
-		if err := ValidateCommand("dev", cmd, nil); err == nil {
-			t.Fatalf("expected deny for %q", cmd)
+		if err := ValidateCommand("dev", cmd, nil); err != nil {
+			t.Fatalf("expected allow for %q, got %v", cmd, err)
 		}
 	}
 }
@@ -93,6 +104,12 @@ func TestValidateCommand_Coding_AllowsFdRedirectionToStdout(t *testing.T) {
 
 func TestValidateCommand_Coding_DeniesSudo(t *testing.T) {
 	if err := ValidateCommand("coding", "sudo ls", nil); err == nil {
+		t.Fatalf("expected deny for sudo")
+	}
+}
+
+func TestValidateCommand_Dev_DeniesSudo(t *testing.T) {
+	if err := ValidateCommand("dev", "sudo ls", nil); err == nil {
 		t.Fatalf("expected deny for sudo")
 	}
 }

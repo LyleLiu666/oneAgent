@@ -24,3 +24,30 @@ func TestParseToolData_UnclosedCDATA_StripsPrefix(t *testing.T) {
 		t.Fatalf("expected command %q, got %q", "ls -la", got)
 	}
 }
+
+func TestParseToolData_ToleratesToolNameClosingTagTypo(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>write_file</toolName>
+    <filePath>a.txt</filePath>
+    <content>hi</content>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "write_file" {
+		t.Fatalf("expected tool 'write_file', got %q", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["filePath"]; got != "a.txt" {
+		t.Fatalf("expected filePath %q, got %q", "a.txt", got)
+	}
+	if got := calls[0].Fields["content"]; got != "hi" {
+		t.Fatalf("expected content %q, got %q", "hi", got)
+	}
+}

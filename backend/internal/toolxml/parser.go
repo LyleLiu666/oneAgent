@@ -108,7 +108,7 @@ func ParseToolData(toolDataBlock string) ([]Call, error) {
 func parseCall(callInner string, raw string) (Call, error) {
 	fields := map[string]string{}
 
-	toolName, ok := firstTagValue(callInner, []string{"tool_name", "tool", "name"})
+	toolName, ok := firstTagValueLoose(callInner, []string{"tool_name", "toolName", "tool", "name"})
 	if !ok {
 		return Call{}, errors.New("missing <tool_name>")
 	}
@@ -316,6 +316,15 @@ func firstTagValue(input string, tags []string) (string, bool) {
 	return "", false
 }
 
+func firstTagValueLoose(input string, tags []string) (string, bool) {
+	for _, open := range tags {
+		if v, ok := tagValueWithAnyClose(input, open, tags); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 func tagValue(input, tag string) (string, bool) {
 	re, err := regexp.Compile(fmt.Sprintf(`(?is)<%s\b[^>]*>(.*?)</%s>`, regexp.QuoteMeta(tag), regexp.QuoteMeta(tag)))
 	if err != nil {
@@ -337,6 +346,53 @@ func tagValue(input, tag string) (string, bool) {
 		} else {
 			// Be tolerant of malformed CDATA blocks so tool calls don't
 			// accidentally pass a leading "<" into downstream tools.
+			value = value[len("<![CDATA["):]
+		}
+	}
+
+	value = html.UnescapeString(value)
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return value, true
+}
+
+func tagValueWithAnyClose(input string, openTag string, closeTags []string) (string, bool) {
+	openRe, err := regexp.Compile(fmt.Sprintf(`(?is)<%s\b[^>]*>`, regexp.QuoteMeta(openTag)))
+	if err != nil {
+		return "", false
+	}
+	loc := openRe.FindStringIndex(input)
+	if len(loc) != 2 {
+		return "", false
+	}
+	start := loc[1]
+
+	rest := input[start:]
+	minEnd := -1
+	for _, closeTag := range closeTags {
+		closeRe, err := regexp.Compile(fmt.Sprintf(`(?is)</%s>`, regexp.QuoteMeta(closeTag)))
+		if err != nil {
+			continue
+		}
+		if matchLoc := closeRe.FindStringIndex(rest); len(matchLoc) == 2 {
+			if minEnd == -1 || matchLoc[0] < minEnd {
+				minEnd = matchLoc[0]
+			}
+		}
+	}
+	if minEnd < 0 {
+		return "", false
+	}
+
+	value := strings.TrimSpace(rest[:minEnd])
+	if value == "" {
+		return "", true
+	}
+
+	// CDATA support.
+	if strings.HasPrefix(value, "<![CDATA[") {
+		if end := strings.Index(value, "]]>"); end != -1 {
+			value = value[len("<![CDATA["):end]
+		} else {
 			value = value[len("<![CDATA["):]
 		}
 	}

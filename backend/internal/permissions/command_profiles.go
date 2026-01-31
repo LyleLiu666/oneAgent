@@ -61,6 +61,7 @@ func AllowedCommands(profile string) map[string]struct{} {
 		}
 	case "dev":
 		return map[string]struct{}{
+			// Baseline (common utils).
 			"cd":    {},
 			"ls":    {},
 			"cat":   {},
@@ -75,12 +76,43 @@ func AllowedCommands(profile string) map[string]struct{} {
 			"uniq":  {},
 			"sed":   {},
 			"awk":   {},
+			"sleep": {},
+
+			// File operations (sandboxed/root-guarded).
 			"cp":    {},
 			"mv":    {},
 			"mkdir": {},
 			"rm":    {},
 			"touch": {},
-			"sleep": {},
+
+			// Developer essentials.
+			"find": {},
+			"git":  {},
+
+			// Go.
+			"go":    {},
+			"gofmt": {},
+
+			// Python.
+			"python":  {},
+			"python3": {},
+			"pip":     {},
+			"pip3":    {},
+			"pytest":  {},
+
+			// Node.
+			"node": {},
+			"npm":  {},
+			"npx":  {},
+			"pnpm": {},
+			"yarn": {},
+
+			// Build tools (best-effort).
+			"make":    {},
+			"cmake":   {},
+			"cargo":   {},
+			"rustc":   {},
+			"rustfmt": {},
 		}
 	case "coding":
 		return map[string]struct{}{
@@ -124,13 +156,16 @@ func AllowedCommands(profile string) map[string]struct{} {
 			// Node.
 			"node": {},
 			"npm":  {},
+			"npx":  {},
 			"pnpm": {},
 			"yarn": {},
 
 			// Build tools (best-effort).
-			"make":  {},
-			"cmake": {},
-			"cargo": {},
+			"make":    {},
+			"cmake":   {},
+			"cargo":   {},
+			"rustc":   {},
+			"rustfmt": {},
 		}
 	default:
 		return map[string]struct{}{

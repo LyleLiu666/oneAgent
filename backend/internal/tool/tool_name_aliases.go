@@ -10,8 +10,11 @@ var legacyToolNameAliases = map[string]string{
 	"document.export": "document_export",
 
 	// Compatibility with common agent tool names.
-	"read":  "read_file",
-	"write": "write_file",
+	"read":           "read_file",
+	"read_from_file": "read_file",
+	"view_file":      "read_file",
+	"write":          "write_file",
+	"write_to_file":  "write_file",
 
 	// Code intelligence (LSP).
 	"lsp.definition":     "lsp_definition",
