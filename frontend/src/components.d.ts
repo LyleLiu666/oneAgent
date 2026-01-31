@@ -19,5 +19,7 @@ declare module 'vue' {
     ToolMessage: typeof import('./components/ToolMessage.vue')['default']
     TraceLog: typeof import('./components/TraceLog.vue')['default']
     Welcome: typeof import('./components/Welcome.vue')['default']
+    WorkflowGraphEditor: typeof import('./components/WorkflowGraphEditor.vue')['default']
+    WorkflowRunNodes: typeof import('./components/WorkflowRunNodes.vue')['default']
   }
 }

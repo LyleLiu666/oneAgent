@@ -44,6 +44,7 @@ func AllowedCommands(profile string) map[string]struct{} {
 			"cp":    {},
 			"mv":    {},
 			"mkdir": {},
+			"rm":    {},
 			"touch": {},
 			"sleep": {},
 		}
@@ -67,6 +68,7 @@ func AllowedCommands(profile string) map[string]struct{} {
 			"cp":    {},
 			"mv":    {},
 			"mkdir": {},
+			"rm":    {},
 			"touch": {},
 			"sleep": {},
 

@@ -41,6 +41,12 @@ func TestValidateCommand_Dev_AllowsCd(t *testing.T) {
 	}
 }
 
+func TestValidateCommand_Dev_AllowsRm(t *testing.T) {
+	if err := ValidateCommand("dev", "rm -rf ./tmp", nil); err != nil {
+		t.Fatalf("expected allow, got %v", err)
+	}
+}
+
 func TestValidateCommand_Coding_AllowsCommonDevCommands(t *testing.T) {
 	cases := []string{
 		"git status",
@@ -62,6 +68,12 @@ func TestValidateCommand_Coding_AllowsCommonDevCommands(t *testing.T) {
 		if err := ValidateCommand("coding", cmd, nil); err != nil {
 			t.Fatalf("expected allow for %q, got %v", cmd, err)
 		}
+	}
+}
+
+func TestValidateCommand_Coding_AllowsRm(t *testing.T) {
+	if err := ValidateCommand("coding", "rm -rf ./tmp", nil); err != nil {
+		t.Fatalf("expected allow, got %v", err)
 	}
 }
 

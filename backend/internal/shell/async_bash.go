@@ -323,14 +323,11 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		return "", err
 	}
 
-	mode := strings.ToLower(strings.TrimSpace(sandboxMode))
-	if mode == "" {
-		mode = "none"
+	mode, err := ParseSandboxMode(sandboxMode)
+	if err != nil {
+		return "", err
 	}
-	if mode != "none" && mode != "docker" {
-		return "", fmt.Errorf("unsupported sandbox_mode: %s", mode)
-	}
-	if mode == "docker" {
+	if mode == SandboxModeDocker {
 		if err := rejectAbsolutePathsForDocker(trimmed); err != nil {
 			return "", err
 		}
@@ -340,21 +337,23 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		return "", err
 	}
 
-	shellPath := ""
 	var dockerPath string
-	if mode == "docker" {
+	shellName := ""
+	if mode == SandboxModeDocker {
 		got, err := ensureDockerAvailable()
 		if err != nil {
 			return "", err
 		}
 		dockerPath = got
-		shellPath = "docker"
+		shellName = "docker"
+	} else if mode == SandboxModeNative {
+		shellName = "native"
 	} else {
 		got, err := ResolveBashPath()
 		if err != nil {
 			return "", err
 		}
-		shellPath = got
+		shellName = got
 	}
 
 	if maxRuntime <= 0 {
@@ -376,7 +375,7 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 	}
 
 	var cmd *exec.Cmd
-	if mode == "docker" {
+	if mode == SandboxModeDocker {
 		args := []string{
 			"run",
 			"--rm",
@@ -393,8 +392,15 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		cmd = exec.Command(dockerPath, args...)
 		cmd.Dir = root
 		cmd.Env = os.Environ()
+		setupCmdForProcessGroup(cmd)
+	} else if mode == SandboxModeNative {
+		cmd, _, err = newNativeBashCommand(trimmed, root, tmpDir, jobDir)
+		if err != nil {
+			_ = os.RemoveAll(jobDir)
+			return "", err
+		}
 	} else {
-		cmd = exec.Command(shellPath, "--noprofile", "--norc", "-lc", trimmed)
+		cmd = exec.Command(shellName, "--noprofile", "--norc", "-lc", trimmed)
 		cmd.Dir = root
 		cmd.Env = mergeEnv(os.Environ(), map[string]string{
 			"HOME":          root,
@@ -405,8 +411,8 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 			"TEMP":          tmpDir,
 			"BASH_ENV":      "",
 		})
+		setupCmdForProcessGroup(cmd)
 	}
-	setupCmdForProcessGroup(cmd)
 
 	notifyCh := make(chan struct{}, 1)
 	stdoutLog, err := newRingLog(filepath.Join(jobDir, "stdout.log"), asyncLogCapacityBytes, notifyCh)
@@ -434,8 +440,8 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 	job := &asyncBashJob{
 		id:         jobID,
 		command:    trimmed,
-		shell:      shellPath,
-		sandbox:    mode,
+		shell:      shellName,
+		sandbox:    string(mode),
 		startedAt:  time.Now(),
 		maxRuntime: maxRuntime,
 		cmd:        cmd,

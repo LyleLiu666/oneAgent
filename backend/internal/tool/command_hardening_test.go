@@ -3,6 +3,9 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +113,7 @@ func TestBashTool_CodingProfile_NoSandbox_FailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "coding profile requires sandbox_mode=docker") {
+	if !strings.Contains(err.Error(), "coding profile requires sandbox_mode=docker|native") {
 		t.Fatalf("expected docker-only rejection, got %q", err.Error())
 	}
 }
@@ -147,7 +150,51 @@ func TestRunCommandTool_CodingProfile_NoSandbox_FailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "coding profile requires sandbox_mode=docker") {
+	if !strings.Contains(err.Error(), "coding profile requires sandbox_mode=docker|native") {
 		t.Fatalf("expected docker-only rejection, got %q", err.Error())
+	}
+}
+
+func TestBashTool_CodingProfile_NativeSandbox_AllowsInRootDelete(t *testing.T) {
+	policy := permissions.Policy{
+		ID:            "p1",
+		DefaultEffect: permissions.EffectDeny,
+		Rules: []permissions.Rule{
+			{
+				ID:     "allow-bash",
+				Effect: permissions.EffectAllow,
+				ToolID: ToolIDBash,
+				Constraints: permissions.Constraints{
+					CommandProfile: "coding",
+					SandboxMode:    "native",
+				},
+			},
+		},
+	}
+	snap := permissions.ResolveSnapshot("alice", policy, time.Now())
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	ctx = ContextWithPolicySnapshot(ctx, snap)
+
+	raw, _ := json.Marshal(map[string]any{
+		"command": "rm -rf ./tmp",
+	})
+	anyRes, err := runBashTool(ctx, raw)
+	if err != nil {
+		t.Fatalf("expected allow, got %v", err)
+	}
+	res, ok := anyRes.(BashToolResult)
+	if !ok {
+		t.Fatalf("expected BashToolResult, got %T", anyRes)
+	}
+	if strings.TrimSpace(res.SandboxMode) != "native" {
+		t.Fatalf("expected sandbox_mode=native, got %q", res.SandboxMode)
+	}
+	if _, err := os.Stat(filepath.Join(root, "tmp")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected tmp deleted, stat err=%v", err)
 	}
 }

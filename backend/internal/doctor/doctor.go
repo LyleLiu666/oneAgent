@@ -132,6 +132,9 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 		checkBinary(lookPath, "ffmpeg", false),
 		checkBinary(lookPath, "wkhtmltopdf", false),
 	)
+	if stdruntime.GOOS == "darwin" {
+		report.Checks = append(report.Checks, checkBinary(lookPath, "sandbox-exec", false))
+	}
 
 	for i := range report.Checks {
 		if report.Checks[i].Available {
@@ -169,6 +172,11 @@ func checkBinary(lookPath LookPathFunc, name string, required bool) BinaryCheck 
 
 func installHint(binary string) string {
 	switch strings.TrimSpace(binary) {
+	case "sandbox-exec":
+		if stdruntime.GOOS == "darwin" {
+			return "sandbox-exec is part of macOS (/usr/bin/sandbox-exec)"
+		}
+		return "native sandbox is not available on this OS"
 	case "gopls":
 		return "go install golang.org/x/tools/gopls@latest"
 	case "typescript-language-server":

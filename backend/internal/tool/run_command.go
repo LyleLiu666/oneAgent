@@ -148,20 +148,17 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		mode := strings.ToLower(strings.TrimSpace(SandboxMode(dec, "none")))
-		if mode == "" {
-			mode = "none"
-		}
-		if mode != "none" && mode != "docker" {
-			return nil, errors.New("unsupported sandbox_mode (expected none|docker)")
+		mode, err := shell.ParseSandboxMode(SandboxMode(dec, "none"))
+		if err != nil {
+			return nil, err
 		}
 		profile := CommandProfile(dec, "dev")
 		requestedProfile := strings.ToLower(strings.TrimSpace(profile))
-		if requestedProfile == "coding" && mode != "docker" {
-			return nil, fmt.Errorf("coding profile requires sandbox_mode=docker (got %s)", mode)
+		if requestedProfile == "coding" && !mode.IsHardBoundary() {
+			return nil, fmt.Errorf("coding profile requires sandbox_mode=docker|native (got %s)", mode)
 		}
 		allowlist := dec.Constraints.Allowlist
-		if mode == "none" {
+		if mode == shell.SandboxModeNone {
 			// Safety invariant: without a hard sandbox boundary, command tools MUST degrade to readonly.
 			profile = "readonly"
 			allowlist = nil
@@ -174,7 +171,7 @@ func runCommandTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		maxRuntime := time.Duration(req.MaxRuntimeSeconds) * time.Second
-		jobID, err := shell.StartBashAsyncWithSandbox(command, maxRuntime, root, mode)
+		jobID, err := shell.StartBashAsyncWithSandbox(command, maxRuntime, root, string(mode))
 		if err != nil {
 			return nil, err
 		}

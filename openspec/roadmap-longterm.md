@@ -1,6 +1,6 @@
 # oneAgent Roadmap（愿景 → 支柱 → 路线图 / Backlog）
 
-更新时间：2026-01-30
+更新时间：2026-01-31
 
 目的：把「我们要做什么、为什么做、先做什么、做完如何验收」固化成一份长期可执行文档。  
 原则：**没有文档就没有执行**；每完成一项工作，必须回到愿景做一次对照检查（Simple/Beautiful/Progressive + Evidence）。
@@ -13,16 +13,20 @@
 
 ---
 
-## 0) 状态快照（Done / Doing / Next）
+## 0) 状态快照（Doing / Complete / Archived / Next）
 
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
 - `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除、不断网）
 - `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
-- `add-trash-file-tool`：软删除（回收站）工具（已实现，待归档）
 
-### 0.2 Done（已交付，且已归档到 `openspec/changes/archive/`）
+### 0.2 Complete（已完成，待归档到 `openspec/changes/archive/`）
+- `add-trash-file-tool`：软删除（回收站）工具（move-to-trash + 7 天保留清理）
+- `update-tool-loop-limits-and-write-file-no-truncate`：tool loop 上限提升 + `write_file` 超限 fail-fast
+- `update-chat-ux-tool-progress-indicator`：秘书模式下工具执行进度提示
+
+### 0.3 Archived（已交付，且已归档到 `openspec/changes/archive/`）
 - [x] `add-project-scripts`
 - [x] `add-diff-review-loop`
 - [x] `add-observer-remediation-loop`
@@ -34,8 +38,7 @@
 - [x] `add-skill-governance-edit`
 - [x] `add-sidebar-ledger-status-badges`
 
-### 0.3 Next（未拆 Spec：需要先建 OpenSpec change）
-- [ ] 工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate 验收（含评分与证据）
+### 0.4 Next（未拆 Spec：需要先建 OpenSpec change）
 - [ ] Digest/通知/批处理的体验增强（收割、聚合、失败聚类、批量 follow-up）
 - [ ] 多 workspace 队列策略、资源治理、自动化（排队策略/资源限制/日程化）
 - [ ] SOP/skills 的自动学习管线、强制证据、去重合并、过时淘汰

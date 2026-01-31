@@ -13,10 +13,10 @@
 - [x] 2.8 API tests: workflows + runs basics
 
 ## 3. Frontend (MVP)
-- [ ] 3.1 Workflow list/create/rename/delete (workspace-scoped)
-- [ ] 3.2 Workflow editor (table-first): nodes/edges/config + version publish
-- [ ] 3.3 Workflow run view: per-node status + events/log waterfall + artifact pointers
-- [ ] 3.4 Frontend tests: editor basics + run status rendering
+- [x] 3.1 Workflow list/create/rename/delete (workspace-scoped)
+- [x] 3.2 Workflow editor (table-first): nodes/edges/config + version publish
+- [x] 3.3 Workflow run view: per-node status + events/log waterfall + artifact pointers
+- [x] 3.4 Frontend tests: editor basics + run status rendering
 
 ## 4. Validation
 - [x] 4.1 `cd backend && go test ./...`

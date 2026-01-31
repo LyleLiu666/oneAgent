@@ -577,6 +577,164 @@ export async function postTaskAttemptReviewComment(
 }
 
 // ============================================================================
+// Workflows (orchestration graph, workspace-scoped)
+// ============================================================================
+
+export interface Workflow {
+  workflow_id: string;
+  workspace_root: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowGraphNode {
+  node_id: string;
+  title?: string;
+  prompt?: string;
+}
+
+export interface WorkflowGraphEdge {
+  from: string;
+  to: string;
+}
+
+export interface WorkflowGraph {
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+}
+
+export interface WorkflowVersion {
+  version_id: string;
+  workflow_id: string;
+  published: boolean;
+  published_at?: string;
+  graph: WorkflowGraph;
+  created_at: string;
+}
+
+export interface WorkflowArtifact {
+  path: string;
+  kind?: string;
+}
+
+export interface WorkflowArtifactManifest {
+  artifacts: WorkflowArtifact[];
+}
+
+export interface WorkflowNodeRun {
+  node_id: string;
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  artifacts?: WorkflowArtifactManifest;
+  hard_gate_report_path?: string;
+  soft_gate_report_path?: string;
+}
+
+export interface WorkflowRun {
+  run_id: string;
+  workflow_id: string;
+  version_id: string;
+  workspace_root: string;
+  graph_snapshot: WorkflowGraph;
+  inputs?: Record<string, any>;
+  node_runs?: Record<string, WorkflowNodeRun>;
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listWorkflows(workspace: string): Promise<Workflow[]> {
+  const qs = new URLSearchParams({ workspace });
+  return api(`/api/workflows?${qs.toString()}`);
+}
+
+export async function createWorkflow(payload: {
+  workspace_root: string;
+  name: string;
+}): Promise<Workflow> {
+  return api("/api/workflows", { method: "POST", body: payload });
+}
+
+export async function renameWorkflow(
+  workflowId: string,
+  payload: { workspace_root: string; name: string },
+): Promise<Workflow> {
+  return api(`/api/workflows/${encodeURIComponent(workflowId)}`, {
+    method: "PATCH",
+    body: payload,
+  });
+}
+
+export async function deleteWorkflow(
+  workflowId: string,
+  workspace: string,
+): Promise<{ ok: boolean }> {
+  const qs = new URLSearchParams({ workspace });
+  return api(`/api/workflows/${encodeURIComponent(workflowId)}?${qs.toString()}`, {
+    method: "DELETE",
+  });
+}
+
+export async function publishWorkflowVersion(
+  workflowId: string,
+  payload: { workspace_root: string; graph: WorkflowGraph },
+): Promise<WorkflowVersion> {
+  return api(`/api/workflows/${encodeURIComponent(workflowId)}/publish`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function createWorkflowRun(
+  workflowId: string,
+  payload: { workspace_root: string; version_id: string; inputs?: Record<string, any> },
+): Promise<WorkflowRun> {
+  return api(`/api/workflows/${encodeURIComponent(workflowId)}/runs`, {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function getWorkflowRun(
+  workflowId: string,
+  runId: string,
+  workspace: string,
+): Promise<WorkflowRun> {
+  const qs = new URLSearchParams({ workspace });
+  return api(
+    `/api/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}?${qs.toString()}`,
+  );
+}
+
+export async function executeWorkflowRun(
+  workflowId: string,
+  runId: string,
+  payload: { workspace_root: string; concurrency?: number },
+): Promise<WorkflowRun> {
+  return api(
+    `/api/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/execute`,
+    { method: "POST", body: payload },
+  );
+}
+
+export async function cancelWorkflowRun(
+  workflowId: string,
+  runId: string,
+  payload: { workspace_root: string; reason?: string },
+): Promise<WorkflowRun> {
+  return api(
+    `/api/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST", body: payload },
+  );
+}
+
+// ============================================================================
 // Tool permissions (admin)
 // ============================================================================
 

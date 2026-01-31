@@ -41,6 +41,18 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: "/workflows",
+    name: "Workflows",
+    component: () => import("@/views/Workflows.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/workflows/:id/runs/:runId",
+    name: "Workflow Run",
+    component: () => import("@/views/WorkflowRun.vue"),
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/governance/sop",
     name: "SOP Governance",
     component: () => import("@/views/SopGovernance.vue"),

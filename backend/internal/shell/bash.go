@@ -299,7 +299,6 @@ var blockedCommands = map[string]struct{}{
 	"toybox":  {},
 
 	// File mutation utilities.
-	"rm":       {},
 	"rmdir":    {},
 	"unlink":   {},
 	"mv":       {},
@@ -388,6 +387,9 @@ func guardCommandWithSeen(command string, root string, seen map[string]struct{})
 
 	expectCommand := true
 	pendingRedirect := false
+	pendingCdTarget := false
+	inRm := false
+	rmOptionsTerminated := false
 	for _, token := range tokens {
 		if token.unsafeExpansion {
 			return &UnsafeCommandError{
@@ -402,6 +404,9 @@ func guardCommandWithSeen(command string, root string, seen map[string]struct{})
 		switch token.kind {
 		case tokenOperator:
 			expectCommand = true
+			pendingCdTarget = false
+			inRm = false
+			rmOptionsTerminated = false
 			continue
 		case tokenRedirection:
 			if pendingRedirect {
@@ -424,11 +429,30 @@ func guardCommandWithSeen(command string, root string, seen map[string]struct{})
 			continue
 		}
 
+		if pendingCdTarget {
+			if err := validateCdTargetWithinRoot(root, token.value); err != nil {
+				return err
+			}
+			pendingCdTarget = false
+			// cd target is already validated; don't double-check as a generic path token.
+			continue
+		}
+
+		if inRm {
+			if err := validateRmFlags(token.value, &rmOptionsTerminated); err != nil {
+				return err
+			}
+		}
+
 		if expectCommand {
 			if !isAssignmentToken(token.value) {
 				if err := checkCommandAllowed(token.value, root, seen); err != nil {
 					return err
 				}
+				lower := strings.ToLower(filepath.Base(strings.TrimSpace(token.value)))
+				pendingCdTarget = lower == "cd"
+				inRm = lower == "rm"
+				rmOptionsTerminated = false
 				expectCommand = false
 			}
 		}
@@ -442,6 +466,49 @@ func guardCommandWithSeen(command string, root string, seen map[string]struct{})
 		return &UnsafeCommandError{Reason: "redirect target missing"}
 	}
 
+	return nil
+}
+
+func validateCdTargetWithinRoot(root, raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		// `cd` with no args uses $HOME (which we set to root); safe.
+		return nil
+	}
+	if strings.HasPrefix(value, "-") {
+		return &UnsafeCommandError{Reason: "cd flags are not allowed in bash sandbox"}
+	}
+	if looksLikePath(value) || strings.Contains(value, "..") {
+		return validatePathWithinRoot(root, value)
+	}
+	return validatePathWithinRoot(root, "./"+value)
+}
+
+func validateRmFlags(raw string, optionsTerminated *bool) error {
+	if optionsTerminated != nil && *optionsTerminated {
+		return nil
+	}
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return nil
+	}
+	if value == "--" {
+		if optionsTerminated != nil {
+			*optionsTerminated = true
+		}
+		return nil
+	}
+	if strings.HasPrefix(value, "--") {
+		if value == "--dereference" || strings.HasPrefix(value, "--dereference=") {
+			return &UnsafeCommandError{Reason: "rm dereference flags are not allowed in bash sandbox"}
+		}
+		return nil
+	}
+	if strings.HasPrefix(value, "-") && len(value) > 1 {
+		if strings.ContainsRune(value[1:], 'L') {
+			return &UnsafeCommandError{Reason: "rm dereference flags are not allowed in bash sandbox"}
+		}
+	}
 	return nil
 }
 
