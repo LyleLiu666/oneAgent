@@ -1,6 +1,10 @@
 package permissions
 
-import "testing"
+import (
+	"os/exec"
+	"runtime"
+	"testing"
+)
 
 func TestEvaluate_DenyOverridesAllow(t *testing.T) {
 	policy := Policy{
@@ -32,3 +36,29 @@ func TestEvaluate_DefaultAllow(t *testing.T) {
 	}
 }
 
+func TestDefaultPolicy_CommandTools_UsesCodingOnDarwinWhenNativeSandboxAvailable(t *testing.T) {
+	want := "dev"
+	if runtime.GOOS == "darwin" {
+		if _, err := exec.LookPath("sandbox-exec"); err == nil {
+			want = "coding"
+		}
+	}
+
+	policy := DefaultPolicy()
+	var gotBash, gotRun string
+	for _, rule := range policy.Rules {
+		switch rule.ToolID {
+		case "bash":
+			gotBash = rule.Constraints.CommandProfile
+		case "run_command":
+			gotRun = rule.Constraints.CommandProfile
+		}
+	}
+
+	if gotBash != want {
+		t.Fatalf("bash command_profile=%q want=%q", gotBash, want)
+	}
+	if gotRun != want {
+		t.Fatalf("run_command command_profile=%q want=%q", gotRun, want)
+	}
+}

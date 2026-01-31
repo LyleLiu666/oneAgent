@@ -139,3 +139,23 @@ func TestGuardCommand_RejectsCdSymlinkOutsideRoot(t *testing.T) {
 		t.Fatalf("expected outside root error, got %q", err.Error())
 	}
 }
+
+func TestGuardCommand_AllowsCargoInitInsideRoot(t *testing.T) {
+	root, err := ResolveBashRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveBashRoot: %v", err)
+	}
+	if err := GuardCommand("cargo init --name epub_reader", root); err != nil {
+		t.Fatalf("expected cargo init allowed, got %v", err)
+	}
+}
+
+func TestGuardCommand_AllowsGitStatusInsideRoot(t *testing.T) {
+	root, err := ResolveBashRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveBashRoot: %v", err)
+	}
+	if err := GuardCommand("git status", root); err != nil {
+		t.Fatalf("expected git status allowed, got %v", err)
+	}
+}

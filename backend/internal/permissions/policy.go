@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -54,17 +56,18 @@ type Snapshot struct {
 }
 
 func DefaultPolicy() Policy {
+	cmdProfile := defaultCommandProfileForCommandTools()
 	return Policy{
 		ID:                "default",
 		DefaultEffect:     EffectAllow,
-		DefaultCmdProfile: "dev",
+		DefaultCmdProfile: cmdProfile,
 		Rules: []Rule{
 			{
 				ID:     "bash-default",
 				Effect: EffectAllow,
 				ToolID: "bash",
 				Constraints: Constraints{
-					CommandProfile: "dev",
+					CommandProfile: cmdProfile,
 					Approval:       "high_risk",
 				},
 			},
@@ -73,12 +76,24 @@ func DefaultPolicy() Policy {
 				Effect: EffectAllow,
 				ToolID: "run_command",
 				Constraints: Constraints{
-					CommandProfile: "dev",
+					CommandProfile: cmdProfile,
 					Approval:       "high_risk",
 				},
 			},
 		},
 	}
+}
+
+func defaultCommandProfileForCommandTools() string {
+	// Prefer a more capable profile on macOS when a hard boundary is available out-of-the-box.
+	//
+	// On other OSes, native sandboxing may not be implemented yet; keep a conservative default.
+	if runtime.GOOS == "darwin" {
+		if _, err := exec.LookPath("sandbox-exec"); err == nil {
+			return "coding"
+		}
+	}
+	return "dev"
 }
 
 func ResolveSnapshot(principalID string, policy Policy, now time.Time) Snapshot {
