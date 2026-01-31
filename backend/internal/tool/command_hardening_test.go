@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -196,5 +197,48 @@ func TestBashTool_CodingProfile_NativeSandbox_AllowsInRootDelete(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "tmp")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected tmp deleted, stat err=%v", err)
+	}
+}
+
+func TestBashTool_SystemInstall_NoSandbox_DoesNotDegradeToReadonly(t *testing.T) {
+	// This is best-effort: Windows might not have bash in PATH in our environment.
+	if runtime.GOOS == "windows" {
+		t.Skip("bash sandbox not supported on windows in tests")
+	}
+
+	policy := permissions.Policy{
+		ID:            "p1",
+		DefaultEffect: permissions.EffectDeny,
+		Rules: []permissions.Rule{
+			{
+				ID:     "allow-bash",
+				Effect: permissions.EffectAllow,
+				ToolID: ToolIDBash,
+				Constraints: permissions.Constraints{
+					CommandProfile: "dev",
+					SandboxMode:    "none",
+				},
+			},
+		},
+	}
+	snap := permissions.ResolveSnapshot("alice", policy, time.Now())
+
+	root := t.TempDir()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+	ctx = ContextWithPolicySnapshot(ctx, snap)
+
+	raw, _ := json.Marshal(map[string]any{
+		"command": "brew --version",
+	})
+	anyRes, err := runBashTool(ctx, raw)
+	if err != nil {
+		t.Fatalf("expected allow, got %v", err)
+	}
+	res, ok := anyRes.(BashToolResult)
+	if !ok {
+		t.Fatalf("expected BashToolResult, got %T", anyRes)
+	}
+	if strings.TrimSpace(res.SandboxMode) != "host" {
+		t.Fatalf("expected sandbox_mode=host, got %q", res.SandboxMode)
 	}
 }

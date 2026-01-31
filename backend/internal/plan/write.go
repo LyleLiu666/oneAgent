@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var checkboxLineRe = regexp.MustCompile(`^(\s*-\s*\[)([xX\s])(\].*)$`)
+var checkboxLineRe = regexp.MustCompile(`^(\s*-\s*\[)([xX>\s])(\].*)$`)
 
 func SetTaskDone(content string, taskID string, done bool) (string, bool, error) {
 	taskID = strings.TrimSpace(taskID)
@@ -96,4 +96,3 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	}
 	return nil
 }
-

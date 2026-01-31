@@ -202,26 +202,7 @@ var blockedCommands = map[string]struct{}{
 	"openssl":      {},
 
 	// Package managers / installers / build tools.
-	"apt":      {},
-	"apt-get":  {},
-	"aptitude": {},
-	"yum":      {},
-	"dnf":      {},
-	"pacman":   {},
-	"apk":      {},
-	"zypper":   {},
-	"brew":     {},
-	"port":     {},
-	"snap":     {},
-	"flatpak":  {},
-	"pkg":      {},
-	"pkgutil":  {},
-	// Language package managers / build tools are governed by command profiles + approvals;
-	// keep hard-blocking only for OS-level installers above.
-	// "npm":      {},
-	// "pnpm":     {},
-	// "yarn":     {},
-	// "bun":      {},
+	// NOTE: system installers (brew/apt/...) are governed by command profiles + approval gating.
 
 	// VCS.
 	"svn": {},

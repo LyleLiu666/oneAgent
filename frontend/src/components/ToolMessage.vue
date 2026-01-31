@@ -8,6 +8,7 @@ const props = defineProps<{
   message: ChatMessage
   pending?: boolean
   progressTokens?: number
+  showTrace?: boolean
 }>()
 
 const isExpanded = ref(false)
@@ -55,6 +56,7 @@ const toggle = () => {
 }
 
 const isPending = computed(() => props.pending === true)
+const showTrace = computed(() => props.showTrace !== false)
 
 type ApprovalInfo =
   | { kind: 'required'; approvalId: string }
@@ -339,7 +341,7 @@ const formatMaybeJson = (raw: string): string => {
       </div>
 
       <!-- Trace Log Component -->
-      <TraceLog :content="message.trace" />
+      <TraceLog v-if="showTrace" :content="message.trace" />
     </div>
   </div>
 </template>

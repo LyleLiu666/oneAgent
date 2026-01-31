@@ -45,8 +45,8 @@ func TestPlanTool_InitGetMarkDone_EndToEnd(t *testing.T) {
 	}
 
 	rawDone, _ := json.Marshal(map[string]any{
-		"action":   "mark_done",
-		"task_id":  "1",
+		"action":  "mark_done",
+		"task_id": "1",
 	})
 	doneAny, err := runPlanTool(ctx, rawDone)
 	if err != nil {
@@ -173,4 +173,81 @@ func mustJSON(v any) json.RawMessage {
 		panic(err)
 	}
 	return data
+}
+
+func TestPlanTool_UpsertTask_ThenGet(t *testing.T) {
+	root := t.TempDir()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+
+	// Start from an empty plan.
+	if _, err := runPlanTool(ctx, mustJSON(map[string]any{
+		"action":    "init",
+		"template":  "# PLAN\n",
+		"overwrite": true,
+	})); err != nil {
+		t.Fatalf("plan init: %v", err)
+	}
+
+	anyRes, err := runPlanTool(ctx, mustJSON(map[string]any{
+		"action":  "upsert_task",
+		"task_id": "rust-ebook-reader",
+		"title":   "Build rust ebook reader",
+		"scope":   []string{"**"},
+		"acceptance": map[string]any{
+			"files": []string{"Cargo.toml"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("plan upsert_task: %v", err)
+	}
+	res := anyRes.(planToolResult)
+	if !res.OK || !res.Updated || res.TaskID != "rust-ebook-reader" {
+		t.Fatalf("unexpected upsert result: %+v", res)
+	}
+
+	anyGet, err := runPlanTool(ctx, mustJSON(map[string]any{
+		"action": "get",
+	}))
+	if err != nil {
+		t.Fatalf("plan get: %v", err)
+	}
+	got := anyGet.(planToolResult)
+	if !got.OK || len(got.Tasks) != 1 || got.Tasks[0].ID != "rust-ebook-reader" {
+		t.Fatalf("unexpected get result: %+v", got)
+	}
+}
+
+func TestPlanTool_MarkDone_TaskNotFound_ReturnsTasks(t *testing.T) {
+	root := t.TempDir()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: root})
+
+	template := `# PLAN
+- [ ] Task A <!-- id: a -->
+  - acceptance:
+    - files:
+      - a.txt
+`
+
+	if _, err := runPlanTool(ctx, mustJSON(map[string]any{
+		"action":    "init",
+		"template":  template,
+		"overwrite": true,
+	})); err != nil {
+		t.Fatalf("plan init: %v", err)
+	}
+
+	anyRes, err := runPlanTool(ctx, mustJSON(map[string]any{
+		"action":  "mark_done",
+		"task_id": "missing",
+	}))
+	if err != nil {
+		t.Fatalf("plan mark_done: %v", err)
+	}
+	res := anyRes.(planToolResult)
+	if res.OK {
+		t.Fatalf("expected ok=false, got %+v", res)
+	}
+	if len(res.Tasks) != 1 || res.Tasks[0].ID != "a" {
+		t.Fatalf("expected tasks returned, got %+v", res)
+	}
 }

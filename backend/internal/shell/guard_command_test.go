@@ -93,6 +93,16 @@ func TestGuardCommand_AllowsRmInsideRoot(t *testing.T) {
 	}
 }
 
+func TestGuardCommand_AllowsBrewInstallCommand(t *testing.T) {
+	root, err := ResolveBashRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveBashRoot: %v", err)
+	}
+	if err := GuardCommand("brew install pango", root); err != nil {
+		t.Fatalf("expected brew allowed, got %v", err)
+	}
+}
+
 func TestGuardCommand_RejectsRmOutsideRoot(t *testing.T) {
 	root, err := ResolveBashRoot(t.TempDir())
 	if err != nil {

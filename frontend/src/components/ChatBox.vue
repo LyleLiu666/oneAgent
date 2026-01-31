@@ -1341,6 +1341,7 @@ onUnmounted(() => {
               :message="message"
               :pending="isToolCallPending(message, index)"
               :progress-tokens="chatStore.lastResponseTokens"
+              :show-trace="!isSecretaryMode"
             />
           </div>
 

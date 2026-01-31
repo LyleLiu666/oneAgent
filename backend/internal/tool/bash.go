@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -72,23 +71,11 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	mode, err := commandToolSandboxMode(dec)
+	policy, err := resolveCommandExecPolicy(dec, req.Command)
 	if err != nil {
 		return nil, err
 	}
-
-	profile := CommandProfile(dec, "dev")
-	requestedProfile := strings.ToLower(strings.TrimSpace(profile))
-	if requestedProfile == "coding" && !mode.IsHardBoundary() {
-		return nil, fmt.Errorf("coding profile requires sandbox_mode=docker|native (got %s)", mode)
-	}
-	allowlist := dec.Constraints.Allowlist
-	if mode == shell.SandboxModeNone {
-		// Safety invariant: without a hard sandbox boundary, command tools MUST degrade to readonly.
-		profile = "readonly"
-		allowlist = nil
-	}
-	if err := permissions.ValidateCommand(profile, req.Command, allowlist); err != nil {
+	if err := permissions.ValidateCommand(policy.profile, req.Command, policy.allowlist); err != nil {
 		return nil, err
 	}
 
@@ -99,9 +86,9 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 
 	timeout := time.Duration(req.TimeoutMs) * time.Millisecond
 	var result shell.Result
-	if mode == shell.SandboxModeDocker {
+	if policy.mode == shell.SandboxModeDocker {
 		result, err = shell.RunBashDocker(ctx, req.Command, timeout, root)
-	} else if mode == shell.SandboxModeNative {
+	} else if policy.mode == shell.SandboxModeNative {
 		result, err = shell.RunBashNative(ctx, req.Command, timeout, root, "")
 	} else {
 		result, err = shell.RunBash(ctx, req.Command, timeout, root, "")
@@ -112,7 +99,7 @@ func runBashTool(ctx context.Context, raw json.RawMessage) (any, error) {
 
 	return BashToolResult{
 		Shell:           result.Shell,
-		SandboxMode:     string(mode),
+		SandboxMode:     string(policy.mode),
 		Stdout:          result.Stdout,
 		Stderr:          result.Stderr,
 		ExitCode:        result.ExitCode,

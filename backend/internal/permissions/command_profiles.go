@@ -12,18 +12,52 @@ func AllowedCommands(profile string) map[string]struct{} {
 		return nil
 	case "readonly":
 		return map[string]struct{}{
-			"ls":   {},
-			"cat":  {},
-			"rg":   {},
-			"grep": {},
-			"pwd":  {},
-			"echo": {},
+			"cd":    {},
+			"ls":    {},
+			"cat":   {},
+			"rg":    {},
+			"grep":  {},
+			"pwd":   {},
+			"echo":  {},
 			"sleep": {},
-			"head": {},
-			"tail": {},
-			"wc":   {},
-			"sort": {},
-			"uniq": {},
+			"head":  {},
+			"tail":  {},
+			"wc":    {},
+			"sort":  {},
+			"uniq":  {},
+		}
+	case "system_install":
+		return map[string]struct{}{
+			// Baseline (mostly read-only utils).
+			"cd":    {},
+			"ls":    {},
+			"cat":   {},
+			"rg":    {},
+			"grep":  {},
+			"pwd":   {},
+			"echo":  {},
+			"head":  {},
+			"tail":  {},
+			"wc":    {},
+			"sort":  {},
+			"uniq":  {},
+			"sleep": {},
+
+			// System package managers (high-risk; approval-gated).
+			"apt":      {},
+			"apt-get":  {},
+			"aptitude": {},
+			"yum":      {},
+			"dnf":      {},
+			"pacman":   {},
+			"apk":      {},
+			"zypper":   {},
+			"brew":     {},
+			"port":     {},
+			"snap":     {},
+			"flatpak":  {},
+			"pkg":      {},
+			"pkgutil":  {},
 		}
 	case "dev":
 		return map[string]struct{}{

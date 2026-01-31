@@ -27,6 +27,18 @@ func isHighRiskCommand(command string) bool {
 	return false
 }
 
+func isSystemInstallCommand(command string) bool {
+	for _, seg := range extractCommandSegments(command) {
+		if seg.cmd == "" {
+			continue
+		}
+		if _, ok := systemInstallCommandTokens[seg.cmd]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 var highRiskCommandTokens = map[string]struct{}{
 	// Destructive file operations.
 	"rm":    {},
@@ -61,6 +73,23 @@ var highRiskCommandTokens = map[string]struct{}{
 	"zsh":        {},
 	"pwsh":       {},
 	"powershell": {},
+}
+
+var systemInstallCommandTokens = map[string]struct{}{
+	"apt":      {},
+	"apt-get":  {},
+	"aptitude": {},
+	"yum":      {},
+	"dnf":      {},
+	"pacman":   {},
+	"apk":      {},
+	"zypper":   {},
+	"brew":     {},
+	"port":     {},
+	"snap":     {},
+	"flatpak":  {},
+	"pkg":      {},
+	"pkgutil":  {},
 }
 
 type commandSegment struct {

@@ -217,22 +217,11 @@ func commandCallWouldBeDenied(ctx context.Context, dec permissions.Decision, com
 	if strings.TrimSpace(command) == "" {
 		return true
 	}
-	mode, err := commandToolSandboxMode(dec)
+	policy, err := resolveCommandExecPolicy(dec, command)
 	if err != nil {
 		return true
 	}
-	profile := CommandProfile(dec, "dev")
-	requestedProfile := strings.ToLower(strings.TrimSpace(profile))
-	if requestedProfile == "coding" && !mode.IsHardBoundary() {
-		return true
-	}
-	allowlist := dec.Constraints.Allowlist
-	if mode == shell.SandboxModeNone {
-		// Keep behavior consistent with command tools: without a hard boundary, they degrade to readonly.
-		profile = "readonly"
-		allowlist = nil
-	}
-	if permissions.ValidateCommand(profile, command, allowlist) != nil {
+	if permissions.ValidateCommand(policy.profile, command, policy.allowlist) != nil {
 		return true
 	}
 	root, err := resolveWorkspaceRoot(ctx)

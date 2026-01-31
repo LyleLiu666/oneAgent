@@ -73,3 +73,29 @@ it('shows approval actions for approval_required tool_result even when collapsed
 
   wrapper.unmount()
 })
+
+it('hides TraceLog when showTrace=false', async () => {
+  const { default: ToolMessage } = await import('@/components/ToolMessage.vue')
+
+  const wrapper = shallowMount(ToolMessage, {
+    props: {
+      showTrace: false,
+      message: {
+        id: 3,
+        role: 'assistant',
+        type: 'tool_call',
+        content: 'calling tool',
+        createdAt: new Date(),
+        trace: 'TRACE_SHOULD_BE_HIDDEN',
+        tool: {
+          toolCalls: [{ id: 'call_0', function: { name: 'bash', arguments: '{\"cmd\":\"ls\"}' } }],
+          content: 'calling tool',
+        },
+      },
+    },
+  })
+
+  expect(wrapper.find('trace-log-stub').exists()).toBe(false)
+
+  wrapper.unmount()
+})

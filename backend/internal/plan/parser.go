@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var taskLineRe = regexp.MustCompile(`^\s*-\s*\[([xX\s])\]\s*(.*?)(?:\s*<!--\s*id:\s*([^>]+?)\s*-->)\s*$`)
+var taskLineRe = regexp.MustCompile(`^\s*-\s*\[([xX>\s])\]\s*(.*?)(?:\s*<!--\s*id:\s*([^>]+?)\s*-->)\s*$`)
 
 func Parse(content string) Plan {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
@@ -19,7 +19,7 @@ func Parse(content string) Plan {
 			continue
 		}
 
-		checked := strings.TrimSpace(match[1]) != ""
+		mark := strings.TrimSpace(match[1])
 		title := strings.TrimSpace(match[2])
 		id := strings.TrimSpace(match[3])
 		if id == "" {
@@ -32,8 +32,10 @@ func Parse(content string) Plan {
 			Status:    "todo",
 			LineIndex: i,
 		}
-		if checked {
+		if strings.EqualFold(mark, "x") {
 			task.Status = "done"
+		} else if mark == ">" {
+			task.Status = "doing"
 		}
 
 		section := ""
@@ -140,4 +142,3 @@ func findTaskByID(p Plan, id string) (Task, bool) {
 	}
 	return Task{}, false
 }
-

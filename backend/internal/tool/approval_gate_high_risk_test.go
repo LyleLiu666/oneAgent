@@ -157,6 +157,52 @@ func TestApprovalGate_CommandTools_HighRisk_Auto(t *testing.T) {
 	}
 }
 
+func TestApprovalGate_CommandTools_HighRisk_Manual_SystemInstallCreatesApproval(t *testing.T) {
+	db, err := settingsdb.Open(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatalf("open settingsdb: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if err := db.SetUserSetting(context.Background(), "alice", settingsdb.SettingKeyCommandApprovalMode, "manual"); err != nil {
+		t.Fatalf("set command approval mode: %v", err)
+	}
+
+	policy := permissions.Policy{
+		ID:            "p1",
+		DefaultEffect: permissions.EffectDeny,
+		Rules: []permissions.Rule{
+			{
+				ID:     "allow-bash-high-risk-approval",
+				Effect: permissions.EffectAllow,
+				ToolID: ToolIDBash,
+				Constraints: permissions.Constraints{
+					Approval:       "high_risk",
+					CommandProfile: "dev",
+					SandboxMode:    "native",
+				},
+			},
+		},
+	}
+	snap := permissions.ResolveSnapshot("alice", policy, time.Now())
+
+	ws := t.TempDir()
+	ctx := ContextWithWorkspace(context.Background(), WorkspaceConfig{Enabled: true, Root: ws})
+	ctx = ContextWithPolicySnapshot(ctx, snap)
+	ctx = ContextWithSettingsDB(ctx, db)
+	ctx = ContextWithSessionID(ctx, "sess-1")
+
+	rawHigh := json.RawMessage(`{"command":"brew install pango"}`)
+	err = requireToolApprovalIfNeeded(ctx, ToolIDBash, rawHigh)
+	var req *ApprovalRequiredError
+	if !errors.As(err, &req) {
+		t.Fatalf("expected approval required, got %v", err)
+	}
+	if req.ApprovalID == "" {
+		t.Fatalf("expected approval_id")
+	}
+}
+
 func TestApprovalGate_CommandTools_HighRisk_SkipsApprovalWhenCommandWouldBeDenied(t *testing.T) {
 	db, err := settingsdb.Open(filepath.Join(t.TempDir(), "settings.db"))
 	if err != nil {
