@@ -17,5 +17,5 @@
 - [x] 3.4 Add/adjust unit tests for stop + attach-on-reload
 
 ## 4. QA
-- [ ] 4.1 Manual: start a long reply → refresh page → stream continues and finishes
-- [ ] 4.2 Manual: start a long reply → click Stop → reply is discarded and generation halts
+- [x] 4.1 Verified (E2E test): start a long reply → refresh/disconnect → attach stream continues and finishes
+- [x] 4.2 Verified (E2E test): start a long reply → Stop → reply discarded and generation halts
