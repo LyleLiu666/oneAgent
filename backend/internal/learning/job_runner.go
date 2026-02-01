@@ -24,6 +24,9 @@ func RunDailyJobWithEvaluator(ctx context.Context, store *workledger.Store, prin
 	}
 
 	dayKey := workledger.DayKey(now)
+	// The daily job runs once per day; keep lookback aligned with the schedule cadence
+	// to avoid repeatedly resurfacing older receipts as "new" SOP suggestions.
+	const dailyLookbackDays = 1
 
 	// If already succeeded today, no-op.
 	if existing, err := store.GetLearningJob(principalID, dayKey); err == nil {
@@ -43,7 +46,7 @@ func RunDailyJobWithEvaluator(ctx context.Context, store *workledger.Store, prin
 
 	created, err := store.GenerateSuggestionsV1(ctx, workledger.GenerateSuggestionsInput{
 		PrincipalID:  principalID,
-		LookbackDays: 7,
+		LookbackDays: dailyLookbackDays,
 		Count:        3,
 		DayKey:       dayKey,
 	})

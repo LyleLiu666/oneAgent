@@ -112,3 +112,46 @@ func TestRunDailyJobWithEvaluator_IdempotentAfterSuccess(t *testing.T) {
 		t.Fatalf("expected same job_id, got %q vs %q", j2.JobID, j1.JobID)
 	}
 }
+
+func TestRunDailyJobWithEvaluator_LookbackIsOneDay(t *testing.T) {
+	base := t.TempDir()
+	store, err := workledger.NewStore(filepath.Join(base, "ledger"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	now := time.Now().UTC()
+	tooOld := now.Add(-36 * time.Hour)
+
+	// Seed enough usable receipts, but make them older than 1 day so the daily job
+	// (lookback=1) should not generate suggestions from them.
+	for i := 0; i < 2; i++ {
+		finishedAt := tooOld.Add(-time.Duration(i) * time.Minute)
+		_, err := store.CreateReceipt(workledger.CreateReceiptInput{
+			PrincipalID: "local",
+			Kind:        workledger.ReceiptKindSubagentRun,
+			Status:      workledger.ReceiptStatusSucceeded,
+			StartedAt:   finishedAt.Add(-time.Minute),
+			FinishedAt:  finishedAt,
+			Summary:     "usable",
+			Artifacts: workledger.ReceiptArtifacts{
+				FindingsPath: "f.md",
+				TraceLogPath: "t.jsonl",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateReceipt(%d): %v", i, err)
+		}
+	}
+
+	job, err := RunDailyJobWithEvaluator(context.Background(), store, "local", now, fakeEvaluator{})
+	if err != nil {
+		t.Fatalf("RunDailyJobWithEvaluator: %v", err)
+	}
+	if job.Status != workledger.LearningJobStatusSucceeded {
+		t.Fatalf("expected succeeded, got %q (job=%+v)", job.Status, job)
+	}
+	if job.Stats.SuggestionsCreated != 0 {
+		t.Fatalf("expected 0 suggestions due to 1-day lookback, got %d", job.Stats.SuggestionsCreated)
+	}
+}
