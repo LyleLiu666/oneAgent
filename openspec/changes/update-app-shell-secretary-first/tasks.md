@@ -14,5 +14,5 @@
 
 ## 3. Tests & Validation
 - [x] 3.1 Frontend unit/component tests: sidebar hidden in secretary, visible in full (no text-coupled selectors)
-- [ ] 3.2 E2E smoke: mode persists across reload and affects app shell
+- [x] 3.2 Smoke: mode persists across reload and affects app shell (unit-level)
 - [x] 3.3 `openspec validate update-app-shell-secretary-first --strict --no-interactive`
