@@ -9,15 +9,20 @@
 - 不承诺“从中断点继续生成”的严格语义（多数上游不支持），优先保证用户感知与数据不丢。
 
 ## Approach (high-level)
-1) 为每个 streaming chat 请求生成一个可寻址的“流实例 id”（或复用现有 streamId/sessionId + step）。
-2) 前端在 streaming 状态展示 Stop 按钮，触发后端 stop（HTTP endpoint 或 SSE control channel）。
-3) 后端收到 stop 后：
-   - 取消上游 LLM 请求（context cancel）
-   - 尽快发送 final/done 事件
-   - best-effort 写入已生成的 assistant 内容（避免丢失）
-4) 对短暂网络错误：
-   - 仅做 best-effort：提示可重试/自动重连（避免 silent hang）
+1) 后端以 `session_id` 为粒度维护一个 `StreamBroadcaster`（内存态）：
+   - 生成过程使用 `context.WithCancel(context.Background())`，不绑定单个 SSE 连接。
+   - 广播 `msg/trace/usage/error/done` 等事件给所有订阅者（多标签页）。
+   - 额外维护“进行中的 assistant text”快照，用于 reload 后补齐（best-effort）。
+2) 前端在 streaming 状态展示 Stop 按钮：
+   - 立即中止本地 SSE 读取（AbortController）
+   - 调用后端 stop endpoint（见 API），并丢弃本次 assistant 回复的 UI 气泡（discard）
+3) 后端 stop：
+   - 将该 session 标记为 canceled，并触发 cancel func（best-effort 取消上游请求）
+   - 广播 `canceled` 事件给所有订阅者
+   - **不落盘本次 assistant 回复**（discard）
+4) Reload/re-attach：
+   - `GET /api/sessions/:id/stream` 仅用于 attach（不触发新生成）
+   - 先发送快照（start+delta），再继续推送后续事件（best-effort）
 
 ## Notes
 - SSE/HTTP streaming 不应使用 `http.Client.Timeout` 作为整请求超时，否则会在长流中断（表现为 `context deadline exceeded (Client.Timeout ...)`）。
-

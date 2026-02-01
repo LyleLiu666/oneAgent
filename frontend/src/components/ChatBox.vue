@@ -303,10 +303,15 @@ const handleDocumentClick = (event: MouseEvent) => {
 const scrollToBottom = (smooth = true) => {
   nextTick(() => {
     if (messagesContainer.value) {
-      messagesContainer.value.scrollTo({
-        top: messagesContainer.value.scrollHeight,
-        behavior: smooth ? 'smooth' : 'auto',
-      })
+      const el: any = messagesContainer.value
+      if (typeof el.scrollTo === 'function') {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: smooth ? 'smooth' : 'auto',
+        })
+      } else {
+        el.scrollTop = el.scrollHeight
+      }
     }
   })
 }
@@ -676,9 +681,323 @@ const skipWorkspaceOnboarding = async () => {
   inputEl.value?.focus()
 }
 
+const generateSessionId = () => {
+  const cryptoAny = (globalThis as any)?.crypto
+  if (cryptoAny?.randomUUID) return cryptoAny.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+const ensureSessionId = () => {
+  const existing = String(chatStore.currentSessionId || '').trim()
+  if (existing) return existing
+  const next = generateSessionId()
+  chatStore.setCurrentSession(next)
+  return next
+}
+
+const discardStreamingMessages = () => {
+  chatStore.setMessages(chatStore.messages.filter((m) => !m.isStreaming))
+}
+
+const stopCurrentReply = async () => {
+  if (!chatStore.isLoading) return
+
+  const sessionId = String(chatStore.currentSessionId || '').trim()
+  try {
+    activeStreamAbort.value?.abort()
+  } catch {
+    // ignore
+  }
+
+  discardStreamingMessages()
+  chatStore.setLoading(false)
+  chatStore.setLastResponseTokens(undefined)
+
+  if (sessionId) {
+    try {
+      await stopSessionStream(sessionId)
+    } catch (error) {
+      console.error('Failed to stop session stream:', error)
+    }
+  }
+}
+
+const attachIfNeeded = async (sessionIdRaw: string) => {
+  const sessionId = String(sessionIdRaw || '').trim()
+  if (!sessionId) return
+  if (chatStore.isLoading || loadingHistory.value) return
+  if (chatStore.messages.some((m) => m.isStreaming)) return
+
+  const lastNonSystem = [...chatStore.messages].reverse().find((m) => m.role !== 'system')
+  if (!lastNonSystem) return
+  if (lastNonSystem.role === 'assistant') return
+
+  chatStore.setLoading(true)
+  chatStore.setLastResponseTokens(0)
+
+  const abort = new AbortController()
+  try {
+    activeStreamAbort.value?.abort()
+  } catch {
+    // ignore
+  }
+  activeStreamAbort.value = abort
+
+  try {
+    let sawMsgEvents = false
+    let nextLocalId = Date.now()
+    const streamIndex = new Map<string, number>()
+
+    const normalizeRole = (raw: string | undefined): ChatMessage['role'] => {
+      const role = String(raw || '').toLowerCase()
+      if (role === 'user') return 'user'
+      if (role === 'assistant') return 'assistant'
+      if (role === 'tool') return 'tool'
+      if (role === 'system') return 'system'
+      return 'system'
+    }
+
+    const normalizeType = (raw: string | undefined): ChatMessage['type'] => {
+      const type = String(raw || '').toLowerCase()
+      if (type === 'tool_call') return 'tool_call'
+      if (type === 'tool_result') return 'tool_result'
+      return 'text'
+    }
+
+    type StreamMsgEvent = {
+      op: 'start' | 'delta' | 'final' | 'insert'
+      id: string
+      role?: string
+      msg_type?: string
+      delta?: string
+      error?: string
+      tool_call?: ToolCallPayload
+      tool_result?: ToolResultPayload
+    }
+
+    const findStreamingIndex = () => {
+      for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+        if (chatStore.messages[i]?.isStreaming) return i
+      }
+      return -1
+    }
+
+    const ensureStreamMessage = (streamId: string, roleRaw?: string, typeRaw?: string) => {
+      if (streamIndex.has(streamId)) return streamIndex.get(streamId)!
+
+      nextLocalId += 1
+      const role = normalizeRole(roleRaw)
+      const type = normalizeType(typeRaw)
+      const msg: ChatMessage = {
+        id: nextLocalId,
+        streamId,
+        role,
+        type,
+        rawRole: roleRaw,
+        rawType: typeRaw,
+        content: '',
+        createdAt: new Date(),
+        isStreaming: true,
+      }
+      chatStore.addMessage(msg)
+      const idx = chatStore.messages.length - 1
+      streamIndex.set(streamId, idx)
+      return idx
+    }
+
+    const applyToolCall = (message: ChatMessage, payload?: ToolCallPayload) => {
+      if (!payload) return
+      message.tool = {
+        protocol: payload.protocol,
+        llmContent: payload.llm_content,
+        toolCalls: Array.isArray(payload.tool_calls) ? payload.tool_calls : undefined,
+        content: payload.content,
+      }
+      if (typeof payload.content === 'string') {
+        message.content = payload.content
+      }
+    }
+
+    const applyToolResult = (message: ChatMessage, payload?: ToolResultPayload) => {
+      if (!payload) return
+      const output = String(payload.content || '')
+      let toolError: string | undefined
+      const parsedOutput = safeJsonParse<any>(output)
+      if (parsedOutput && typeof parsedOutput.error === 'string') {
+        toolError = parsedOutput.error
+      }
+      message.tool = {
+        protocol: payload.protocol,
+        name: payload.name,
+        toolCallId: payload.tool_call_id,
+        arguments: payload.arguments,
+        output,
+        error: toolError,
+        results: Array.isArray(payload.results) ? payload.results : undefined,
+      }
+      message.content = output
+    }
+
+    await attachChatStream(
+      sessionId,
+      (event) => {
+        if (event.type === 'canceled') {
+          discardStreamingMessages()
+          chatStore.setLoading(false)
+          chatStore.setLastResponseTokens(undefined)
+          try {
+            abort.abort()
+          } catch {
+            // ignore
+          }
+          return
+        }
+
+        if (event.type === 'session') {
+          chatStore.setCurrentSession(event.data)
+          return
+        }
+
+        if (event.type === 'msg') {
+          sawMsgEvents = true
+          const payload = safeJsonParse<StreamMsgEvent>(event.data)
+          if (!payload || !payload.id || !payload.op) return
+
+          if (payload.op === 'start') {
+            ensureStreamMessage(payload.id, payload.role, payload.msg_type)
+            scrollToBottom(false)
+            return
+          }
+
+          if (payload.op === 'delta') {
+            const idx = ensureStreamMessage(payload.id, payload.role, payload.msg_type)
+            const msg = chatStore.messages[idx]
+            if (msg && typeof payload.delta === 'string' && payload.delta) {
+              msg.content += payload.delta
+              msg.isStreaming = true
+              scrollToBottom(false)
+            }
+            return
+          }
+
+          if (payload.op === 'final') {
+            const idx = ensureStreamMessage(payload.id, payload.role, payload.msg_type)
+            const msg = chatStore.messages[idx]
+            if (!msg) return
+
+            msg.isStreaming = false
+            const finalType = normalizeType(payload.msg_type)
+            msg.type = finalType
+            msg.rawType = payload.msg_type
+            if (payload.role) {
+              msg.rawRole = payload.role
+              msg.role = normalizeRole(payload.role)
+            }
+
+            if (finalType === 'tool_call') {
+              applyToolCall(msg, payload.tool_call)
+            }
+
+            if (payload.error) {
+              msg.content = (msg.content || '') + `\n\n[Error] ${payload.error}`
+            }
+            return
+          }
+
+          if (payload.op === 'insert') {
+            nextLocalId += 1
+            const role = normalizeRole(payload.role)
+            const type = normalizeType(payload.msg_type)
+            const msg: ChatMessage = {
+              id: nextLocalId,
+              streamId: payload.id,
+              role,
+              type,
+              rawRole: payload.role,
+              rawType: payload.msg_type,
+              content: '',
+              createdAt: new Date(),
+              isStreaming: false,
+            }
+
+            if (type === 'tool_result') {
+              applyToolResult(msg, payload.tool_result)
+            }
+            chatStore.addMessage(msg)
+            scrollToBottom(false)
+            return
+          }
+        } else if (event.type === 'trace') {
+          const idx = findStreamingIndex()
+          const target = idx >= 0 ? chatStore.messages[idx] : chatStore.messages[chatStore.messages.length - 1]
+          if (target) target.trace = (target.trace || '') + event.data + '\n'
+        } else if (event.type === 'usage') {
+          try {
+            const data = JSON.parse(event.data)
+            if (typeof data.response_tokens === 'number') {
+              chatStore.setLastResponseTokens(data.response_tokens)
+              for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+                const msg = chatStore.messages[i]
+                if (msg.role === 'assistant' && msg.isStreaming) {
+                  msg.responseTokens = data.response_tokens
+                  break
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to parse usage event:', e)
+          }
+        } else if (event.type === 'error') {
+          const suffix = event.data ? `\n\n[Error] ${event.data}` : '\n\n[Error] Request failed.'
+          const idx = findStreamingIndex()
+          if (idx >= 0) {
+            const msg = chatStore.messages[idx]
+            msg.content = (msg.content || '') + suffix
+            msg.isStreaming = false
+          } else if (!sawMsgEvents) {
+            chatStore.addMessage({
+              id: Date.now(),
+              role: 'system',
+              type: 'text',
+              content: suffix,
+              createdAt: new Date(),
+              isStreaming: false,
+            })
+          }
+        } else if (event.type === 'done') {
+          loadSessions()
+        }
+      },
+      (error) => {
+        console.error('Stream error:', error)
+        const idx = (() => {
+          for (let i = chatStore.messages.length - 1; i >= 0; i--) {
+            if (chatStore.messages[i]?.isStreaming) return i
+          }
+          return -1
+        })()
+        if (idx >= 0) {
+          const msg = chatStore.messages[idx]
+          msg.content = (msg.content || '') + '\n\n[Error] Stream failed.'
+          msg.isStreaming = false
+        }
+      },
+      abort.signal
+    )
+  } finally {
+    if (activeStreamAbort.value === abort) {
+      activeStreamAbort.value = null
+    }
+    chatStore.setLoading(false)
+    scrollToBottom()
+  }
+}
+
 const sendChat = async (rawMessage: string) => {
   const message = rawMessage.trim()
   if (!message || chatStore.isLoading || loadingHistory.value) return
+
+  const ensuredSessionId = ensureSessionId()
 
   // Add user message
   const userMessage: ChatMessage = {
@@ -693,6 +1012,14 @@ const sendChat = async (rawMessage: string) => {
 
   chatStore.setLoading(true)
   chatStore.setLastResponseTokens(0)
+
+  const abort = new AbortController()
+  try {
+    activeStreamAbort.value?.abort()
+  } catch {
+    // ignore
+  }
+  activeStreamAbort.value = abort
 
   try {
     let sawMsgEvents = false
@@ -791,12 +1118,23 @@ const sendChat = async (rawMessage: string) => {
 
     await streamChat(
       message,
-      chatStore.currentSessionId,
+      ensuredSessionId,
       chatStore.currentModelId,
       chatStore.currentToolIds,
       chatStore.currentToolProtocol,
       workspacePath.value,
       (event) => {
+        if (event.type === 'canceled') {
+          discardStreamingMessages()
+          chatStore.setLoading(false)
+          chatStore.setLastResponseTokens(undefined)
+          try {
+            abort.abort()
+          } catch {
+            // ignore
+          }
+          return
+        }
         if (event.type === 'session') {
           chatStore.setCurrentSession(event.data)
           const current = String(workspacePath.value || '').trim()
@@ -923,7 +1261,8 @@ const sendChat = async (rawMessage: string) => {
           msg.content = (msg.content || '') + '\n\n[Error] Stream failed.'
           msg.isStreaming = false
         }
-      }
+      },
+      abort.signal
     )
   } catch (error) {
     console.error('Chat error:', error)
@@ -936,6 +1275,9 @@ const sendChat = async (rawMessage: string) => {
       isStreaming: false,
     })
   } finally {
+    if (activeStreamAbort.value === abort) {
+      activeStreamAbort.value = null
+    }
     chatStore.setLoading(false)
     if (chatStore.currentSessionId) {
       // We don't necessarily need to reload all messages, but getting the fresh session data is good practice
@@ -1117,22 +1459,30 @@ onMounted(async () => {
   await loadModels()
   await loadSessions()
   const persistedId = chatStore.currentSessionId
-  if (persistedId) {
-    const exists = chatStore.sessions.some((s) => s.id === persistedId)
-    if (exists) {
-      await loadSessionMessages(persistedId)
-    } else {
-      // Avoid requesting a non-existent session on boot.
-      chatStore.clearMessages()
-    }
-  }
+	  if (persistedId) {
+	    const exists = chatStore.sessions.some((s) => s.id === persistedId)
+	    if (exists) {
+	      await loadSessionMessages(persistedId)
+	      await attachIfNeeded(persistedId)
+	    } else {
+	      // Avoid requesting a non-existent session on boot.
+	      chatStore.clearMessages()
+	    }
+	  }
 
   applyWorkspaceDefaultsForNewSession()
 })
 
-onUnmounted(() => {
-  document.removeEventListener('click', handleDocumentClick)
-})
+	onUnmounted(() => {
+	  try {
+	    activeStreamAbort.value?.abort()
+	  } catch {
+	    // ignore
+	  } finally {
+	    activeStreamAbort.value = null
+	  }
+	  document.removeEventListener('click', handleDocumentClick)
+	})
 </script>
 
 <template>
@@ -1516,6 +1866,16 @@ onUnmounted(() => {
               />
             </div>
             <button
+              v-if="chatStore.isLoading"
+              data-testid="chat-stop"
+              @click="stopCurrentReply"
+              class="p-3 rounded-xl transition-all duration-200 bg-surface-800 text-surface-200 hover:bg-surface-700"
+            >
+              <Square class="w-5 h-5" />
+            </button>
+            <button
+              v-else
+              data-testid="chat-send"
               @click="sendMessage"
               :disabled="!canSend"
               :class="[
@@ -1525,11 +1885,7 @@ onUnmounted(() => {
                   : 'bg-surface-800 text-surface-500 cursor-not-allowed',
               ]"
             >
-              <Loader2
-                v-if="chatStore.isLoading"
-                class="w-5 h-5 animate-spin"
-              />
-              <Send v-else class="w-5 h-5" />
+              <Send class="w-5 h-5" />
             </button>
           </div>
           <p class="text-xs text-surface-500 mt-2 text-center">

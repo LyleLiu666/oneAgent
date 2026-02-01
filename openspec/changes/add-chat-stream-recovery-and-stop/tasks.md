@@ -1,17 +1,21 @@
-## 1. Backend
-- [ ] 1.1 Add stop signal path for `/api/chat` streaming sessions
-- [ ] 1.2 Cancel upstream LLM request on stop
-- [ ] 1.3 Persist partial assistant message (best-effort)
-- [ ] 1.4 Emit explicit final status (stopped vs error)
-- [ ] 1.5 Add tests for stop + persistence behavior
+## 1. Specification
+- [x] 1.1 Confirm UX semantics (stop discards reply, latest only)
+- [x] 1.2 Update `chat-ux` delta spec
+- [x] 1.3 Run `openspec validate add-chat-stream-recovery-and-stop --strict --no-interactive`
 
-## 2. Frontend
-- [ ] 2.1 Show “Stop/停止生成” while assistant message is streaming
-- [ ] 2.2 Show final state when stopped (best-effort)
-- [ ] 2.3 Best-effort retry/reconnect UX for recoverable stream failures
-- [ ] 2.4 Add unit/e2e tests for stop + reconnect UI
+## 2. Backend
+- [x] 2.1 Add attach-only stream endpoint `GET /api/sessions/:id/stream`
+- [x] 2.2 Add stop endpoint `POST /api/sessions/:id/stop`
+- [x] 2.3 Ensure generation survives SSE disconnect and is cancelable via stop
+- [x] 2.4 Do not persist assistant reply on stop (discard)
+- [x] 2.5 Add backend tests (disconnect + attach; stop discard)
 
-## 3. QA
-- [ ] 3.1 Manual test: long response, stop mid-stream, verify partial content retained
-- [ ] 3.2 Manual test: simulate stream interruption, verify UI feedback + recovery behavior
+## 3. Frontend
+- [x] 3.1 Add API client methods: `attachChatStream` + `stopSessionStream`
+- [x] 3.2 Show Stop button while streaming; discard current reply on stop
+- [x] 3.3 On reload, auto-attach to an in-flight stream when needed (best-effort)
+- [x] 3.4 Add/adjust unit tests for stop + attach-on-reload
 
+## 4. QA
+- [ ] 4.1 Manual: start a long reply → refresh page → stream continues and finishes
+- [ ] 4.2 Manual: start a long reply → click Stop → reply is discarded and generation halts

@@ -7,13 +7,11 @@
 
 ## What Changes
 - 在聊天 UI 中，为正在流式输出的 assistant 消息提供显式的 “Stop/停止生成” 能力（best-effort）。
-- 后端在收到 stop 后，应尽快取消上游请求并收敛流状态：
-  - 结束当前流（发送 final/done）
-  - best-effort 持久化已生成的内容（避免丢失）
-  - 标注停止原因（用户主动停止 vs 超时/错误）
-- 对可恢复的中断场景（例如短暂网络抖动）提供 best-effort 的恢复策略（例如重试/重新连接），避免用户频繁手动刷新。
+- 后端在收到 stop 后，应尽快取消上游请求并收敛流状态（best-effort）：
+  - 结束当前流（通知所有订阅者停止）
+  - **不持久化本次 assistant 回复**（discard；符合用户预期“停止就是不要这次回复”）
+- 对刷新/断线场景提供 best-effort 的“重新 attach”策略：用户刷新页面后可继续观察同一 session 的进行中流式输出，避免会话被动中断。
 
 ## Impact
 - Affected specs: chat-ux
-- Affected code: backend `/api/chat` SSE streaming, llm http client, frontend streaming UI
-
+- Affected code: backend chat SSE (attach/stop), frontend streaming lifecycle (stop button + attach-on-reload)

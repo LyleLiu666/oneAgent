@@ -467,12 +467,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	// If this is the PRIMARY (first) request for this session that triggered creation,
 	// start the generation process in background.
 	// Otherwise, we just listen.
-		if broadcaster.StartGeneration() {
-			go func() {
-				defer broadcaster.Finish()
-				defer broadcaster.ClearGeneration()
+	if broadcaster.StartGeneration() {
+		go func() {
+			defer broadcaster.Finish()
+			defer broadcaster.ClearGeneration()
 
-				// Compress long sessions before persisting this user turn.
+			// Compress long sessions before persisting this user turn.
 			// This avoids deleting the freshly-created user message during compression.
 			{
 				ctx := context.Background()
@@ -555,14 +555,14 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						Data: "Generating response...",
 					})
 				},
-					OnComplete: func(ctx context.Context, output string, err error) {
-						if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
-							return
-						}
-						if err != nil {
-							broadcaster.Broadcast(StreamEvent{
-								Type: "error",
-								Data: fmt.Sprintf("LLM error: %v", err),
+				OnComplete: func(ctx context.Context, output string, err error) {
+					if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
+						return
+					}
+					if err != nil {
+						broadcaster.Broadcast(StreamEvent{
+							Type: "error",
+							Data: fmt.Sprintf("LLM error: %v", err),
 						})
 					} else {
 						broadcaster.Broadcast(StreamEvent{
@@ -639,12 +639,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				time.Sleep(50 * time.Millisecond)
 			}
 
-				// Call LLM with streaming
-				var fullContent string
-				ctx, cancel := context.WithCancel(context.Background()) // Use background context so generation survives request cancellation
-				broadcaster.SetGenerationCancel(cancel)
-				ctx = tool.ContextWithSessionID(ctx, sessionID)
-				ctx = tool.ContextWithUserID(ctx, userID)
+			// Call LLM with streaming
+			var fullContent string
+			ctx, cancel := context.WithCancel(context.Background()) // Use background context so generation survives request cancellation
+			broadcaster.SetGenerationCancel(cancel)
+			ctx = tool.ContextWithSessionID(ctx, sessionID)
+			ctx = tool.ContextWithUserID(ctx, userID)
 			ctx = tool.ContextWithPolicySnapshot(ctx, policySnap)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
@@ -731,21 +731,21 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					resolvedModel.Client,
 					messages,
 					opts,
-						toolDefs,
-						userID,
-						func(chunk string) error {
-							if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
-								return context.Canceled
-							}
-							broadcastMsg(broadcaster, streamMsg{
-								Op:      "delta",
-								ID:      currentStepID,
-								Role:    model.MessageRoleAssistant,
+					toolDefs,
+					userID,
+					func(chunk string) error {
+						if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+							return context.Canceled
+						}
+						broadcastMsg(broadcaster, streamMsg{
+							Op:      "delta",
+							ID:      currentStepID,
+							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 							Delta:   chunk,
-							})
-							return nil
-						},
+						})
+						return nil
+					},
 					func(msg string) {
 						broadcaster.Broadcast(StreamEvent{Type: "trace", Data: msg})
 					},
@@ -929,38 +929,38 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						if _, err := h.rt.Sessions.AppendMessage(sessionID, resultMsg); err == nil {
 							toolLoopPersisted = true
 						}
-						},
-						func(visibleContent, assistantContent string) {
-							if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
-								return
-							}
-							content := strings.TrimSpace(assistantContent)
-							if content == "" {
-								content = visibleContent
-							}
+					},
+					func(visibleContent, assistantContent string) {
+						if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+							return
+						}
+						content := strings.TrimSpace(assistantContent)
+						if content == "" {
+							content = visibleContent
+						}
 						broadcastMsg(broadcaster, streamMsg{
 							Op:      "final",
 							ID:      currentStepID,
 							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 						})
-							msg := model.ChatMessage{
-								Role:    model.MessageRoleAssistant,
-								Type:    model.MessageTypeText,
-								Content: content,
-							}
-							if _, err := h.rt.Sessions.AppendMessage(sessionID, msg); err == nil {
-								toolLoopPersisted = true
-							}
-						},
-						func(step int) {
-							if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
-								return
-							}
-							currentStepID = uuid.NewString()
-							broadcastMsg(broadcaster, streamMsg{
-								Op:      "start",
-								ID:      currentStepID,
+						msg := model.ChatMessage{
+							Role:    model.MessageRoleAssistant,
+							Type:    model.MessageTypeText,
+							Content: content,
+						}
+						if _, err := h.rt.Sessions.AppendMessage(sessionID, msg); err == nil {
+							toolLoopPersisted = true
+						}
+					},
+					func(step int) {
+						if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+							return
+						}
+						currentStepID = uuid.NewString()
+						broadcastMsg(broadcaster, streamMsg{
+							Op:      "start",
+							ID:      currentStepID,
 							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 						})
@@ -981,21 +981,21 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			} else {
 				assistantStreamID := uuid.NewString()
-					broadcastMsg(broadcaster, streamMsg{
-						Op:      "start",
-						ID:      assistantStreamID,
-						Role:    model.MessageRoleAssistant,
-						MsgType: model.MessageTypeText,
-					})
-					err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
-						if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
-							return context.Canceled
-						}
-						fullContent += chunk
+				broadcastMsg(broadcaster, streamMsg{
+					Op:      "start",
+					ID:      assistantStreamID,
+					Role:    model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+				})
+				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+					if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+						return context.Canceled
+					}
+					fullContent += chunk
 
-						// Buffer content to ensure we only broadcast complete UTF-8 runes
-						incompleteUTF8 = append(incompleteUTF8, chunk...)
-						valid, rest := splitBuffer(incompleteUTF8)
+					// Buffer content to ensure we only broadcast complete UTF-8 runes
+					incompleteUTF8 = append(incompleteUTF8, chunk...)
+					valid, rest := splitBuffer(incompleteUTF8)
 					incompleteUTF8 = rest
 
 					if len(valid) > 0 {
@@ -1009,28 +1009,28 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					}
 					return nil
 				})
-					broadcastMsg(broadcaster, streamMsg{
-						Op:      "final",
-						ID:      assistantStreamID,
-						Role:    model.MessageRoleAssistant,
-						MsgType: model.MessageTypeText,
-						Error: func() string {
-							if err != nil {
-								if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
-									return ""
-								}
-								return err.Error()
+				broadcastMsg(broadcaster, streamMsg{
+					Op:      "final",
+					ID:      assistantStreamID,
+					Role:    model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+					Error: func() string {
+						if err != nil {
+							if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
+								return ""
 							}
-							return ""
-						}(),
-					})
-				}
+							return err.Error()
+						}
+						return ""
+					}(),
+				})
+			}
 
-				if toolProtocol == "xml" && err != nil && toolLoopPersisted && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
-					// Ensure an assistant "air bubble" exists on XML tool failures (history + trace).
-					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-					entry.Error = err.Error()
-					entry.Complete()
+			if toolProtocol == "xml" && err != nil && toolLoopPersisted && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
+				// Ensure an assistant "air bubble" exists on XML tool failures (history + trace).
+				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+				entry.Error = err.Error()
+				entry.Complete()
 				trace := model.TraceDataJSON{
 					TraceData: model.TraceData{
 						Entries: []model.TraceEntry{entry},
@@ -1090,13 +1090,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			}
 
-				// Save assistant message (also persist error cases so history shows an "air bubble" + trace).
-				// But when the user explicitly cancels generation, discard the assistant reply.
-				if !toolLoopPersisted && (fullContent != "" || err != nil) && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
-					entries := traceEntries
-					if err != nil && len(entries) == 0 {
-						entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-						entry.Error = err.Error()
+			// Save assistant message (also persist error cases so history shows an "air bubble" + trace).
+			// But when the user explicitly cancels generation, discard the assistant reply.
+			if !toolLoopPersisted && (fullContent != "" || err != nil) && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
+				entries := traceEntries
+				if err != nil && len(entries) == 0 {
+					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+					entry.Error = err.Error()
 					entry.Complete()
 					entries = []model.TraceEntry{entry}
 				}
@@ -1141,11 +1141,11 @@ loop:
 	}
 
 	// Send done event if we finished normally
-		sendSSE(c.Writer, flusher, StreamEvent{
-			Type: "done",
-			Data: "",
-		})
-	}
+	sendSSE(c.Writer, flusher, StreamEvent{
+		Type: "done",
+		Data: "",
+	})
+}
 
 // AttachSessionStream attaches to an in-flight chat stream for an existing session (best-effort).
 // GET /api/sessions/:id/stream
@@ -2234,19 +2234,19 @@ func (sm *StreamManager) Remove(sessionID string) {
 
 // StreamBroadcaster handles broadcasting events to multiple clients (tabs) for the same session.
 type StreamBroadcaster struct {
-	sessionID string
-	clients   map[chan StreamEvent]bool
-	mu        sync.RWMutex
+	sessionID   string
+	clients     map[chan StreamEvent]bool
+	mu          sync.RWMutex
 	broadcastMu sync.RWMutex
-	manager   *StreamManager
-	started   bool
-	startMu   sync.Mutex
+	manager     *StreamManager
+	started     bool
+	startMu     sync.Mutex
 
 	closed bool
 
-	genMu    sync.RWMutex
+	genMu     sync.RWMutex
 	genCancel context.CancelFunc
-	canceled bool
+	canceled  bool
 
 	stateMu sync.RWMutex
 	active  map[string]*streamMsgState
