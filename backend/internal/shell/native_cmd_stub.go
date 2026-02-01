@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux && !windows
 
 package shell
 
@@ -7,7 +7,6 @@ import (
 	"os/exec"
 )
 
-func newNativeBashCommand(_, _, _, _ string) (*exec.Cmd, string, error) {
-	return nil, "", errors.New("native sandbox is not supported on this platform (use sandbox_mode=docker)")
+func newNativeBashCommand(_, _, _, _ string) (*exec.Cmd, func(), error) {
+	return nil, nil, errors.New("native sandbox is not supported on this platform (use sandbox_mode=docker)")
 }
-

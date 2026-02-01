@@ -6,7 +6,7 @@
 ## 2. Implementation (after proposal approval)
 - [x] 2.1 Introduce a unified sandbox policy abstraction for command tools (none/docker/native)
 - [x] 2.2 Implement macOS native backend (Seatbelt via `/usr/bin/sandbox-exec`)
-- [ ] 2.3 Implement Linux native backend (Landlock; best-effort)
+- [x] 2.3 Implement Linux native backend (Landlock; best-effort)
 - [ ] 2.4 Implement Windows native backend (Restricted Token + ACL; best-effort)
 - [x] 2.5 Allow safe deletion commands (e.g., `rm`) when sandbox is hard-boundary (native/docker)
 - [x] 2.6 Add doctor diagnostics for native sandbox availability
