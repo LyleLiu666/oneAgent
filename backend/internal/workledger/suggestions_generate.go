@@ -39,7 +39,9 @@ func (s *Store) GenerateSuggestionsV1(ctx context.Context, in GenerateSuggestion
 
 	lookback := in.LookbackDays
 	if lookback <= 0 {
-		lookback = 7
+		// Default aligns with the daily learning cadence to avoid repeatedly
+		// resurfacing older receipts as "new" SOP suggestions.
+		lookback = 1
 	}
 	if lookback > 30 {
 		lookback = 30

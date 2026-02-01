@@ -315,7 +315,7 @@ const generateOneSuggestion = async () => {
   sopLoading.value = true;
   sopError.value = null;
   try {
-    await generateSopSuggestions({ count: 1, lookback_days: 7 });
+    await generateSopSuggestions({ count: 1, lookback_days: 1 });
     await loadSopSuggestionsList();
     await loadLedgerStatus();
   } catch (e: any) {

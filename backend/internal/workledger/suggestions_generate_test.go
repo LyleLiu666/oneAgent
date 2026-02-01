@@ -162,6 +162,59 @@ func TestStore_GenerateSuggestionsV1_DedupWithinDay(t *testing.T) {
 	}
 }
 
+func TestStore_GenerateSuggestionsV1_DefaultLookbackIsOneDay(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewStore(filepath.Join(base, "ledger"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	now := time.Now().UTC()
+	_, err = store.CreateReceipt(CreateReceiptInput{
+		PrincipalID: "local",
+		Kind:        ReceiptKindSubagentRun,
+		Status:      ReceiptStatusSucceeded,
+		StartedAt:   now.Add(-2*24*time.Hour - 2*time.Minute),
+		FinishedAt:  now.Add(-2 * 24 * time.Hour),
+		Summary:     "usable",
+		Artifacts: ReceiptArtifacts{
+			FindingsPath: "f-old.md",
+			TraceLogPath: "t-old.jsonl",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateReceipt(old): %v", err)
+	}
+	_, err = store.CreateReceipt(CreateReceiptInput{
+		PrincipalID: "local",
+		Kind:        ReceiptKindSubagentRun,
+		Status:      ReceiptStatusSucceeded,
+		StartedAt:   now.Add(-1*time.Hour - 2*time.Minute),
+		FinishedAt:  now.Add(-1 * time.Hour),
+		Summary:     "usable",
+		Artifacts: ReceiptArtifacts{
+			FindingsPath: "f-new.md",
+			TraceLogPath: "t-new.jsonl",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateReceipt(new): %v", err)
+	}
+
+	created, err := store.GenerateSuggestionsV1(context.Background(), GenerateSuggestionsInput{
+		PrincipalID: "local",
+		DayKey:      DayKey(now),
+		// LookbackDays omitted: should default to the daily cadence (1 day)
+		Count: 1,
+	})
+	if err != nil {
+		t.Fatalf("GenerateSuggestionsV1: %v", err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("expected 0 suggestions with default 1-day lookback, got %d", len(created))
+	}
+}
+
 func TestStore_GenerateSuggestionsV1_AttachesGovernanceHints(t *testing.T) {
 	base := t.TempDir()
 	store, err := NewStore(filepath.Join(base, "ledger"))

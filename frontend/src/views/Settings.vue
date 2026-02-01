@@ -193,7 +193,7 @@ const generateOneSuggestion = async () => {
   sopLoading.value = true
   sopError.value = ''
   try {
-    await generateSopSuggestions({ count: 1, lookback_days: 7 })
+    await generateSopSuggestions({ count: 1, lookback_days: 1 })
     await loadSopSuggestionsList()
   } catch (e: any) {
     sopError.value = e?.message || '生成建议失败'
