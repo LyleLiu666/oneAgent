@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Send, Square, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
+import { useUIStore } from '@/stores/ui'
 import { streamChat, attachChatStream, stopSessionStream, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
@@ -13,6 +14,7 @@ import ToolMessage from './ToolMessage.vue'
 import TaskQueuePanel from './TaskQueuePanel.vue'
 
 const chatStore = useChatStore()
+const uiStore = useUIStore()
 
 type ChatUIMode = 'full' | 'secretary'
 
@@ -20,19 +22,14 @@ const props = defineProps<{
   initialMode?: ChatUIMode
 }>()
 
-const CHAT_UI_MODE_KEY = 'oneagent-chat-ui-mode'
-
 const normalizeChatUIMode = (raw: any): ChatUIMode | undefined => {
   const v = String(raw || '').trim().toLowerCase()
   if (v === 'full' || v === 'secretary') return v
   return undefined
 }
 
-const chatUIMode = ref<ChatUIMode>(
-  normalizeChatUIMode(props.initialMode) ??
-    normalizeChatUIMode(localStorage.getItem(CHAT_UI_MODE_KEY)) ??
-    'full'
-)
+const isSecretaryMode = computed(() => uiStore.mode === 'secretary')
+const showHistory = computed(() => !isSecretaryMode.value)
 
 // Local state
 const inputMessage = ref('')
@@ -42,7 +39,6 @@ const showScrollButton = ref(false)
 const copiedId = ref<number | null>(null)
 const sessionsLoading = ref(false)
 const loadingHistory = ref(false)
-const showHistory = ref(chatUIMode.value !== 'secretary') // Control visibility of history panel
 const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
 const toolsLoading = ref(false)
@@ -165,8 +161,6 @@ const showSkillsHelpHint = computed(() => {
   )
 })
 
-const isSecretaryMode = computed(() => chatUIMode.value === 'secretary')
-
 const extractToolCallIDs = (msg: ChatMessage): string[] => {
   const calls = Array.isArray(msg.tool?.toolCalls) ? msg.tool?.toolCalls : []
   return calls.map((c: any) => String(c?.id || '').trim()).filter((id: string) => !!id)
@@ -285,7 +279,7 @@ const toolSummary = computed(() => {
 })
 
 const toggleChatUIMode = () => {
-  chatUIMode.value = isSecretaryMode.value ? 'full' : 'secretary'
+  uiStore.toggleMode()
 }
 
 // Methods
@@ -1434,16 +1428,11 @@ watch(
   (next) => {
     const normalized = normalizeChatUIMode(next)
     if (!normalized) return
-    if (chatUIMode.value === normalized) return
-    chatUIMode.value = normalized
+    if (uiStore.mode === normalized) return
+    uiStore.setMode(normalized)
   },
   { immediate: true }
 )
-
-watch(chatUIMode, (next) => {
-  localStorage.setItem(CHAT_UI_MODE_KEY, next)
-  showHistory.value = next !== 'secretary'
-})
 
 
 const handleWelcomeSelect = (prompt: string) => {

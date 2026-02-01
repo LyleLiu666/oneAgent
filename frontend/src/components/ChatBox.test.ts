@@ -45,6 +45,7 @@ it('sets workspace path after clicking Browse', async () => {
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
     const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
         global: {
             plugins: [pinia],
         },
