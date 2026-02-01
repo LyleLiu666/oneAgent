@@ -13,6 +13,7 @@ import ThinkingProcess from './ThinkingProcess.vue'
 import ToolMessage from './ToolMessage.vue'
 import TaskQueuePanel from './TaskQueuePanel.vue'
 import SecretaryStatusHints from './SecretaryStatusHints.vue'
+import SecretaryTaskDeliverables from './SecretaryTaskDeliverables.vue'
 
 const chatStore = useChatStore()
 const uiStore = useUIStore()
@@ -1704,6 +1705,8 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <SecretaryTaskDeliverables v-if="isSecretaryMode" :workspace="workspacePath" />
 
       <TaskQueuePanel v-if="!isSecretaryMode" :workspace="workspacePath" :model-id="selectedModelId" />
 
