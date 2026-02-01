@@ -116,3 +116,56 @@
 2) **秘书模式下是否允许访问非 chat 页面**：仅隐藏入口（可 URL 直达），还是要路由级强制重定向到 `/secretary`？
 3) **秘书模式的“回归完全模式”入口形态**：保留当前 Chat header 按钮，还是要更像微信（放在“⋯更多”里/长按/命令面板）？
 4) **秘书模式下的可观测性露出**：你希望默认完全不可见，还是要保留一个极轻的“状态/进度”提示（例如一行提示或角标）？
+
+---
+
+## 6) 执行顺序（地基 → 上层，避免搅和在一起）
+
+目标：把后续工作固化成一个“按依赖顺序推进”的队列；每一步都对应一个 OpenSpec change（或补齐现有 change 的残留任务），完成后按 TDD 验证并提交，再进入下一步。
+
+> 状态说明：
+> - ✅：已完成（spec+实现+验证）
+> - 🟡：进行中/未收尾
+> - ⏭️：下一步（建议新建 change）
+
+### L0 地基：运行时边界与安全（跨平台能力）
+1) 🟡 `add-native-command-sandbox`：补齐 Linux/Windows native sandbox（Landlock/Restricted Token 等，best-effort）
+   - **模块边界**：仅触碰 `backend/internal/sandbox/**`（或等价）、命令工具执行层、doctor；不要把平台细节泄漏到 handler/业务层。
+   - **Hard Gate**：集成测试“workspace 内可删、越界拒绝”，并在不可用平台上可预测 skip。
+
+### L1 地基：对话主循环可靠性（长跑能力）
+2) ✅ `update-tool-loop-limits-and-write-file-no-truncate`：工具 loop max_steps 可配置 + write_file fail-fast
+3) ✅ `add-session-context-compression-verification`：会话压缩可回归 + 阈值可配置（dev/诊断）
+4) 🟡 `add-chat-stream-recovery-and-stop`：补齐 QA 收尾（把 4.1/4.2 变成可回归验证或至少可复现实验脚本）
+   - **模块边界**：Chat streaming 的可靠性验证优先在 backend integration test + frontend component test；避免把“测试逻辑/调试逻辑”混进生产代码。
+   - **Hard Gate**：可回归验证“刷新后可 attach 继续”、“Stop 后不落盘 reply 且后端 generation 终止”。
+
+### L2 壳层：默认就是秘书（入口心智一致）
+5) ✅ `update-app-shell-secretary-first`：全局 `ui_mode`（secretary/full）+ Sidebar 仅 full 可见 + deep-link 提示
+   - **模块边界**：`ui_mode` 只由 `frontend/src/stores/ui.ts` 负责；任何页面/组件不得各自维护第二份 mode 状态。
+
+### L3 上层：秘书模式的“低噪声可观测性”（不等于把侧边栏搬进来）
+6) ⏭️ `add-secretary-status-hints`（建议新建 change）
+   - **做什么**：在 `ui_mode=secretary` 下提供极轻的状态提示（例如 SOP 待治理数、任务运行中），且不引入“管理系统外观”。
+   - **模块边界**：
+     - 状态拉取逻辑抽成 composable（例如 `useLedgerStatusToday`），Sidebar/SecretaryBar 复用，避免重复定时器逻辑。
+     - UI 作为 App Shell 的一部分（例如 `SecretaryStatusBar`），不要继续膨胀 `ChatBox.vue`。
+   - **Hard Gate**：unit tests 覆盖 badge 出现/隐藏、点击进入 full mode 的路径；不依赖 UI 文案选择器。
+
+### L4 上层：把“管理系统”变成自动化（任务化执行 + 交付）
+7) ⏭️ `add-secretary-chat-task-handoff`（建议新建 change）
+   - **做什么**：秘书模式下将“长任务”自动落入 Task Queue（异步），对话仅展示进度与最终交付入口（而不是把全过程塞进一轮 chat）。
+   - **模块边界**：
+     - 后端新增“编排层”（secretary/orchestrator）负责判定/入队/回传状态；不要把 Task Queue 逻辑揉进 `chat.go`。
+     - Chat 仍是即时对话；Task Queue 仍是长跑执行；二者通过明确的事件/引用桥接（receipt/task_id）。
+   - **Hard Gate**：集成测试：发起一个模拟长任务 → 产生 task + events → 刷新后可恢复显示进度 → 完成后可打开 artifacts。
+
+8) ⏭️ `add-secretary-deliverable-cards`（建议新建 change）
+   - **做什么**：对话里结构化交付（文件路径/diff/导出文档/report 链接），形成“可点击卡片”。
+   - **模块边界**：渲染组件独立（`DeliverableCard`），后端输出结构化引用（不要让前端从纯文本里用正则猜）。
+
+9) ⏭️ `add-secretary-recovery-actions`（建议新建 change）
+   - **做什么**：失败时给出下一步（重试/继续/缩小范围/进入 full 排障），把“可恢复”做成默认体验。
+
+### L5 长期上层：多线程与复利（秘书=编排器）
+10) ✅/🟡 对齐 `add-workflow-orchestration-graph` 等长期方向，把“并行工作线/交付物传递/Hard&Soft Gate”落到 Secretary orchestration 上。
