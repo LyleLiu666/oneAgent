@@ -94,6 +94,9 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/tasks/:id/attempts/:attempt_id/review_comments", handler.PostTaskAttemptReviewComment)
 		api.POST("/tasks/:id/attempts/:attempt_id/rollback", handler.RollbackTaskAttempt)
 
+		// Subagent run artifacts (logs/subagent/...).
+		api.GET("/subagent/sessions/:session_id/runs/:run_id/artifacts/:kind", handler.GetSubagentRunArtifact)
+
 		// Work ledger.
 		api.GET("/ledger/receipts", handler.ListReceipts)
 		api.GET("/ledger/receipts/:id", handler.GetReceipt)

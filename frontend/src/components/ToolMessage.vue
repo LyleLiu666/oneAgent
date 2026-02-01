@@ -2,10 +2,11 @@
 import { ref, computed } from 'vue'
 import { Cpu, ChevronDown, ChevronRight, Loader2 } from 'lucide-vue-next'
 import type { ChatMessage } from '@/stores/chat'
-import { approveToolApproval, denyToolApproval } from '@/api/client'
+import { approveToolApproval, denyToolApproval, getSubagentRunArtifact } from '@/api/client'
 
 const props = defineProps<{
   message: ChatMessage
+  sessionId?: string
   pending?: boolean
   progressTokens?: number
   showTrace?: boolean
@@ -135,6 +136,63 @@ const formatMaybeJson = (raw: string): string => {
     return JSON.stringify(JSON.parse(trimmed), null, 2)
   } catch {
     return raw
+  }
+}
+
+type SubagentRunInfo = {
+  runId: string
+  findingsPath?: string
+  traceLogPath?: string
+}
+
+const subagentRunInfo = computed<SubagentRunInfo | null>(() => {
+  if (!isToolResult.value) return null
+  const toolName = String(props.message.tool?.name || '').trim()
+  if (toolName !== 'subagent') return null
+
+  const raw = String(props.message.tool?.output || props.message.content || '').trim()
+  const parsed = tryParseJsonObject(raw)
+  if (!parsed) return null
+
+  const runId = String((parsed as any).run_id || '').trim()
+  if (!runId) return null
+
+  const findingsPath = String((parsed as any).findings_path || '').trim()
+  const traceLogPath = String((parsed as any).trace_log_path || '').trim()
+  return {
+    runId,
+    findingsPath: findingsPath || undefined,
+    traceLogPath: traceLogPath || undefined,
+  }
+})
+
+const subagentArtifactsBusy = ref(false)
+const subagentArtifactsError = ref('')
+const subagentTrace = ref('')
+const subagentFindings = ref('')
+
+const loadSubagentArtifact = async (kind: 'trace' | 'findings') => {
+  const info = subagentRunInfo.value
+  if (!info) return
+  const sessionId = String(props.sessionId || '').trim()
+  if (!sessionId) {
+    subagentArtifactsError.value = '缺少 session_id，无法加载子任务产物。'
+    return
+  }
+  if (subagentArtifactsBusy.value) return
+  subagentArtifactsBusy.value = true
+  subagentArtifactsError.value = ''
+  try {
+    const res = await getSubagentRunArtifact(sessionId, info.runId, kind, { tail: kind === 'trace' })
+    if (kind === 'trace') {
+      subagentTrace.value = String((res as any)?.content || '')
+    } else {
+      subagentFindings.value = String((res as any)?.content || '')
+    }
+  } catch (e: any) {
+    subagentArtifactsError.value = String(e?.message || e)
+  } finally {
+    subagentArtifactsBusy.value = false
   }
 }
 </script>
@@ -332,6 +390,60 @@ const formatMaybeJson = (raw: string): string => {
                 被工具权限拦截。
                 <a href="/governance/tools" class="underline text-primary-400 hover:text-primary-300">工具权限</a>
               </div>
+            </div>
+
+            <div v-if="subagentRunInfo" class="mt-4 space-y-2">
+              <div class="text-[11px] text-surface-500">subagent artifacts</div>
+              <div class="flex flex-wrap gap-2 items-center">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-md border border-surface-700 bg-surface-950 px-3 py-1.5 text-xs text-surface-200 hover:bg-surface-900 disabled:opacity-60"
+                  :disabled="subagentArtifactsBusy"
+                  @click="loadSubagentArtifact('findings')"
+                >
+                  <Loader2 v-if="subagentArtifactsBusy" class="w-3.5 h-3.5 animate-spin" />
+                  加载 findings
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-md border border-surface-700 bg-surface-950 px-3 py-1.5 text-xs text-surface-200 hover:bg-surface-900 disabled:opacity-60"
+                  :disabled="subagentArtifactsBusy"
+                  @click="loadSubagentArtifact('trace')"
+                >
+                  <Loader2 v-if="subagentArtifactsBusy" class="w-3.5 h-3.5 animate-spin" />
+                  加载 trace（tail）
+                </button>
+                <span class="text-[11px] text-surface-500 font-mono">run_id={{ subagentRunInfo.runId }}</span>
+              </div>
+              <div v-if="subagentRunInfo.findingsPath || subagentRunInfo.traceLogPath" class="text-[11px] text-surface-500 space-y-0.5">
+                <div v-if="subagentRunInfo.findingsPath" class="truncate" :title="subagentRunInfo.findingsPath">
+                  findings_path: <span class="font-mono">{{ subagentRunInfo.findingsPath }}</span>
+                </div>
+                <div v-if="subagentRunInfo.traceLogPath" class="truncate" :title="subagentRunInfo.traceLogPath">
+                  trace_log_path: <span class="font-mono">{{ subagentRunInfo.traceLogPath }}</span>
+                </div>
+              </div>
+              <div v-if="subagentArtifactsError" class="text-xs text-red-400">{{ subagentArtifactsError }}</div>
+
+              <details
+                v-if="subagentFindings && subagentFindings.trim()"
+                class="rounded-xl bg-surface-900/60 border border-surface-700/50"
+              >
+                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">查看 Findings</summary>
+                <div class="px-4 pb-4">
+                  <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[320px] overflow-y-auto custom-scrollbar shadow-inner">{{ subagentFindings }}</pre>
+                </div>
+              </details>
+
+              <details
+                v-if="subagentTrace && subagentTrace.trim()"
+                class="rounded-xl bg-surface-900/60 border border-surface-700/50"
+              >
+                <summary class="cursor-pointer select-none px-4 py-3 text-sm text-surface-200">查看 Subagent Trace（tail）</summary>
+                <div class="px-4 pb-4">
+                  <pre class="p-3 bg-surface-950 rounded-md border border-surface-800/50 whitespace-pre-wrap break-words text-xs font-mono text-surface-300 max-h-[320px] overflow-y-auto custom-scrollbar shadow-inner">{{ subagentTrace }}</pre>
+                </div>
+              </details>
             </div>
           </template>
           <template v-else>

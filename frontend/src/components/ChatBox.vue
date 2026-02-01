@@ -1998,6 +1998,7 @@ onMounted(async () => {
           >
             <ToolMessage
               :message="message"
+              :session-id="chatStore.currentSessionId"
               :pending="isToolCallPending(message, index)"
               :progress-tokens="chatStore.lastResponseTokens"
               :show-trace="!isSecretaryMode"

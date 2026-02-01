@@ -670,6 +670,18 @@ export async function getTaskAttemptArtifact(
   );
 }
 
+export async function getSubagentRunArtifact(
+  sessionId: string,
+  runId: string,
+  kind: string,
+  opts?: { tail?: boolean },
+): Promise<TaskAttemptArtifactContent> {
+  const q = opts?.tail ? "?tail=1" : "";
+  return api(
+    `/api/subagent/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(kind)}${q}`,
+  );
+}
+
 export async function getTaskAttemptDiffPatch(
   taskId: string,
   attemptId: string,
