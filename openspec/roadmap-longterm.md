@@ -1,12 +1,13 @@
 # oneAgent Roadmap（愿景 → 支柱 → 路线图 / Backlog）
 
-更新时间：2026-01-31
+更新时间：2026-02-01
 
 目的：把「我们要做什么、为什么做、先做什么、做完如何验收」固化成一份长期可执行文档。  
 原则：**没有文档就没有执行**；每完成一项工作，必须回到愿景做一次对照检查（Simple/Beautiful/Progressive + Evidence）。
 
 > 相关文档：
 > - UX 愿景（心理与优先级）：`docs/ux-vision.md`
+> - Secretary-first（短期专项：默认只保留秘书模式）：`openspec/roadmap-secretary-first.md`
 > - 项目约束与完成定义：`openspec/project.md`
 > - 变更进度（Done/Doing）：`openspec list`
 > - 变更规范（OpenSpec）：`openspec/changes/review.md`
@@ -18,6 +19,8 @@
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
+- `update-app-shell-secretary-first`：默认只保留秘书模式；仅完全模式显示 Sidebar/菜单
+- `add-session-context-compression-verification`：会话自动压缩的可回归验证（确认生效）
 - `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除、不断网）
 - `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
 
