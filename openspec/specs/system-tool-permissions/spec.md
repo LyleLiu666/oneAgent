@@ -31,31 +31,31 @@ TBD - created by archiving change add-tool-permissions-system. Update Purpose af
 ### Requirement: Command tools MUST support profiles (readonly/dev/full)
 系统必须 (MUST) 为 `bash`/`run_command` 提供可配置的命令 profile（`readonly/dev/coding/full`），默认使用最小权限集合，并优先采用 allowlist。
 
-其中 `coding` profile 仅用于 coding agent 场景，必须 (MUST) 结合强隔离 sandbox（例如 `sandbox_mode=docker`）使用；当环境不满足时必须 fail-closed 并返回可操作错误（best-effort）。
+其中 `coding` profile 仅用于 coding agent 场景，必须 (MUST) 结合强隔离 sandbox 使用；当环境不满足时必须 fail-closed 并返回可操作错误（best-effort）。
 
 #### Scenario: readonly profile blocks interpreters
 - **GIVEN** 当前 profile 为 `readonly`
 - **WHEN** 调用 `bash` 执行 `python`/`node` 等解释器
 - **THEN** 系统拒绝该命令并返回可解释错误
 
-#### Scenario: coding profile requires docker sandbox
-- **GIVEN** 当前 profile 为 `coding` 且 policy 要求 `sandbox_mode=docker`
+#### Scenario: coding profile requires hard-boundary sandbox
+- **GIVEN** 当前 profile 为 `coding` 且 policy 要求 `sandbox_mode=native`（或 `docker`）
 - **WHEN** 调用 `run_command` 执行 `git status`（best-effort）
-- **THEN** 系统在 docker sandbox 中执行或返回可操作的环境缺失错误（best-effort）
+- **THEN** 系统在硬边界 sandbox 中执行或返回可操作的环境缺失错误（best-effort）
 
 ### Requirement: Command tools MUST support sandbox_mode constraints
-系统必须 (MUST) 在 tool permissions policy 的 constraints 中支持对命令类工具（`bash`/`run_command`）指定 `sandbox_mode`（例如 `none`/`docker`），并在执行时强制遵守。
+系统必须 (MUST) 在 tool permissions policy 的 constraints 中支持对命令类工具（`bash`/`run_command`）指定 `sandbox_mode`（例如 `none`/`docker`/`native`），并在执行时强制遵守。
 
-#### Scenario: Policy requires docker sandbox
-- **GIVEN** policy 为 `bash` 或 `run_command` 指定 `sandbox_mode=docker`
-- **WHEN** LLM 尝试调用该工具
-- **THEN** 系统在 Docker sandbox 中执行命令（workspace 挂载、默认无网络）
+#### Scenario: Policy requires native sandbox
+- **GIVEN** policy 为 `bash` 或 `run_command` 指定 `sandbox_mode=native`
+- **WHEN** LLM 尝试调用该工具执行会写/删文件的命令（例如 `rm -rf tmp/`）
+- **THEN** 系统在 native sandbox 中执行命令
 - **AND** tool output 标注该次执行的 sandbox_mode
 
-#### Scenario: Sandbox unavailable is actionable failure
-- **GIVEN** policy 要求 `sandbox_mode=docker` 但运行环境不可用（Docker 未安装或不可用）
+#### Scenario: Native sandbox unavailable is actionable failure
+- **GIVEN** policy 要求 `sandbox_mode=native` 但运行环境不可用（平台不支持/依赖缺失/初始化失败）
 - **WHEN** LLM 调用该工具
-- **THEN** 系统拒绝执行并返回可操作错误（包含如何安装/开启或如何降级策略）
+- **THEN** 系统拒绝执行并返回可操作错误（包含如何启用/安装/修复或如何调整策略）
 
 ### Requirement: Global kill-switch MUST override all policies
 系统必须 (MUST) 保留 `ONEAGENT_DISABLE_TOOL_*` 作为全局 kill-switch，优先级最高。
@@ -121,4 +121,37 @@ TBD - created by archiving change add-tool-permissions-system. Update Purpose af
 - **GIVEN** 用户编辑 tool policy JSON
 - **WHEN** 用户输入/粘贴策略内容
 - **THEN** 编辑器区域具备足够高度且可一键格式化（best-effort）
+
+### Requirement: Command tools MUST support high-risk approval gating
+系统必须 (MUST) 支持在 tool permissions policy 的 constraints 中为命令类工具（`bash`/`run_command`）配置 `approval=high_risk`，其语义为：
+- 仅当本次请求的命令被判定为“高风险”时才进入审批门；
+- `run_command` 的 `poll/cancel` 等非执行动作不得触发审批（best-effort）。
+
+#### Scenario: Safe command does not require approval
+- **GIVEN** policy 为 `bash` 设置 `approval=high_risk`
+- **WHEN** LLM 调用 `bash` 执行 `ls`
+- **THEN** 系统不应返回 `approval_required`（best-effort）
+
+#### Scenario: High-risk command requires approval when in manual mode
+- **GIVEN** policy 为 `bash` 设置 `approval=high_risk`
+- **AND** 当前用户设置 `command_approval_mode=manual`
+- **WHEN** LLM 调用 `bash` 执行 `rm -rf foo`
+- **THEN** 系统必须阻断执行并返回 `approval_required`（best-effort）
+
+#### Scenario: High-risk command is auto-approved when in auto mode
+- **GIVEN** policy 为 `bash` 设置 `approval=high_risk`
+- **AND** 当前用户设置 `command_approval_mode=auto`
+- **WHEN** LLM 调用 `bash` 执行 `rm -rf foo`
+- **THEN** 系统应自动批准并继续执行（best-effort）
+- **AND** 审批记录必须可被审计（best-effort）
+
+### Requirement: System MUST provide a user-visible toggle for command approval mode
+系统必须 (MUST) 提供一个用户可见的设置项用于切换“高风险命令审批模式”，至少支持：
+- `auto`：默认由系统/秘书自动审批（并留痕）
+- `manual`：由用户手动审批（approve/deny）
+
+#### Scenario: User switches approval mode to manual
+- **GIVEN** 用户当前 `command_approval_mode=auto`
+- **WHEN** 用户在 UI 中切换为 `manual`
+- **THEN** 后续高风险命令调用应进入 `approval_required` 流程（best-effort）
 

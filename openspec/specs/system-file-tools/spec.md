@@ -104,3 +104,46 @@ TBD - created by archiving change add-read-file-tool. Update Purpose after archi
 - **WHEN** agent 调用 `edit_v2(...)`
 - **THEN** 系统返回的 `diff_preview` 仍然是可读的摘要（被 size cap 截断）
 
+### Requirement: 系统必须提供 `trash_file` 工具（软删除 / move-to-trash）
+系统必须 (MUST) 提供一个 `trash_file` 工具，用于对 workspace 内的文件/目录执行软删除：从原路径移除，并移动到 workspace 内的系统回收站目录（例如 `<workspace>/.oneagent/trash/`）。
+
+`trash_file` 必须 (MUST)：
+- 仅允许操作 workspace 内路径（拒绝 `..` 与 symlink 逃逸导致的越界）
+- 在工具输出中返回 `trash_id`、`original_path` 与 `trashed_path`（解析后的真实路径），便于审计与人工恢复
+- 在执行阶段强制执行 tool permissions 中的 `file_scope` 等约束，至少对 `filePath` 进行限制
+
+#### Scenario: trash_file 将文件移动到回收站并从原位置消失
+- **GIVEN** workspace 内存在文件 `tmp/a.txt`
+- **WHEN** agent 调用 `trash_file(filePath="tmp/a.txt")`
+- **THEN** `tmp/a.txt` 在原位置不再存在
+- **AND** 系统返回 `trashed_path` 指向 `<workspace>/.oneagent/trash/...` 下的真实路径
+
+#### Scenario: workspace 启用时越界路径被拒绝
+- **GIVEN** workspace 根目录为 `<workspace>/`
+- **WHEN** agent 调用 `trash_file(filePath="../secrets.txt")`
+- **THEN** 系统拒绝并返回“path is outside workspace”的清晰错误
+
+### Requirement: 系统必须自动清理回收站条目（7 天保留期）
+系统必须 (MUST) 对回收站条目实施 7 天保留期：条目创建超过 7 天后必须被永久删除（best-effort），以防止回收站无限增长。
+
+系统必须 (MUST) 自动触发清理（best-effort），无需用户手动调用专用清理工具。
+
+#### Scenario: 超过 7 天的回收站条目在清理后被删除
+- **GIVEN** 回收站中存在一个创建时间超过 7 天的条目
+- **WHEN** 系统执行一次回收站清理
+- **THEN** 该条目被永久删除（payload 与 metadata 不再存在）
+
+### Requirement: `write_file` MUST NOT silently truncate content
+系统必须 (MUST) 确保 `write_file` 不会在无错误信号的情况下写入“被截断的内容”并返回成功（silent partial write）。
+
+当单次入参 `content` 超过系统允许的最大大小时，系统必须 (MUST)：
+- 明确失败（tool result 中 `ok=false` 且返回可理解的错误信息）
+- 不写入/不改动目标文件（避免产生半成品）
+- 给出 best-effort 的下一步建议（例如使用 `append=true` 分段写入）
+
+#### Scenario: Oversize content fails without modifying existing file
+- **GIVEN** 文件 `a.txt` 已存在且内容为 `old`
+- **WHEN** agent 调用 `write_file(filePath="a.txt", content=<oversize>)`
+- **THEN** 工具返回 `ok=false`
+- **AND** `a.txt` 内容仍为 `old`
+
