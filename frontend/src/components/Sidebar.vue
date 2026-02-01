@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   Home,
@@ -22,7 +22,7 @@ import {
 } from 'lucide-vue-next'
 import { useAuth } from '@/composables/useAuth'
 import { useTheme } from '@/composables/useTheme'
-import { getLedgerStatusToday } from '@/api/client'
+import { useLedgerStatusToday } from '@/composables/useLedgerStatusToday'
 
 const router = useRouter()
 const route = useRoute()
@@ -76,30 +76,7 @@ if (savedState) {
 
 const sidebarWidth = computed(() => (isCollapsed.value ? 'w-16' : 'w-64'))
 
-const sopBadgeCount = ref(0)
-
-const refreshLedgerStatus = async () => {
-  try {
-    const st = await getLedgerStatusToday()
-    sopBadgeCount.value = Number(st?.sop_proposed_count || 0)
-  } catch {
-    // keep last known
-  }
-}
-
-let statusTimer: number | undefined
-onMounted(() => {
-  void refreshLedgerStatus()
-  statusTimer = window.setInterval(() => {
-    void refreshLedgerStatus()
-  }, 30_000)
-})
-onUnmounted(() => {
-  if (statusTimer != null) {
-    window.clearInterval(statusTimer)
-    statusTimer = undefined
-  }
-})
+const { sopProposedCount: sopBadgeCount } = useLedgerStatusToday()
 </script>
 
 <template>

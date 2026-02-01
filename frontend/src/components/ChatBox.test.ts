@@ -11,6 +11,12 @@ vi.mock('@/api/client', () => ({
     attachChatStream: vi.fn(),
     stopSessionStream: vi.fn(),
     getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
+    getLedgerStatusToday: vi.fn(async () => ({
+        day_key: '2026-02-01',
+        digest_exists: false,
+        learning_job_status: 'none',
+        sop_proposed_count: 0,
+    })),
     getSessions: vi.fn(async () => []),
     getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
     truncateSession: vi.fn(),

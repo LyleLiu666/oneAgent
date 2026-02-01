@@ -12,6 +12,7 @@ import TraceLog from './TraceLog.vue'
 import ThinkingProcess from './ThinkingProcess.vue'
 import ToolMessage from './ToolMessage.vue'
 import TaskQueuePanel from './TaskQueuePanel.vue'
+import SecretaryStatusHints from './SecretaryStatusHints.vue'
 
 const chatStore = useChatStore()
 const uiStore = useUIStore()
@@ -1512,6 +1513,7 @@ onMounted(async () => {
             </p>
           </div>
           <div class="flex items-center gap-2 flex-wrap justify-end">
+            <SecretaryStatusHints v-if="isSecretaryMode" />
             <button
               type="button"
               data-testid="chat-toggle-mode"
