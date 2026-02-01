@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -35,6 +35,10 @@ vi.mock('@/api/client', () => ({
 }))
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+beforeEach(() => {
+    vi.clearAllMocks()
+})
 
 it('sets workspace path after clicking Browse', async () => {
     const store = new Map<string, string>()
@@ -270,4 +274,87 @@ it('attaches to in-flight stream on reload when last message is user', async () 
     expect(apiClient.attachChatStream).toHaveBeenCalledTimes(1)
     expect((apiClient.attachChatStream as any).mock.calls[0][0]).toBe('s1')
     expect(wrapper.exists()).toBe(true)
+})
+
+it('hands off input to task queue in secretary mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    ;(apiClient.createTask as any).mockResolvedValueOnce({
+        id: 't1',
+        user_id: 'local',
+        workspace: '/tmp/workspace',
+        title: 'T1',
+        prompt: 'do the thing',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attempts: [],
+    })
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('do the thing')
+    await wrapper.get('[data-testid="chat-handoff-task"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.chooseWorkspaceDir).toHaveBeenCalledTimes(1)
+    expect(apiClient.createTask).toHaveBeenCalledTimes(1)
+    expect(apiClient.createTask).toHaveBeenCalledWith({
+        workspace: '/tmp/workspace',
+        prompt: 'do the thing',
+        model_id: undefined,
+    })
+    expect(apiClient.streamChat).not.toHaveBeenCalled()
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+})
+
+it('does not handoff to task queue when workspace selection is canceled', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    ;(apiClient.chooseWorkspaceDir as any).mockResolvedValueOnce({ canceled: true })
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('do the thing')
+    await wrapper.get('[data-testid="chat-handoff-task"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.createTask).not.toHaveBeenCalled()
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('do the thing')
 })

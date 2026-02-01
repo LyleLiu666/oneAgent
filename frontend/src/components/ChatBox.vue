@@ -4,7 +4,7 @@ import { Send, Square, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, C
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
 import { useUIStore } from '@/stores/ui'
-import { streamChat, attachChatStream, stopSessionStream, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig } from '@/api/client'
+import { streamChat, attachChatStream, stopSessionStream, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig, createTask } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
@@ -64,6 +64,10 @@ const toolPickerOpen = ref(false)
 const toolPickerEl = ref<HTMLElement | null>(null)
 
 const activeStreamAbort = ref<AbortController | null>(null)
+
+const taskHandoffSubmitting = ref(false)
+const taskHandoffError = ref('')
+const taskHandoffSuccess = ref('')
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
   if (!msg.isStreaming) return undefined
@@ -240,6 +244,15 @@ const canSend = computed(
     !chatStore.isLoading &&
     !loadingHistory.value &&
     !workspaceOnboardingBlocking.value
+)
+
+const canHandoffTask = computed(
+  () =>
+    isSecretaryMode.value &&
+    inputMessage.value.trim() &&
+    !chatStore.isLoading &&
+    !loadingHistory.value &&
+    !taskHandoffSubmitting.value
 )
 
 const currentSessionTitle = computed(() => chatStore.currentSession?.title || '新对话')
@@ -1421,7 +1434,16 @@ watch(
 
 watch(
   () => inputMessage.value,
-  () => nextTick(adjustTextareaHeight)
+  (next) => {
+    if (String(next || '').trim()) {
+      taskHandoffError.value = ''
+      taskHandoffSuccess.value = ''
+    } else {
+      // Keep success feedback visible after clearing input (e.g., successful handoff).
+      taskHandoffError.value = ''
+    }
+    nextTick(adjustTextareaHeight)
+  }
 )
 
 watch(
@@ -1439,6 +1461,52 @@ watch(
 const handleWelcomeSelect = (prompt: string) => {
   inputMessage.value = prompt
   sendMessage()
+}
+
+const handoffToTask = async () => {
+  if (!canHandoffTask.value) return
+
+  const prompt = inputMessage.value.trim()
+  if (!prompt) return
+
+  taskHandoffSubmitting.value = true
+  taskHandoffError.value = ''
+  taskHandoffSuccess.value = ''
+
+  try {
+    let ws = String(workspacePath.value || '').trim()
+    if (!ws) {
+      const def = String(serverDefaultWorkspace.value || '').trim()
+      if (def) {
+        workspacePath.value = def
+        ws = def
+      } else {
+        await chooseWorkspace()
+        ws = String(workspacePath.value || '').trim()
+      }
+    }
+
+    if (!ws) {
+      taskHandoffError.value = '未选择工作区，无法创建后台任务。'
+      return
+    }
+
+    await createTask({
+      workspace: ws,
+      prompt,
+      model_id: String(selectedModelId.value || '').trim() || undefined,
+    })
+
+    inputMessage.value = ''
+    if (inputEl.value) inputEl.value.style.height = ''
+    taskHandoffSuccess.value = '已交给后台处理'
+  } catch (error) {
+    const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to create task.'
+    taskHandoffError.value = String(msg)
+    console.error('Failed to handoff task:', error)
+  } finally {
+    taskHandoffSubmitting.value = false
+  }
 }
 
 onMounted(async () => {
@@ -1857,6 +1925,21 @@ onMounted(async () => {
               />
             </div>
             <button
+              v-if="isSecretaryMode && !chatStore.isLoading"
+              data-testid="chat-handoff-task"
+              @click="handoffToTask"
+              :disabled="!canHandoffTask"
+              :class="[
+                'p-3 rounded-xl transition-all duration-200',
+                canHandoffTask
+                  ? 'bg-surface-800 text-surface-200 hover:bg-surface-700'
+                  : 'bg-surface-900 text-surface-600 cursor-not-allowed',
+              ]"
+              title="交给后台（创建任务）"
+            >
+              <Sparkles class="w-5 h-5" />
+            </button>
+            <button
               v-if="chatStore.isLoading"
               data-testid="chat-stop"
               @click="stopCurrentReply"
@@ -1879,6 +1962,20 @@ onMounted(async () => {
               <Send class="w-5 h-5" />
             </button>
           </div>
+          <p
+            v-if="taskHandoffError"
+            data-testid="chat-handoff-error"
+            class="text-xs text-red-400 mt-2 text-center"
+          >
+            {{ taskHandoffError }}
+          </p>
+          <p
+            v-else-if="taskHandoffSuccess"
+            data-testid="chat-handoff-success"
+            class="text-xs text-surface-500 mt-2 text-center"
+          >
+            {{ taskHandoffSuccess }}
+          </p>
           <p class="text-xs text-surface-500 mt-2 text-center">
             回车发送，Shift+Enter 换行
           </p>
