@@ -24,7 +24,15 @@ export const api = ofetch.create({
 
 // Stream event interface
 export interface StreamEvent {
-  type: "session" | "content" | "trace" | "done" | "error" | "usage" | "msg";
+  type:
+    | "session"
+    | "content"
+    | "trace"
+    | "done"
+    | "error"
+    | "usage"
+    | "msg"
+    | "canceled";
   data: string;
 }
 
@@ -88,6 +96,82 @@ function splitIncompleteUtf8Tail(bytes: Uint8Array): {
 /**
  * Stream chat messages from the API
  */
+async function consumeSSE(
+  response: Response,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("No response body");
+  }
+
+  const decoder = new TextDecoder();
+  let pendingBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const combined = concatBytes(pendingBytes, value);
+    const { complete, remainder } = splitIncompleteUtf8Tail(combined);
+    pendingBytes = remainder;
+
+    buffer += decoder.decode(complete);
+    // Normalize CRLF -> LF so we can reliably split SSE events.
+    buffer = buffer.replace(/\r\n/g, "\n");
+
+    // Process complete events
+    let delimiterIndex = buffer.indexOf("\n\n");
+    while (delimiterIndex !== -1) {
+      const rawEvent = buffer.slice(0, delimiterIndex);
+      buffer = buffer.slice(delimiterIndex + 2);
+
+      const dataLines = rawEvent
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.replace(/^data:\s?/, ""));
+
+      if (dataLines.length > 0) {
+        const dataText = dataLines.join("\n");
+        try {
+          const data = JSON.parse(dataText);
+          onEvent(data as StreamEvent);
+        } catch (e) {
+          console.error("Failed to parse SSE event:", e);
+        }
+      }
+
+      delimiterIndex = buffer.indexOf("\n\n");
+    }
+  }
+
+  if (pendingBytes.length > 0) {
+    buffer += decoder.decode(pendingBytes);
+  }
+
+  // Process any remaining buffer
+  buffer = buffer.replace(/\r\n/g, "\n");
+  const delimiterIndex = buffer.indexOf("\n\n");
+  const lastEvent = (
+    delimiterIndex === -1 ? buffer : buffer.slice(0, delimiterIndex)
+  ).trim();
+  if (lastEvent) {
+    const dataLines = lastEvent
+      .split("\n")
+      .filter((l) => l.startsWith("data:"))
+      .map((l) => l.replace(/^data:\s?/, ""));
+    if (dataLines.length > 0) {
+      try {
+        const data = JSON.parse(dataLines.join("\n"));
+        onEvent(data as StreamEvent);
+      } catch {
+        // Ignore incomplete / non-JSON tail.
+      }
+    }
+  }
+}
+
 export async function streamChat(
   message: string,
   sessionId: string = "",
@@ -97,12 +181,14 @@ export async function streamChat(
   workspace: string = "",
   onEvent: (event: StreamEvent) => void,
   onError: (error: Error) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const authStore = useAuthStore();
 
   try {
     const response = await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
+      signal,
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
@@ -121,80 +207,59 @@ export async function streamChat(
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("No response body");
-    }
-
-    const decoder = new TextDecoder();
-    let pendingBytes: Uint8Array<ArrayBufferLike> = new Uint8Array();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const combined = concatBytes(pendingBytes, value);
-      const { complete, remainder } = splitIncompleteUtf8Tail(combined);
-      pendingBytes = remainder;
-
-      buffer += decoder.decode(complete);
-      // Normalize CRLF -> LF so we can reliably split SSE events.
-      buffer = buffer.replace(/\r\n/g, "\n");
-
-      // Process complete events
-      let delimiterIndex = buffer.indexOf("\n\n");
-      while (delimiterIndex !== -1) {
-        const rawEvent = buffer.slice(0, delimiterIndex);
-        buffer = buffer.slice(delimiterIndex + 2);
-
-        const dataLines = rawEvent
-          .split("\n")
-          .filter((l) => l.startsWith("data:"))
-          .map((l) => l.replace(/^data:\s?/, ""));
-
-        if (dataLines.length > 0) {
-          const dataText = dataLines.join("\n");
-          try {
-            const data = JSON.parse(dataText);
-            onEvent(data as StreamEvent);
-          } catch (e) {
-            console.error("Failed to parse SSE event:", e);
-          }
-        }
-
-        delimiterIndex = buffer.indexOf("\n\n");
-      }
-    }
-
-    if (pendingBytes.length > 0) {
-      buffer += decoder.decode(pendingBytes);
-    }
-
-    // Process any remaining buffer
-    buffer = buffer.replace(/\r\n/g, "\n");
-    const delimiterIndex = buffer.indexOf("\n\n");
-    const lastEvent = (
-      delimiterIndex === -1 ? buffer : buffer.slice(0, delimiterIndex)
-    ).trim();
-    if (lastEvent) {
-      const dataLines = lastEvent
-        .split("\n")
-        .filter((l) => l.startsWith("data:"))
-        .map((l) => l.replace(/^data:\s?/, ""));
-      if (dataLines.length > 0) {
-        try {
-          const data = JSON.parse(dataLines.join("\n"));
-          onEvent(data as StreamEvent);
-        } catch {
-          // Ignore incomplete / non-JSON tail.
-        }
-      }
-    }
+    await consumeSSE(response, onEvent);
   } catch (error) {
+    const e = error as any;
+    if (e?.name === "AbortError") return;
     onError(error as Error);
   }
+}
+
+/**
+ * Attach to an in-flight stream for an existing session (best-effort).
+ */
+export async function attachChatStream(
+  sessionId: string,
+  onEvent: (event: StreamEvent) => void,
+  onError: (error: Error) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const authStore = useAuthStore();
+  const id = String(sessionId || "").trim();
+  if (!id) {
+    onError(new Error("sessionId is required"));
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/api/sessions/${encodeURIComponent(id)}/stream`,
+      {
+        method: "GET",
+        signal,
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${authStore.token}`,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    await consumeSSE(response, onEvent);
+  } catch (error) {
+    const e = error as any;
+    if (e?.name === "AbortError") return;
+    onError(error as Error);
+  }
+}
+
+export async function stopSessionStream(sessionId: string) {
+  const id = String(sessionId || "").trim();
+  if (!id) throw new Error("sessionId is required");
+  return api(`/api/sessions/${encodeURIComponent(id)}/stop`, { method: "POST" });
 }
 
 /**

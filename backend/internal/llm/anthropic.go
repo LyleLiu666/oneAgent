@@ -274,6 +274,12 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, messages []C
 			}
 
 			fullContent.WriteString(chunk)
+
+			// Trace: OnToken
+			if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+				opts.Trace.OnToken(ctx, chunk)
+			}
+
 			if err := callback(chunk); err != nil {
 				if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 					opts.Trace.OnComplete(ctx, fullContent.String(), err)

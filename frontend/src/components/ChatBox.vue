@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { Send, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
+import { Send, Square, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
-import { streamChat, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig } from '@/api/client'
+import { streamChat, attachChatStream, stopSessionStream, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
@@ -65,6 +65,8 @@ const serverBaseURL = ref('')
 
 const toolPickerOpen = ref(false)
 const toolPickerEl = ref<HTMLElement | null>(null)
+
+const activeStreamAbort = ref<AbortController | null>(null)
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
   if (!msg.isStreaming) return undefined

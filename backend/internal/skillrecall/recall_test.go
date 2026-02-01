@@ -98,7 +98,7 @@ func TestSearch_TokenizesMultiWordQuery(t *testing.T) {
 			t.Fatalf("mkdir: %v", err)
 		}
 	}
-	if err := os.WriteFile(apple, []byte("---\nname: apple-notes\ndescription: Manage Apple Notes via memo\n---\nUse memo notes\n"), 0o644); err != nil {
+	if err := os.WriteFile(apple, []byte("---\nname: apple-notes\ndescription: manage apple notes via memo\n---\nuse memo notes\n"), 0o644); err != nil {
 		t.Fatalf("write apple: %v", err)
 	}
 	if err := os.WriteFile(bear, []byte("---\nname: bear-notes\ndescription: Manage Bear notes\n---\n"), 0o644); err != nil {
@@ -354,9 +354,17 @@ for f in "$@"; do
   fi
   total=0
   for p in $patterns; do
-    c=$(grep -oiF "$p" "$f" 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$c" -gt 0 ]; then
-      total=$((total + c))
+    hit=0
+    while IFS= read -r line; do
+      case "$line" in
+        *"$p"*)
+          hit=1
+          break
+          ;;
+      esac
+    done < "$f"
+    if [ "$hit" -eq 1 ]; then
+      total=$((total + 1))
     fi
   done
   if [ "$total" -gt 0 ]; then

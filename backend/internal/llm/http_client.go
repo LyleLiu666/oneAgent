@@ -23,10 +23,14 @@ func newHTTPClient(timeout time.Duration) *http.Client {
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+		// Important: For streaming (SSE) requests, http.Client.Timeout would enforce a whole-request
+		// deadline and will terminate long-running streams with:
+		//   context deadline exceeded (Client.Timeout or context cancellation while reading body)
+		// Instead, cap only the time to receive response headers.
+		ResponseHeaderTimeout: timeout,
 	}
 
 	return &http.Client{
-		Timeout:   timeout,
 		Transport: transport,
 	}
 }

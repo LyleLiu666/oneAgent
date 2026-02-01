@@ -28,6 +28,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,11 +135,7 @@ func broadcastMsg(b *StreamBroadcaster, msg streamMsg) {
 	if b == nil {
 		return
 	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	b.Broadcast(StreamEvent{Type: "msg", Data: string(data)})
+	b.BroadcastMsg(msg)
 }
 
 // TruncateSessionRequest represents a request to truncate a session's messages.
@@ -470,11 +467,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	// If this is the PRIMARY (first) request for this session that triggered creation,
 	// start the generation process in background.
 	// Otherwise, we just listen.
-	if broadcaster.StartGeneration() {
-		go func() {
-			defer broadcaster.Finish()
+		if broadcaster.StartGeneration() {
+			go func() {
+				defer broadcaster.Finish()
+				defer broadcaster.ClearGeneration()
 
-			// Compress long sessions before persisting this user turn.
+				// Compress long sessions before persisting this user turn.
 			// This avoids deleting the freshly-created user message during compression.
 			{
 				ctx := context.Background()
@@ -557,11 +555,14 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						Data: "Generating response...",
 					})
 				},
-				OnComplete: func(ctx context.Context, output string, err error) {
-					if err != nil {
-						broadcaster.Broadcast(StreamEvent{
-							Type: "error",
-							Data: fmt.Sprintf("LLM error: %v", err),
+					OnComplete: func(ctx context.Context, output string, err error) {
+						if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
+							return
+						}
+						if err != nil {
+							broadcaster.Broadcast(StreamEvent{
+								Type: "error",
+								Data: fmt.Sprintf("LLM error: %v", err),
 						})
 					} else {
 						broadcaster.Broadcast(StreamEvent{
@@ -638,11 +639,12 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				time.Sleep(50 * time.Millisecond)
 			}
 
-			// Call LLM with streaming
-			var fullContent string
-			ctx := context.Background() // Use background context so generation survives request cancellation
-			ctx = tool.ContextWithSessionID(ctx, sessionID)
-			ctx = tool.ContextWithUserID(ctx, userID)
+				// Call LLM with streaming
+				var fullContent string
+				ctx, cancel := context.WithCancel(context.Background()) // Use background context so generation survives request cancellation
+				broadcaster.SetGenerationCancel(cancel)
+				ctx = tool.ContextWithSessionID(ctx, sessionID)
+				ctx = tool.ContextWithUserID(ctx, userID)
 			ctx = tool.ContextWithPolicySnapshot(ctx, policySnap)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
@@ -729,18 +731,21 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					resolvedModel.Client,
 					messages,
 					opts,
-					toolDefs,
-					userID,
-					func(chunk string) error {
-						broadcastMsg(broadcaster, streamMsg{
-							Op:      "delta",
-							ID:      currentStepID,
-							Role:    model.MessageRoleAssistant,
+						toolDefs,
+						userID,
+						func(chunk string) error {
+							if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+								return context.Canceled
+							}
+							broadcastMsg(broadcaster, streamMsg{
+								Op:      "delta",
+								ID:      currentStepID,
+								Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 							Delta:   chunk,
-						})
-						return nil
-					},
+							})
+							return nil
+						},
 					func(msg string) {
 						broadcaster.Broadcast(StreamEvent{Type: "trace", Data: msg})
 					},
@@ -924,32 +929,38 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						if _, err := h.rt.Sessions.AppendMessage(sessionID, resultMsg); err == nil {
 							toolLoopPersisted = true
 						}
-					},
-					func(visibleContent, assistantContent string) {
-						content := strings.TrimSpace(assistantContent)
-						if content == "" {
-							content = visibleContent
-						}
+						},
+						func(visibleContent, assistantContent string) {
+							if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+								return
+							}
+							content := strings.TrimSpace(assistantContent)
+							if content == "" {
+								content = visibleContent
+							}
 						broadcastMsg(broadcaster, streamMsg{
 							Op:      "final",
 							ID:      currentStepID,
 							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 						})
-						msg := model.ChatMessage{
-							Role:    model.MessageRoleAssistant,
-							Type:    model.MessageTypeText,
-							Content: content,
-						}
-						if _, err := h.rt.Sessions.AppendMessage(sessionID, msg); err == nil {
-							toolLoopPersisted = true
-						}
-					},
-					func(step int) {
-						currentStepID = uuid.NewString()
-						broadcastMsg(broadcaster, streamMsg{
-							Op:      "start",
-							ID:      currentStepID,
+							msg := model.ChatMessage{
+								Role:    model.MessageRoleAssistant,
+								Type:    model.MessageTypeText,
+								Content: content,
+							}
+							if _, err := h.rt.Sessions.AppendMessage(sessionID, msg); err == nil {
+								toolLoopPersisted = true
+							}
+						},
+						func(step int) {
+							if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+								return
+							}
+							currentStepID = uuid.NewString()
+							broadcastMsg(broadcaster, streamMsg{
+								Op:      "start",
+								ID:      currentStepID,
 							Role:    model.MessageRoleAssistant,
 							MsgType: model.MessageTypeText,
 						})
@@ -970,18 +981,21 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			} else {
 				assistantStreamID := uuid.NewString()
-				broadcastMsg(broadcaster, streamMsg{
-					Op:      "start",
-					ID:      assistantStreamID,
-					Role:    model.MessageRoleAssistant,
-					MsgType: model.MessageTypeText,
-				})
-				err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
-					fullContent += chunk
+					broadcastMsg(broadcaster, streamMsg{
+						Op:      "start",
+						ID:      assistantStreamID,
+						Role:    model.MessageRoleAssistant,
+						MsgType: model.MessageTypeText,
+					})
+					err = resolvedModel.Client.ChatCompletionStream(ctx, messages, opts, func(chunk string) error {
+						if broadcaster.WasCanceled() || errors.Is(ctx.Err(), context.Canceled) {
+							return context.Canceled
+						}
+						fullContent += chunk
 
-					// Buffer content to ensure we only broadcast complete UTF-8 runes
-					incompleteUTF8 = append(incompleteUTF8, chunk...)
-					valid, rest := splitBuffer(incompleteUTF8)
+						// Buffer content to ensure we only broadcast complete UTF-8 runes
+						incompleteUTF8 = append(incompleteUTF8, chunk...)
+						valid, rest := splitBuffer(incompleteUTF8)
 					incompleteUTF8 = rest
 
 					if len(valid) > 0 {
@@ -995,25 +1009,28 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					}
 					return nil
 				})
-				broadcastMsg(broadcaster, streamMsg{
-					Op:      "final",
-					ID:      assistantStreamID,
-					Role:    model.MessageRoleAssistant,
-					MsgType: model.MessageTypeText,
-					Error: func() string {
-						if err != nil {
-							return err.Error()
-						}
-						return ""
-					}(),
-				})
-			}
+					broadcastMsg(broadcaster, streamMsg{
+						Op:      "final",
+						ID:      assistantStreamID,
+						Role:    model.MessageRoleAssistant,
+						MsgType: model.MessageTypeText,
+						Error: func() string {
+							if err != nil {
+								if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
+									return ""
+								}
+								return err.Error()
+							}
+							return ""
+						}(),
+					})
+				}
 
-			if toolProtocol == "xml" && err != nil && toolLoopPersisted {
-				// Ensure an assistant "air bubble" exists on XML tool failures (history + trace).
-				entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-				entry.Error = err.Error()
-				entry.Complete()
+				if toolProtocol == "xml" && err != nil && toolLoopPersisted && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
+					// Ensure an assistant "air bubble" exists on XML tool failures (history + trace).
+					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+					entry.Error = err.Error()
+					entry.Complete()
 				trace := model.TraceDataJSON{
 					TraceData: model.TraceData{
 						Entries: []model.TraceEntry{entry},
@@ -1073,12 +1090,13 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 			}
 
-			// Save assistant message (also persist error cases so history shows an "air bubble" + trace).
-			if !toolLoopPersisted && (fullContent != "" || err != nil) {
-				entries := traceEntries
-				if err != nil && len(entries) == 0 {
-					entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
-					entry.Error = err.Error()
+				// Save assistant message (also persist error cases so history shows an "air bubble" + trace).
+				// But when the user explicitly cancels generation, discard the assistant reply.
+				if !toolLoopPersisted && (fullContent != "" || err != nil) && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
+					entries := traceEntries
+					if err != nil && len(entries) == 0 {
+						entry := model.NewTraceEntry(model.TraceTypeCustom, "Error")
+						entry.Error = err.Error()
 					entry.Complete()
 					entries = []model.TraceEntry{entry}
 				}
@@ -1123,10 +1141,135 @@ loop:
 	}
 
 	// Send done event if we finished normally
-	sendSSE(c.Writer, flusher, StreamEvent{
-		Type: "done",
-		Data: "",
-	})
+		sendSSE(c.Writer, flusher, StreamEvent{
+			Type: "done",
+			Data: "",
+		})
+	}
+
+// AttachSessionStream attaches to an in-flight chat stream for an existing session (best-effort).
+// GET /api/sessions/:id/stream
+func (h *ChatHandler) AttachSessionStream(c *gin.Context) {
+	sessionID := strings.TrimSpace(c.Param("id"))
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session id is required"})
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	if h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	// Authorization/ownership check (best-effort).
+	if _, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+
+	// SSE headers
+	c.Writer.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	c.Writer.Header().Set("Cache-Control", "no-cache, no-transform")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Streaming not supported"})
+		return
+	}
+
+	c.Writer.WriteHeaderNow()
+	fmt.Fprintf(c.Writer, ":%s\n\n", strings.Repeat(" ", 2048))
+	flusher.Flush()
+
+	sendSSE(c.Writer, flusher, StreamEvent{Type: "session", Data: sessionID})
+
+	broadcaster, ok := h.streamManager.Get(sessionID)
+	if !ok {
+		sendSSE(c.Writer, flusher, StreamEvent{Type: "done", Data: ""})
+		return
+	}
+
+	clientChan, snapshot := broadcaster.SubscribeWithSnapshot()
+	defer broadcaster.Unsubscribe(clientChan)
+
+	// Send snapshot first so a reloading client can catch up.
+	for _, s := range snapshot {
+		start := streamMsg{
+			Op:      "start",
+			ID:      s.ID,
+			Role:    s.Role,
+			MsgType: s.MsgType,
+		}
+		startData, _ := json.Marshal(start)
+		sendSSE(c.Writer, flusher, StreamEvent{Type: "msg", Data: string(startData)})
+
+		if strings.TrimSpace(s.Content) != "" {
+			delta := streamMsg{
+				Op:      "delta",
+				ID:      s.ID,
+				Role:    s.Role,
+				MsgType: s.MsgType,
+				Delta:   s.Content,
+			}
+			deltaData, _ := json.Marshal(delta)
+			sendSSE(c.Writer, flusher, StreamEvent{Type: "msg", Data: string(deltaData)})
+		}
+	}
+
+	notify := c.Request.Context().Done()
+loop:
+	for {
+		select {
+		case <-notify:
+			break loop
+		case event, ok := <-clientChan:
+			if !ok {
+				break loop
+			}
+			sendSSE(c.Writer, flusher, event)
+		}
+	}
+
+	sendSSE(c.Writer, flusher, StreamEvent{Type: "done", Data: ""})
+}
+
+// StopSessionStream cancels the current in-flight reply for a session (best-effort).
+// POST /api/sessions/:id/stop
+func (h *ChatHandler) StopSessionStream(c *gin.Context) {
+	sessionID := strings.TrimSpace(c.Param("id"))
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session id is required"})
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	if h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	// Authorization/ownership check (best-effort).
+	if _, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+
+	if broadcaster, ok := h.streamManager.Get(sessionID); ok {
+		broadcaster.CancelGeneration()
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // ============================================================================
@@ -1385,6 +1528,10 @@ func runToolLoop(
 
 	maxSteps := toolcalling.ChatToolMaxSteps()
 	for step := 0; step < maxSteps; step++ {
+		if (broadcaster != nil && broadcaster.WasCanceled()) || errors.Is(ctx.Err(), context.Canceled) {
+			return combined.String(), persisted, context.Canceled
+		}
+
 		stepStreamID := uuid.NewString()
 		broadcastMsg(broadcaster, streamMsg{
 			Op:      "start",
@@ -1447,6 +1594,16 @@ func runToolLoop(
 			}
 		}
 		if err != nil {
+			if (broadcaster != nil && broadcaster.WasCanceled()) || errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				broadcastMsg(broadcaster, streamMsg{
+					Op:      "final",
+					ID:      stepStreamID,
+					Role:    model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+				})
+				return combined.String(), persisted, context.Canceled
+			}
+
 			broadcastMsg(broadcaster, streamMsg{
 				Op:      "final",
 				ID:      stepStreamID,
@@ -1477,6 +1634,16 @@ func runToolLoop(
 		}
 
 		if len(result.ToolCalls) == 0 {
+			if (broadcaster != nil && broadcaster.WasCanceled()) || errors.Is(ctx.Err(), context.Canceled) {
+				broadcastMsg(broadcaster, streamMsg{
+					Op:      "final",
+					ID:      stepStreamID,
+					Role:    model.MessageRoleAssistant,
+					MsgType: model.MessageTypeText,
+				})
+				return combined.String(), persisted, context.Canceled
+			}
+
 			broadcastMsg(broadcaster, streamMsg{
 				Op:      "final",
 				ID:      stepStreamID,
@@ -2054,6 +2221,13 @@ func (sm *StreamManager) GetOrCreate(sessionID string) *StreamBroadcaster {
 	return sb
 }
 
+func (sm *StreamManager) Get(sessionID string) (*StreamBroadcaster, bool) {
+	if val, ok := sm.streams.Load(sessionID); ok {
+		return val.(*StreamBroadcaster), true
+	}
+	return nil, false
+}
+
 func (sm *StreamManager) Remove(sessionID string) {
 	sm.streams.Delete(sessionID)
 }
@@ -2063,10 +2237,33 @@ type StreamBroadcaster struct {
 	sessionID string
 	clients   map[chan StreamEvent]bool
 	mu        sync.RWMutex
+	broadcastMu sync.RWMutex
 	manager   *StreamManager
 	started   bool
 	startMu   sync.Mutex
-	history   []StreamEvent // Optional: store recent events for catch-up (not full replay)
+
+	closed bool
+
+	genMu    sync.RWMutex
+	genCancel context.CancelFunc
+	canceled bool
+
+	stateMu sync.RWMutex
+	active  map[string]*streamMsgState
+}
+
+type streamMsgState struct {
+	ID      string
+	Role    string
+	MsgType string
+	Content string
+}
+
+type streamMsgSnapshot struct {
+	ID      string
+	Role    string
+	MsgType string
+	Content string
 }
 
 // Subscribe adds a new client channel.
@@ -2074,9 +2271,24 @@ func (sb *StreamBroadcaster) Subscribe() chan StreamEvent {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
-	ch := make(chan StreamEvent, 50) // Buffered to prevent blocking
+	ch := make(chan StreamEvent, 512) // Buffered to tolerate short snapshot/send pauses.
+	if sb.closed {
+		close(ch)
+		return ch
+	}
+	if sb.clients == nil {
+		sb.clients = make(map[chan StreamEvent]bool)
+	}
 	sb.clients[ch] = true
 	return ch
+}
+
+func (sb *StreamBroadcaster) SubscribeWithSnapshot() (chan StreamEvent, []streamMsgSnapshot) {
+	sb.broadcastMu.Lock()
+	defer sb.broadcastMu.Unlock()
+
+	ch := sb.Subscribe()
+	return ch, sb.snapshotActiveLocked()
 }
 
 // Unsubscribe removes a client channel.
@@ -2084,6 +2296,9 @@ func (sb *StreamBroadcaster) Unsubscribe(ch chan StreamEvent) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
+	if sb.closed || sb.clients == nil {
+		return
+	}
 	if _, ok := sb.clients[ch]; !ok {
 		return
 	}
@@ -2093,17 +2308,179 @@ func (sb *StreamBroadcaster) Unsubscribe(ch chan StreamEvent) {
 
 // Broadcast sends an event to all connected clients.
 func (sb *StreamBroadcaster) Broadcast(event StreamEvent) {
+	sb.broadcastMu.RLock()
+	defer sb.broadcastMu.RUnlock()
+
 	sb.mu.RLock()
 	defer sb.mu.RUnlock()
+
+	if sb.closed || sb.clients == nil {
+		return
+	}
 
 	for ch := range sb.clients {
 		select {
 		case ch <- event:
 		default:
-			// If client is blocked, we skip (it's likely disconnected or too slow)
-			// Ideally we should disconnect slow clients.
+			// If client is blocked, we skip (it's likely disconnected or too slow).
 		}
 	}
+}
+
+func (sb *StreamBroadcaster) BroadcastMsg(msg streamMsg) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	sb.broadcastMu.RLock()
+	defer sb.broadcastMu.RUnlock()
+
+	sb.recordStreamMsg(msg)
+
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+
+	if sb.closed || sb.clients == nil {
+		return
+	}
+
+	for ch := range sb.clients {
+		select {
+		case ch <- StreamEvent{Type: "msg", Data: string(data)}:
+		default:
+			// If client is blocked, we skip (it's likely disconnected or too slow).
+		}
+	}
+}
+
+func (sb *StreamBroadcaster) recordStreamMsg(msg streamMsg) {
+	if sb == nil {
+		return
+	}
+	id := strings.TrimSpace(msg.ID)
+	if id == "" {
+		return
+	}
+	if strings.TrimSpace(msg.Op) == "" {
+		return
+	}
+	if msg.MsgType != model.MessageTypeText {
+		return
+	}
+	if strings.TrimSpace(msg.Role) != model.MessageRoleAssistant {
+		return
+	}
+
+	sb.stateMu.Lock()
+	defer sb.stateMu.Unlock()
+	if sb.active == nil {
+		sb.active = make(map[string]*streamMsgState)
+	}
+
+	switch msg.Op {
+	case "start":
+		sb.active[id] = &streamMsgState{
+			ID:      id,
+			Role:    msg.Role,
+			MsgType: msg.MsgType,
+			Content: "",
+		}
+	case "delta":
+		st := sb.active[id]
+		if st == nil {
+			st = &streamMsgState{
+				ID:      id,
+				Role:    msg.Role,
+				MsgType: msg.MsgType,
+				Content: "",
+			}
+			sb.active[id] = st
+		}
+		if msg.Delta != "" {
+			st.Content += msg.Delta
+		}
+	case "final":
+		delete(sb.active, id)
+	default:
+		// ignore
+	}
+}
+
+func (sb *StreamBroadcaster) snapshotActiveLocked() []streamMsgSnapshot {
+	sb.stateMu.RLock()
+	defer sb.stateMu.RUnlock()
+
+	if len(sb.active) == 0 {
+		return nil
+	}
+	out := make([]streamMsgSnapshot, 0, len(sb.active))
+	for _, st := range sb.active {
+		if st == nil || st.ID == "" {
+			continue
+		}
+		out = append(out, streamMsgSnapshot{
+			ID:      st.ID,
+			Role:    st.Role,
+			MsgType: st.MsgType,
+			Content: st.Content,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (sb *StreamBroadcaster) SetGenerationCancel(cancel context.CancelFunc) {
+	sb.genMu.Lock()
+	wasCanceled := sb.canceled
+	sb.genCancel = cancel
+	sb.genMu.Unlock()
+
+	if wasCanceled && cancel != nil {
+		cancel()
+	}
+
+	sb.stateMu.Lock()
+	sb.active = make(map[string]*streamMsgState)
+	sb.stateMu.Unlock()
+}
+
+func (sb *StreamBroadcaster) WasCanceled() bool {
+	sb.genMu.RLock()
+	defer sb.genMu.RUnlock()
+	return sb.canceled
+}
+
+func (sb *StreamBroadcaster) CancelGeneration() {
+	sb.genMu.Lock()
+	if sb.canceled {
+		sb.genMu.Unlock()
+		return
+	}
+	sb.canceled = true
+	cancel := sb.genCancel
+	sb.genMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	sb.stateMu.Lock()
+	sb.active = make(map[string]*streamMsgState)
+	sb.stateMu.Unlock()
+
+	sb.Broadcast(StreamEvent{Type: "canceled", Data: ""})
+}
+
+func (sb *StreamBroadcaster) ClearGeneration() {
+	sb.genMu.Lock()
+	sb.genCancel = nil
+	sb.canceled = false
+	sb.genMu.Unlock()
+
+	sb.stateMu.Lock()
+	sb.active = nil
+	sb.stateMu.Unlock()
 }
 
 // StartGeneration atomically checks if this broadcaster should start generation.
@@ -2124,6 +2501,7 @@ func (sb *StreamBroadcaster) Finish() {
 	sb.manager.Remove(sb.sessionID)
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
+	sb.closed = true
 	for ch := range sb.clients {
 		close(ch)
 	}
