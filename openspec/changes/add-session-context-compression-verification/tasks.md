@@ -7,7 +7,7 @@
 - [x] 2.1 Add unit tests for `compressSessionIfNeeded` (fake llm client)
 - [x] 2.2 Add regression test for fallback path (summary error)
 - [x] 2.3 (Optional) Add env override: `ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES`
-- [ ] 2.4 Ensure trace messages remain low-noise but confirmable (best-effort)
+- [x] 2.4 Ensure trace messages remain low-noise but confirmable (best-effort)
 
 ## 3. Tests & Validation
 - [x] 3.1 `go test ./...` (backend)
