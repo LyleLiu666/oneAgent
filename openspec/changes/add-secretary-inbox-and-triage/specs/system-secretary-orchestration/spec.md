@@ -1,19 +1,26 @@
 ## ADDED Requirements
 
-### Requirement: The system MUST provide an append-only secretary inbox API (no LLM execution)
-系统必须 (MUST) 提供一种“收件箱（inbox）”消息写入机制，用于在秘书模式下追加用户消息，并给出一个快速确认（quick ack，best-effort），且不触发 LLM/工具执行（append-only）。
+### Requirement: The system MUST provide an append-only secretary inbox API with LLM quick acks (no tools)
+系统必须 (MUST) 提供一种“收件箱（inbox）”消息写入机制，用于在秘书模式下追加用户消息；系统必须 (MUST) 为每条写入生成一个 quick ack（**由 LLM 生成的短句**，best-effort），且该 quick ack 不得触发工具执行（tool calling）。系统应该 (SHOULD) 让 quick ack 与当前消息相关（例如点出/复述 1 个关键信息），而不是固定模板回复（best-effort）。
 
-#### Scenario: Append-only inbox message does not trigger LLM
+#### Scenario: Inbox append persists user message and an LLM quick ack
 - **GIVEN** 用户在秘书模式下发送一条消息（best-effort）
 - **WHEN** 客户端调用 inbox append API（best-effort）
 - **THEN** 系统追加一条 `role=user,type=text` 的会话消息（best-effort）
-- **AND** 该请求不触发 LLM 生成或 tool calling（best-effort）
+- **AND** 系统调用 LLM 生成 quick ack 文本（best-effort）
+- **AND** 系统追加一条 `role=assistant,type=text` 的 ack 会话消息（best-effort）
+- **AND** 该过程不产生 `tool_call/tool_result` 类型消息（best-effort）
 
 #### Scenario: Inbox append returns a quick ack
 - **GIVEN** 用户在秘书模式下发送一条消息（best-effort）
 - **WHEN** 客户端调用 inbox append API（best-effort）
-- **THEN** 系统返回一个“已记录/收到”的 quick ack（best-effort）
+- **THEN** 系统返回一个 quick ack（LLM 生成的短句，best-effort）
 - **AND** 该 quick ack 不依赖 triage 完成（best-effort）
+
+#### Scenario: Inbox quick ack is traceable (replayable)
+- **GIVEN** 用户在秘书模式下发送消息并收到 quick ack（best-effort）
+- **WHEN** 用户刷新页面或重新进入会话（best-effort）
+- **THEN** 对话中仍可看到同样的 quick ack 内容（best-effort）
 
 ### Requirement: The system MUST provide a triage API that batches messages into a single secretary report and dispatches workers (best-effort)
 系统必须 (MUST) 提供一个 triage（归并/派工）机制（best-effort），用于对“自上次 triage 以来的消息集合”生成一条低噪声的秘书汇报，并**默认自动**将可执行工作派发为后台 worker（Task Queue tasks）。
@@ -31,6 +38,7 @@
 当用户未指定 workspace 且该工作不依赖既有 repo 时，系统可以 (MAY) 自动创建一个新的目录作为 workspace（best-effort），用于：
 - 与代码仓库隔离（降低误改风险）
 - 与其它 workstreams 获得并行度（Task Queue 按 workspace 并行）
+当系统自动创建 workspace 时，系统必须 (MUST) 支持用 `ONEAGENT_WORKSPACE_POOL_DIR` 指定 workspace pool root；若未设置则默认使用 `ONEAGENT_HOME/.oneagent/workspaces`（best-effort 创建目录）。
 
 #### Scenario: Unscoped non-repo work creates a new workspace
 - **GIVEN** 用户在秘书模式下提出一个不依赖既有 repo 的需求（例如整理一份报告）（best-effort）
@@ -38,6 +46,7 @@
 - **WHEN** 系统执行 triage 并决定派工（best-effort）
 - **THEN** 系统创建一个新的目录作为 workspace 并用于创建 task（best-effort）
 - **AND** 系统在秘书汇报或 triage 响应中告知该 workspace 路径（best-effort）
+- **AND** 该 workspace 位于 workspace pool root 之下（best-effort）
 
 #### Scenario: Repo-dependent work uses the session workspace or asks the user
 - **GIVEN** 用户提出一个看起来依赖既有代码库的需求（例如“改代码/跑测试”）（best-effort）

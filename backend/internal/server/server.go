@@ -71,6 +71,11 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/sessions/:id/stop", chatHandler.StopSessionStream)
 		api.POST("/sessions/:id/truncate", chatHandler.TruncateSession)
 
+		secretaryHandler := handler.NewSecretaryHandler(rt)
+		api.POST("/secretary/inbox/messages", secretaryHandler.AppendInboxMessage)
+		api.POST("/secretary/triage", secretaryHandler.Triage)
+		api.GET("/secretary/state", secretaryHandler.GetState)
+
 		// Task queue.
 		api.POST("/tasks", handler.CreateTask)
 		api.GET("/tasks", handler.ListTasks)

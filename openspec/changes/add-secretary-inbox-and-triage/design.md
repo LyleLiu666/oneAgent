@@ -4,7 +4,7 @@
 
 ## Goals
 - 支持“微信式”连续发送：append-only，不阻塞
-- 每条消息先 quick ack（不触发 LLM/tool calling）
+- 每条消息先 quick ack（LLM 生成、短句、无工具；落盘可回溯）
 - 支持一次 triage 覆盖多条未处理消息：低噪声汇报 + **默认自动派工**
 - 保证幂等：同一批输入不重复派工
 - 支持 workspace allocator：同一 workspace 串行；不相关工作尽量分配到不同 workspace 并行（必要时自动创建新 workspace）
@@ -30,8 +30,8 @@ Request:
 
 Behavior:
 - 追加一条 session message（role=user,type=text）
-- 追加一条 deterministic 的 quick ack（可落盘为 assistant text message，或由前端作为 UI ack 展示；best-effort）
-- 不触发 LLM/tool calling
+- 调用 LLM 生成 quick ack（短句、无工具、不做分析/派工；建议点出/复述 1 个关键信息以证明“看过并记下”）
+- 追加一条 assistant ack message（建议设置 `parent_id = <user_message_id>` 以便回溯关联）
 
 Response:
 ```json
@@ -39,7 +39,7 @@ Response:
   "session_id": "resolved",
   "message_id": 123,
   "ack_message_id": 124,
-  "ack_text": "收到，我先记下。"
+  "ack_text": "..."
 }
 ```
 
@@ -107,7 +107,7 @@ v1 建议复用 `session.Metadata["secretary"]`，避免引入新 store：
 3) **可自动创建**：若任务不依赖既有 repo（由 triage 判断），则在一个“workspace pool root”下创建新目录作为 workspace，并返回路径给用户
 4) **需要用户确认**：若任务看起来需要某个 repo，但系统无法推断 → `questions[]` 询问用户选择/指定 workspace
 
-workspace pool root 建议作为配置项（例如 `ONEAGENT_WORKSPACE_POOL_DIR`，默认可取 `~/oneagent-workspaces` 或 `ONEAGENT_HOME/workspaces`；具体默认值在实现阶段确定）。
+workspace pool root 必须 (MUST) 支持通过 `ONEAGENT_WORKSPACE_POOL_DIR` 覆盖；默认值为 `ONEAGENT_HOME/.oneagent/workspaces`，并在启动或首次使用时创建该目录（best-effort）。
 
 ## Frontend Integration Plan
 - secretary mode 下：

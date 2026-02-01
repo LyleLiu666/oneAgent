@@ -8,12 +8,12 @@ oneAgent 的北极星要求“秘书 = 编排器”：承接多线程意图、�
 ## What Changes
 - 新增“收件箱（append-only）+ 归并/派工（triage）”能力：
   - 秘书模式下允许用户连续发送多条消息，不因生成中而阻塞
-  - 每条消息都会获得一个“已记录/收到”的快速确认（quick ack，**不触发 LLM/tool calling**）
+  - 每条消息都会获得一个快速确认（quick ack）：**由 LLM 生成**（短句、无工具、不做分析/派工），并作为一条 assistant message 落盘，保证可回溯
   - 在短暂静默窗口后，秘书对“自上次 triage 以来的消息集合”做一次统一归并，并输出低噪声汇报
   - 秘书**默认自动**将可执行工作派发为后台 tasks（workers），并保证幂等（相同输入不重复派工）
   - 当用户未指定 workspace 且工作不依赖既有 repo 时，系统可自动创建一个新文件夹作为 workspace（用于并行与隔离），并在汇报中告知路径（best-effort）
 - 新增后端 Secretary Orchestrator API（最小闭环）：
-  - `POST /api/secretary/inbox/messages`（append-only + quick ack，不触发 LLM）
+  - `POST /api/secretary/inbox/messages`（append-only + LLM quick ack，无工具）
   - `POST /api/secretary/triage`（归并/派工/写入汇报）
   - `GET /api/secretary/state`（恢复）
 

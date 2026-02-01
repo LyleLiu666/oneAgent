@@ -304,6 +304,61 @@ export async function truncateSession(
   });
 }
 
+// ============================================================================
+// Secretary (WeChat-style inbox + triage)
+// ============================================================================
+
+export interface SecretaryInboxAppendResponse {
+  session_id: string;
+  message_id: number;
+  ack_message_id: number;
+  ack_text: string;
+}
+
+export async function appendSecretaryInboxMessage(payload: {
+  session_id?: string;
+  content: string;
+  workspace?: string;
+}): Promise<SecretaryInboxAppendResponse> {
+  return api("/api/secretary/inbox/messages", { method: "POST", body: payload });
+}
+
+export interface SecretaryTriageResponse {
+  summary_message: string;
+  summary_message_id: number;
+  cursor_message_id: number;
+  created_task_ids: string[];
+  questions?: string[];
+  workspaces_created?: string[];
+}
+
+export async function secretaryTriage(payload: {
+  session_id: string;
+  cursor_message_id?: number;
+}): Promise<SecretaryTriageResponse> {
+  return api("/api/secretary/triage", { method: "POST", body: payload });
+}
+
+export interface SecretaryStateResponse {
+  cursor_message_id: number;
+  triage_runs?: Array<{
+    from_cursor: number;
+    to_message_id: number;
+    summary_message_id?: number;
+    summary_message?: string;
+    created_task_ids?: string[];
+    questions?: string[];
+    workspaces_created?: string[];
+    created_at?: string;
+  }>;
+}
+
+export async function getSecretaryState(sessionId: string): Promise<SecretaryStateResponse> {
+  const id = String(sessionId || "").trim();
+  if (!id) throw new Error("sessionId is required");
+  return api(`/api/secretary/state?session_id=${encodeURIComponent(id)}`);
+}
+
 export async function approveToolApproval(approvalId: string, reason: string = "") {
   const id = String(approvalId || "").trim();
   if (!id) throw new Error("approvalId is required");

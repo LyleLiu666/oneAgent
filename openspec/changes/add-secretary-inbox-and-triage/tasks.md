@@ -6,7 +6,7 @@
 ## 2. Implementation (after proposal approval)
 - [ ] 2.1 Backend: add `internal/secretary` orchestrator module (triage + state)
 - [ ] 2.2 Backend: add endpoints `/api/secretary/inbox/messages`, `/api/secretary/triage`, `/api/secretary/state`
-- [ ] 2.3 Backend: inbox append returns quick ack (no LLM/tool calling), best-effort persisted as assistant message
+- [ ] 2.3 Backend: inbox append returns quick ack (**LLM-generated, no tools**) and persists it as an assistant message for replay
 - [ ] 2.4 Backend: triage calls LLM for structured plan, allocates/creates workspaces, auto-creates/enqueues tasks, appends low-noise summary message to session
 - [ ] 2.5 Frontend: secretary mode send uses append+ack; debounce triggers triage; allow multiple sends while triage running
 - [ ] 2.6 Back-compat: full mode chat stays on `/api/chat`; existing manual handoff remains available (best-effort)

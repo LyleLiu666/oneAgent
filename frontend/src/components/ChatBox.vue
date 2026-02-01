@@ -4,7 +4,22 @@ import { Send, Square, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, C
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
 import { useUIStore } from '@/stores/ui'
-import { streamChat, attachChatStream, stopSessionStream, getSessions, getSession, truncateSession, getModels, getTools, chooseWorkspaceDir, getConfig, createTask } from '@/api/client'
+import {
+  streamChat,
+  attachChatStream,
+  stopSessionStream,
+  getSessions,
+  getSession,
+  truncateSession,
+  getModels,
+  getTools,
+  chooseWorkspaceDir,
+  getConfig,
+  createTask,
+  appendSecretaryInboxMessage,
+  secretaryTriage,
+  getSecretaryState,
+} from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
@@ -70,6 +85,11 @@ const taskHandoffSubmitting = ref(false)
 const taskHandoffError = ref('')
 const taskHandoffSuccess = ref('')
 const taskHandoffSuggestOpen = ref(false)
+
+const secretaryCursorMessageId = ref(0)
+const secretaryTriageSubmitting = ref(false)
+const secretaryTriageQueued = ref(false)
+let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
   if (!msg.isStreaming) return undefined
@@ -241,20 +261,23 @@ const shortSessionPolicyHash = computed(() => {
 })
 
 const canSend = computed(
-  () =>
-    inputMessage.value.trim() &&
-    !chatStore.isLoading &&
-    !loadingHistory.value &&
-    !workspaceOnboardingBlocking.value
+  () => {
+    if (!String(inputMessage.value || '').trim()) return false
+    if (loadingHistory.value) return false
+    if (workspaceOnboardingBlocking.value) return false
+    if (!isSecretaryMode.value && chatStore.isLoading) return false
+    return true
+  }
 )
 
 const canHandoffTask = computed(
-  () =>
-    isSecretaryMode.value &&
-    inputMessage.value.trim() &&
-    !chatStore.isLoading &&
-    !loadingHistory.value &&
-    !taskHandoffSubmitting.value
+  () => {
+    if (!isSecretaryMode.value) return false
+    if (!String(inputMessage.value || '').trim()) return false
+    if (loadingHistory.value) return false
+    if (taskHandoffSubmitting.value) return false
+    return true
+  }
 )
 
 const currentSessionTitle = computed(() => chatStore.currentSession?.title || '新对话')
@@ -700,6 +723,19 @@ const loadSessionMessages = async (
     }
     chatStore.setMessages(withPlaceholders)
     scrollToBottom(false)
+
+    if (isSecretaryMode.value) {
+      try {
+        const st: any = await getSecretaryState(sessionId)
+        const cursor = Number((st as any)?.cursor_message_id)
+        secretaryCursorMessageId.value = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
+      } catch (error) {
+        secretaryCursorMessageId.value = 0
+        console.warn('Failed to load secretary state:', error)
+      }
+    } else {
+      secretaryCursorMessageId.value = 0
+    }
   } catch (error) {
     console.error('Failed to load session:', error)
     const status = (error as any)?.response?.status
@@ -731,6 +767,13 @@ const startNewSession = () => {
   sessionPolicyHash.value = ''
   sessionPolicyResolvedAt.value = ''
   workspaceOnboardingDismissed.value = false
+  secretaryCursorMessageId.value = 0
+  secretaryTriageSubmitting.value = false
+  secretaryTriageQueued.value = false
+  if (secretaryTriageTimer) {
+    clearTimeout(secretaryTriageTimer)
+    secretaryTriageTimer = undefined
+  }
   applyWorkspaceDefaultsForNewSession()
 }
 
@@ -1388,15 +1431,136 @@ const sendChat = async (rawMessage: string) => {
   }
 }
 
+const upsertServerTextMessage = (serverIdRaw: any, role: ChatMessage['role'], contentRaw: any) => {
+  const content = String(contentRaw ?? '').trim()
+  if (!content) return
+
+  const serverId = Number(serverIdRaw)
+  if (Number.isFinite(serverId) && serverId > 0) {
+    const exists = chatStore.messages.some((m) => Number(m.serverId) === serverId)
+    if (exists) return
+    chatStore.addMessage({
+      id: serverId,
+      serverId,
+      role,
+      type: 'text',
+      content,
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+    return
+  }
+
+  chatStore.addMessage({
+    id: Date.now(),
+    role,
+    type: 'text',
+    content,
+    createdAt: new Date(),
+    isStreaming: false,
+  })
+}
+
+const scheduleSecretaryTriage = () => {
+  if (secretaryTriageTimer) clearTimeout(secretaryTriageTimer)
+  secretaryTriageTimer = setTimeout(() => {
+    void runSecretaryTriage()
+  }, 900)
+}
+
+const runSecretaryTriage = async () => {
+  const sessionId = String(chatStore.currentSessionId || '').trim()
+  if (!sessionId) return
+
+  if (secretaryTriageSubmitting.value) {
+    secretaryTriageQueued.value = true
+    return
+  }
+
+  secretaryTriageSubmitting.value = true
+  try {
+    const res: any = await secretaryTriage({
+      session_id: sessionId,
+      cursor_message_id: Number(secretaryCursorMessageId.value || 0),
+    })
+
+    const nextCursor = Number(res?.cursor_message_id)
+    if (Number.isFinite(nextCursor) && nextCursor >= 0) {
+      secretaryCursorMessageId.value = nextCursor
+    }
+
+    upsertServerTextMessage(res?.summary_message_id, 'assistant', res?.summary_message)
+    loadSessions()
+  } catch (error) {
+    console.error('Failed to triage secretary inbox:', error)
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'system',
+      type: 'text',
+      content: '秘书归并失败，请稍后再试。',
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+  } finally {
+    secretaryTriageSubmitting.value = false
+    if (secretaryTriageQueued.value) {
+      secretaryTriageQueued.value = false
+      scheduleSecretaryTriage()
+    }
+  }
+}
+
+const sendSecretaryMessage = async (rawMessage: string) => {
+  const message = String(rawMessage || '').trim()
+  if (!message) return
+  if (loadingHistory.value) return
+
+  const ensuredSessionId = ensureSessionId()
+
+  try {
+    const res: any = await appendSecretaryInboxMessage({
+      session_id: ensuredSessionId,
+      content: message,
+      // Best-effort: bind workspace if the session already has one.
+      workspace: String(sessionWorkspace.value || '').trim() || undefined,
+    })
+
+    const serverSessionId = String(res?.session_id || '').trim()
+    if (serverSessionId && serverSessionId !== chatStore.currentSessionId) {
+      chatStore.setCurrentSession(serverSessionId)
+    }
+
+    upsertServerTextMessage(res?.message_id, 'user', message)
+    upsertServerTextMessage(res?.ack_message_id, 'assistant', res?.ack_text)
+    loadSessions()
+
+    scheduleSecretaryTriage()
+  } catch (error) {
+    console.error('Failed to append secretary inbox message:', error)
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'system',
+      type: 'text',
+      content: '发送失败，请稍后再试。',
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+  }
+}
+
 const sendMessage = async () => {
   if (!canSend.value) return
   const message = inputMessage.value.trim()
-  if (shouldSuggestTaskHandoff(message)) {
-    taskHandoffSuggestOpen.value = true
-    return
-  }
+  if (!message) return
+
   inputMessage.value = ''
   if (inputEl.value) inputEl.value.style.height = ''
+
+  if (isSecretaryMode.value) {
+    await sendSecretaryMessage(message)
+    return
+  }
+
   await sendChat(message)
 }
 
@@ -1652,6 +1816,10 @@ onMounted(async () => {
 	    // ignore
 	  } finally {
 	    activeStreamAbort.value = null
+	  }
+	  if (secretaryTriageTimer) {
+	    clearTimeout(secretaryTriageTimer)
+	    secretaryTriageTimer = undefined
 	  }
 	  document.removeEventListener('click', handleDocumentClick)
 	})
@@ -2037,7 +2205,7 @@ onMounted(async () => {
                 "
                 rows="1"
                 class="w-full px-4 py-3 pr-12 text-base leading-6 overflow-y-auto bg-surface-800 rounded-xl text-surface-50 placeholder-surface-500 resize-y focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all border border-surface-700"
-                :disabled="chatStore.isLoading || workspaceOnboardingBlocking"
+                :disabled="(!isSecretaryMode && chatStore.isLoading) || workspaceOnboardingBlocking"
               />
             </div>
             <button
