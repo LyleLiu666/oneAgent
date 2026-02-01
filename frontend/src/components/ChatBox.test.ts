@@ -406,6 +406,12 @@ it('sends messages via secretary inbox API in secretary mode', async () => {
 it('allows multiple sends in secretary mode and debounces triage', async () => {
     vi.useFakeTimers()
 
+    const flush = async () => {
+        const p = flushPromises()
+        vi.advanceTimersByTime(0)
+        await p
+    }
+
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -447,28 +453,33 @@ it('allows multiple sends in secretary mode and debounces triage', async () => {
         },
     })
 
-    await flushPromises()
+    await flush()
 
     await wrapper.get('textarea').setValue('m1')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
-    await flushPromises()
+    await flush()
 
     await wrapper.get('textarea').setValue('m2')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
-    await flushPromises()
+    await flush()
 
     expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(2)
 
     // Debounce: only one triage call after the burst.
     vi.advanceTimersByTime(900)
-    await flushPromises()
+    await flush()
     expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
 
     // While triage is still in-flight, sending another message should still work.
     await wrapper.get('textarea').setValue('m3')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
-    await flushPromises()
+    await flush()
     expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(3)
+
+    // Let the queued debounce fire while triage is still in-flight.
+    vi.advanceTimersByTime(900)
+    await flush()
+    expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
 
     // Finish first triage, then queued triage should run once more.
     resolveFirstTriage!({
@@ -479,10 +490,10 @@ it('allows multiple sends in secretary mode and debounces triage', async () => {
         questions: [],
         workspaces_created: [],
     })
-    await flushPromises()
+    await flush()
 
     vi.advanceTimersByTime(900)
-    await flushPromises()
+    await flush()
     expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(2)
 
     wrapper.unmount()

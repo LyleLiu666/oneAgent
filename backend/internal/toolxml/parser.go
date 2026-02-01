@@ -314,6 +314,15 @@ func repairMissingFilePathOpenTag(input string) string {
 	if strings.Contains(lower, "<filepath") {
 		return input
 	}
+
+	// Repair a common malformed pattern produced by LLMs:
+	//   <tool_name>read_file</filePath>src/generator.py</filePath>
+	// by fixing the wrong close tag and inserting the missing `<filePath>` opening tag.
+	reToolNameClosedByFilePath := regexp.MustCompile(`(?is)<tool_name\b[^>]*>\s*([^<]+?)\s*</filepath>\s*([^<]+?)\s*</filepath>`)
+	if reToolNameClosedByFilePath.MatchString(input) {
+		return reToolNameClosedByFilePath.ReplaceAllString(input, `<tool_name>${1}</tool_name><filePath>${2}</filePath>`)
+	}
+
 	// Repair a common malformed pattern produced by LLMs:
 	//   <tool_name>edit</toolName>/abs/path</filePath>
 	// by inserting the missing `<filePath>` opening tag.

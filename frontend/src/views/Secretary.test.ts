@@ -7,6 +7,9 @@ import { useChatStore } from '@/stores/chat'
 
 vi.mock('@/api/client', () => ({
   streamChat: vi.fn(),
+  appendSecretaryInboxMessage: vi.fn(),
+  secretaryTriage: vi.fn(),
+  getSecretaryState: vi.fn(async () => ({ cursor_message_id: 0, triage_runs: [] })),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
   getSessions: vi.fn(async () => []),
   getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
