@@ -477,10 +477,11 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			{
 				ctx := context.Background()
 				before := approximateContextRunes(messages)
-				if before > sessionCompressionMaxContextRunes {
+				maxRunes := sessionCompressionMaxContextRunes()
+				if before > maxRunes {
 					broadcaster.Broadcast(StreamEvent{
 						Type: "trace",
-						Data: fmt.Sprintf("Context length %d > %d, compressing history...", before, sessionCompressionMaxContextRunes),
+						Data: fmt.Sprintf("Context length %d > %d, compressing history...", before, maxRunes),
 					})
 				}
 
@@ -492,7 +493,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					})
 
 					// Fallback: keep the last two rounds and continue without DB mutation.
-					if before > sessionCompressionMaxContextRunes {
+					if before > maxRunes {
 						messages = buildCompressionFallbackMessages(persistedMessages, messages, err)
 					}
 				} else if compressed {

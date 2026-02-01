@@ -28,6 +28,8 @@ func (c fakeSummaryClient) ChatCompletionStream(ctx context.Context, messages []
 func TestCompressSessionIfNeeded_RewritesSessionAndPreservesCurrentUserMessage(t *testing.T) {
 	t.Parallel()
 
+	t.Setenv("ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES", "200")
+
 	store, err := sessionstore.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("new sessionstore: %v", err)
@@ -48,7 +50,7 @@ func TestCompressSessionIfNeeded_RewritesSessionAndPreservesCurrentUserMessage(t
 		{ID: 6, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a3", CreatedAt: now.Add(-1 * time.Minute)},
 	}
 
-	currentUser := strings.Repeat("a", sessionCompressionMaxContextRunes+1)
+	currentUser := strings.Repeat("a", sessionCompressionMaxContextRunes()+1)
 	llmMessages := []llm.ChatMessage{
 		llm.BuildSystemMessage("sys"),
 		llm.BuildUserMessage(currentUser),
@@ -105,6 +107,8 @@ func TestCompressSessionIfNeeded_RewritesSessionAndPreservesCurrentUserMessage(t
 func TestBuildCompressionFallbackMessages_PreservesCurrentUserMessageAndTail(t *testing.T) {
 	t.Parallel()
 
+	t.Setenv("ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES", "200")
+
 	sessionID := "s1"
 	now := time.Now()
 	persisted := []model.ChatMessage{
@@ -116,7 +120,7 @@ func TestBuildCompressionFallbackMessages_PreservesCurrentUserMessageAndTail(t *
 		{ID: 6, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a3", CreatedAt: now.Add(-1 * time.Minute)},
 	}
 
-	currentUser := strings.Repeat("b", sessionCompressionMaxContextRunes+1)
+	currentUser := strings.Repeat("b", sessionCompressionMaxContextRunes()+1)
 	llmMessages := []llm.ChatMessage{
 		llm.BuildSystemMessage("sys"),
 		llm.BuildUserMessage(currentUser),
@@ -141,4 +145,3 @@ func TestBuildCompressionFallbackMessages_PreservesCurrentUserMessageAndTail(t *
 		t.Fatalf("expected fallback to preserve current user message")
 	}
 }
-

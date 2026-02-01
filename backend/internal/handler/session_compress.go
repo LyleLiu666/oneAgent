@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,7 +15,7 @@ import (
 )
 
 const (
-	sessionCompressionMaxContextRunes = 80_000
+	defaultSessionCompressionMaxContextRunes = 80_000
 	sessionCompressionKeepTextMsgs    = 4 // last 2 rounds (user+assistant)*2
 
 	sessionCompressionMaxSummaryInputRunes = 120_000
@@ -21,6 +23,22 @@ const (
 
 	sessionCompressionSummaryPrefix = "【会话压缩】"
 )
+
+// sessionCompressionMaxContextRunes returns the threshold after which the system will attempt to compress
+// the chat history. It is intentionally configurable for dev/diagnostics.
+//
+// Env overrides:
+// - ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES
+func sessionCompressionMaxContextRunes() int {
+	maxRunes := defaultSessionCompressionMaxContextRunes
+	if v := envInt("ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES"); v > 0 {
+		maxRunes = v
+	}
+	if maxRunes < 1 {
+		return 1
+	}
+	return maxRunes
+}
 
 func approximateContextRunes(messages []llm.ChatMessage) int {
 	total := 0
@@ -180,7 +198,7 @@ func compressSessionIfNeeded(
 		return false, llmMessages, nil
 	}
 
-	if approximateContextRunes(llmMessages) <= sessionCompressionMaxContextRunes {
+	if approximateContextRunes(llmMessages) <= sessionCompressionMaxContextRunes() {
 		return false, llmMessages, nil
 	}
 
@@ -263,4 +281,16 @@ func buildCompressionFallbackMessages(persistedMessages []model.ChatMessage, llm
 	fallback = append(fallback, llmMessages[len(llmMessages)-1])
 
 	return fallback
+}
+
+func envInt(key string) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return v
 }
