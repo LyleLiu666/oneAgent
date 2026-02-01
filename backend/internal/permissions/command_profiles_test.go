@@ -102,6 +102,13 @@ func TestValidateCommand_Coding_AllowsFdRedirectionToStdout(t *testing.T) {
 	}
 }
 
+func TestValidateCommand_Coding_AllowsPythonDashCWithMultilineCode(t *testing.T) {
+	cmd := "python3 -c \"\nwith open('/Users/liu_y/code/pyProject/testPro/caipu/src/generator.py', 'r') as f:\n    lines = f.readlines()\n    for i, line in enumerate(lines[490:500], start=491):\n        leading = len(line) - len(line.lstrip())\n        print(f'{i}: [{leading}] {repr(line)}')\n\""
+	if err := ValidateCommand("coding", cmd, nil); err != nil {
+		t.Fatalf("expected allow for python3 -c multiline code, got %v", err)
+	}
+}
+
 func TestValidateCommand_Coding_DeniesSudo(t *testing.T) {
 	if err := ValidateCommand("coding", "sudo ls", nil); err == nil {
 		t.Fatalf("expected deny for sudo")

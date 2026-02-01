@@ -106,6 +106,8 @@ func ParseToolData(toolDataBlock string) ([]Call, error) {
 }
 
 func parseCall(callInner string, raw string) (Call, error) {
+	callInner = repairMissingFilePathOpenTag(callInner)
+
 	fields := map[string]string{}
 
 	toolName, ok := firstTagValueLoose(callInner, []string{"tool_name", "toolName", "tool", "name"})
@@ -305,6 +307,18 @@ func parseCall(callInner string, raw string) (Call, error) {
 		Fields:   fields,
 		Raw:      raw,
 	}, nil
+}
+
+func repairMissingFilePathOpenTag(input string) string {
+	lower := strings.ToLower(input)
+	if strings.Contains(lower, "<filepath") {
+		return input
+	}
+	// Repair a common malformed pattern produced by LLMs:
+	//   <tool_name>edit</toolName>/abs/path</filePath>
+	// by inserting the missing `<filePath>` opening tag.
+	re := regexp.MustCompile(`(?is)(</tool_name>|</toolname>)\s*([^<]+?)\s*(</filepath>)`)
+	return re.ReplaceAllString(input, `${1}<filePath>${2}${3}`)
 }
 
 func firstTagValue(input string, tags []string) (string, bool) {

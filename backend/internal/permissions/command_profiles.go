@@ -224,42 +224,11 @@ func ExtractCommands(command string) []string {
 
 // extractCommands returns the first token of each command segment.
 func extractCommands(command string) []string {
-	command = protectRedirectionAmpersands(command)
-	repl := strings.NewReplacer(
-		"&&", " && ",
-		"||", " || ",
-		";", " ; ",
-		"|", " | ",
-		"&", " & ",
-		"\n", " \n ",
-		"\r", " \r ",
-		"(", " ( ",
-		")", " ) ",
-	)
-	cleaned := repl.Replace(command)
-	parts := strings.Fields(cleaned)
-	out := make([]string, 0, len(parts))
-	expectCommand := true
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+	out := make([]string, 0, 4)
+	for _, segment := range splitCommandSegments(command) {
+		if token, ok := firstCommandToken(segment); ok {
+			out = append(out, token)
 		}
-		if isSeparatorToken(part) {
-			expectCommand = true
-			continue
-		}
-		if !expectCommand {
-			continue
-		}
-		if strings.HasPrefix(part, ">") || strings.HasPrefix(part, "<") {
-			continue
-		}
-		if isAssignmentToken(part) {
-			continue
-		}
-		out = append(out, part)
-		expectCommand = false
 	}
 	return out
 }
@@ -317,4 +286,172 @@ func containsRedirectionOutsideQuotes(command string) bool {
 		}
 	}
 	return false
+}
+
+func splitCommandSegments(command string) []string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+
+	var segments []string
+	var cur strings.Builder
+
+	inSingle := false
+	inDouble := false
+	escaped := false
+
+	flush := func() {
+		s := strings.TrimSpace(cur.String())
+		cur.Reset()
+		if s != "" {
+			segments = append(segments, s)
+		}
+	}
+
+	for i := 0; i < len(command); i++ {
+		ch := command[i]
+
+		if escaped {
+			escaped = false
+			cur.WriteByte(ch)
+			continue
+		}
+
+		if ch == '\\' && !inSingle {
+			escaped = true
+			cur.WriteByte(ch)
+			continue
+		}
+
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			cur.WriteByte(ch)
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			cur.WriteByte(ch)
+			continue
+		}
+
+		if inSingle || inDouble {
+			cur.WriteByte(ch)
+			continue
+		}
+
+		// Outside quotes: recognize command separators.
+		if ch == '&' && i+1 < len(command) && command[i+1] == '&' {
+			flush()
+			i++
+			continue
+		}
+		if ch == '|' && i+1 < len(command) && command[i+1] == '|' {
+			flush()
+			i++
+			continue
+		}
+		if ch == '&' {
+			// Avoid treating common redirection forms as separators (e.g., `2>&1`, `&>out.txt`).
+			prev := byte(0)
+			if i > 0 {
+				prev = command[i-1]
+			}
+			next := byte(0)
+			if i+1 < len(command) {
+				next = command[i+1]
+			}
+			if prev == '>' || prev == '<' || next == '>' || next == '<' {
+				cur.WriteByte(ch)
+				continue
+			}
+			flush()
+			continue
+		}
+		if ch == ';' || ch == '|' || ch == '\n' || ch == '\r' || ch == '(' || ch == ')' {
+			flush()
+			continue
+		}
+
+		cur.WriteByte(ch)
+	}
+
+	flush()
+	return segments
+}
+
+func firstCommandToken(segment string) (string, bool) {
+	segment = strings.TrimSpace(segment)
+	if segment == "" {
+		return "", false
+	}
+
+	inSingle := false
+	inDouble := false
+	escaped := false
+	expectToken := true
+	var tok strings.Builder
+
+	flushToken := func() (string, bool) {
+		t := strings.TrimSpace(tok.String())
+		tok.Reset()
+		if t == "" {
+			return "", false
+		}
+		// Skip redirections like `>out`, `<in`, `2>out`, etc.
+		if strings.HasPrefix(t, ">") || strings.HasPrefix(t, "<") || strings.HasPrefix(t, "1>") || strings.HasPrefix(t, "2>") {
+			return "", false
+		}
+		// Skip environment assignments like `A=1`.
+		if isAssignmentToken(t) {
+			return "", false
+		}
+		return t, true
+	}
+
+	for i := 0; i < len(segment); i++ {
+		ch := segment[i]
+
+		if escaped {
+			escaped = false
+			tok.WriteByte(ch)
+			continue
+		}
+
+		if ch == '\\' && !inSingle {
+			escaped = true
+			tok.WriteByte(ch)
+			continue
+		}
+
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			tok.WriteByte(ch)
+			continue
+		}
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			tok.WriteByte(ch)
+			continue
+		}
+
+		if !inSingle && !inDouble && (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+			if expectToken {
+				continue
+			}
+			if t, ok := flushToken(); ok {
+				return t, true
+			}
+			expectToken = true
+			continue
+		}
+
+		expectToken = false
+		tok.WriteByte(ch)
+	}
+
+	if t, ok := flushToken(); ok {
+		return t, true
+	}
+	return "", false
 }

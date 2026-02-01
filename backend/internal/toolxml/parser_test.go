@@ -27,12 +27,12 @@ func TestParseToolData_UnclosedCDATA_StripsPrefix(t *testing.T) {
 
 func TestParseToolData_ToleratesToolNameClosingTagTypo(t *testing.T) {
 	input := `<tool_data>
-  <call>
-    <tool_name>write_file</toolName>
-    <filePath>a.txt</filePath>
-    <content>hi</content>
-  </call>
-</tool_data>`
+	  <call>
+	    <tool_name>write_file</toolName>
+	    <filePath>a.txt</filePath>
+	    <content>hi</content>
+	  </call>
+	</tool_data>`
 
 	calls, err := ParseToolData(input)
 	if err != nil {
@@ -49,5 +49,27 @@ func TestParseToolData_ToleratesToolNameClosingTagTypo(t *testing.T) {
 	}
 	if got := calls[0].Fields["content"]; got != "hi" {
 		t.Fatalf("expected content %q, got %q", "hi", got)
+	}
+}
+
+func TestParseToolData_RepairsMissingFilePathOpenTagAfterToolNameClose(t *testing.T) {
+	input := `<tool_data>
+  <tool_name>edit</toolName>/Users/liu_y/code/pyProject/testPro/caipu/src/generator.py</filePath>
+  <oldcontent>old</oldcontent>
+  <newcontent>new</newcontent>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "edit" {
+		t.Fatalf("expected tool 'edit', got %q", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["filePath"]; got != "/Users/liu_y/code/pyProject/testPro/caipu/src/generator.py" {
+		t.Fatalf("expected filePath %q, got %q", "/Users/liu_y/code/pyProject/testPro/caipu/src/generator.py", got)
 	}
 }
