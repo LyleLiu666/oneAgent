@@ -26,8 +26,6 @@ func (c fakeSummaryClient) ChatCompletionStream(ctx context.Context, messages []
 }
 
 func TestCompressSessionIfNeeded_RewritesSessionAndPreservesCurrentUserMessage(t *testing.T) {
-	t.Parallel()
-
 	t.Setenv("ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES", "200")
 
 	store, err := sessionstore.New(t.TempDir())
@@ -105,8 +103,6 @@ func TestCompressSessionIfNeeded_RewritesSessionAndPreservesCurrentUserMessage(t
 }
 
 func TestBuildCompressionFallbackMessages_PreservesCurrentUserMessageAndTail(t *testing.T) {
-	t.Parallel()
-
 	t.Setenv("ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES", "200")
 
 	sessionID := "s1"
