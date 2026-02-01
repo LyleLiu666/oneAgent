@@ -405,3 +405,41 @@ it('suggests handing off long tasks on send in secretary mode', async () => {
     expect(apiClient.createTask).toHaveBeenCalledTimes(1)
     expect(apiClient.streamChat).not.toHaveBeenCalled()
 })
+
+it('appends an assistant message when receiving a task-completed event (secretary mode)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+            stubs: {
+                SecretaryTaskDeliverables: {
+                    template: `<button data-testid="emit-task-completed" @click="$emit('task-completed', { taskId: 't1', title: 'task1', status: 'succeeded' })"></button>`,
+                },
+            },
+        },
+    })
+
+    await flushPromises()
+
+    expect(chat.messages.filter((m: any) => m.role === 'assistant').length).toBe(0)
+
+    await wrapper.get('[data-testid="emit-task-completed"]').trigger('click')
+    await flushPromises()
+
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.type === 'text')).toBe(true)
+})

@@ -362,6 +362,33 @@ const sendChatFromSuggest = async () => {
   await sendChat(message)
 }
 
+type TaskCompletedEvent = {
+  taskId?: string
+  attemptId?: string
+  title?: string
+  status?: string
+}
+
+const onTaskCompleted = (payload: TaskCompletedEvent) => {
+  if (!isSecretaryMode.value) return
+
+  const taskID = String(payload?.taskId || '').trim()
+  const status = String(payload?.status || '').trim()
+  const title = String(payload?.title || '').trim()
+
+  const shortID = taskID ? taskID.slice(0, 8) : 'unknown'
+  const label = status === 'succeeded' ? '已完成' : `已结束(${status || 'unknown'})`
+
+  chatStore.addMessage({
+    id: Date.now(),
+    role: 'assistant',
+    type: 'text',
+    content: `后台任务${label}：${title || '任务'}（task=${shortID}）。交付已更新。`,
+    createdAt: new Date(),
+    isStreaming: false,
+  })
+}
+
 // Methods
 const handleDocumentClick = (event: MouseEvent) => {
   if (!toolPickerOpen.value) return
@@ -1792,7 +1819,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <SecretaryTaskDeliverables v-if="isSecretaryMode" :workspace="workspacePath" />
+      <SecretaryTaskDeliverables v-if="isSecretaryMode" :workspace="workspacePath" @task-completed="onTaskCompleted" />
 
       <TaskQueuePanel v-if="!isSecretaryMode" :workspace="workspacePath" :model-id="selectedModelId" />
 

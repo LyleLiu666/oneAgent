@@ -244,3 +244,77 @@ it("enters full mode and navigates to tasks when troubleshooting from secretary 
 
   wrapper.unmount();
 });
+
+it("emits task-completed when a running task finishes (no history replay)", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "running",
+          created_at: "2026-02-01T00:00:01Z",
+          started_at: "2026-02-01T00:00:01Z",
+        },
+      ],
+    },
+  ]);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:03Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "succeeded",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:03Z",
+          summary: "done",
+          findings_path: "/tmp/ws/FINDINGS.md",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  expect(wrapper.emitted("task-completed")).toBeUndefined();
+
+  // Trigger a second refresh via the workspace watch (keeping normalized path stable).
+  await wrapper.setProps({ workspace: "/tmp/ws " });
+  await flushPromises();
+
+  const events = wrapper.emitted("task-completed");
+  expect(events?.length).toBe(1);
+  expect(events?.[0]?.[0]).toMatchObject({
+    taskId: "t1",
+    status: "succeeded",
+  });
+
+  wrapper.unmount();
+});

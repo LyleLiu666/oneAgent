@@ -36,6 +36,17 @@ const props = defineProps<{
   maxRecoveryCards?: number
 }>()
 
+type TaskCompletedEvent = {
+  taskId: string
+  attemptId: string
+  title: string
+  status: string
+}
+
+const emit = defineEmits<{
+  (e: 'task-completed', payload: TaskCompletedEvent): void
+}>()
+
 const ui = useUIStore()
 const router = useRouter()
 
@@ -46,6 +57,8 @@ const maxRecoveryCards = computed(() => (typeof props.maxRecoveryCards === 'numb
 const loading = ref(false)
 const error = ref<string>('')
 const tasks = ref<Task[]>([])
+const hasTaskBaseline = ref(false)
+const lastLatestStatusByTaskID = ref<Record<string, string>>({})
 
 let pollTimer: number | undefined
 
@@ -53,6 +66,7 @@ const normalizeWorkspace = (ws: any) => String(ws || '').trim()
 
 const isTerminalAttempt = (a: TaskAttempt) => !['queued', 'running'].includes(String(a?.status || ''))
 const isSucceededAttempt = (a: TaskAttempt) => String(a?.status || '') === 'succeeded'
+const isTerminalStatus = (status: string) => status !== '' && !['queued', 'running'].includes(status)
 
 const isNeedsAttentionAttempt = (a: TaskAttempt) => {
   const s = String(a?.status || '')
@@ -139,7 +153,44 @@ const refresh = async () => {
 
   try {
     const res = await listTasks(ws || undefined)
-    tasks.value = Array.isArray(res) ? res : []
+    const nextTasks = Array.isArray(res) ? res : []
+    const nextLatestStatusByTaskID: Record<string, string> = {}
+
+    for (const t of nextTasks) {
+      const taskID = String((t as any)?.id || '').trim()
+      if (!taskID) continue
+      const latest = getLatestAttempt(t)
+      nextLatestStatusByTaskID[taskID] = String(latest?.status || '').trim()
+    }
+
+    if (hasTaskBaseline.value) {
+      const prev = lastLatestStatusByTaskID.value
+
+      for (const t of nextTasks) {
+        const taskID = String((t as any)?.id || '').trim()
+        if (!taskID) continue
+        const latest = getLatestAttempt(t)
+        if (!latest) continue
+
+        const prevStatus = String(prev[taskID] || '').trim()
+        const nextStatus = String(latest.status || '').trim()
+        if (!prevStatus) continue
+        if (!['queued', 'running'].includes(prevStatus)) continue
+        if (!isTerminalStatus(nextStatus)) continue
+
+        emit('task-completed', {
+          taskId: taskID,
+          attemptId: String(latest.id || '').trim(),
+          title: String((t as any)?.title || '').trim(),
+          status: nextStatus,
+        })
+      }
+    } else {
+      hasTaskBaseline.value = true
+    }
+
+    tasks.value = nextTasks
+    lastLatestStatusByTaskID.value = nextLatestStatusByTaskID
   } catch (e: any) {
     const msg = e?.data?.error || e?.message || 'Failed to load tasks.'
     error.value = String(msg)
