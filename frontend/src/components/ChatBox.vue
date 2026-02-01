@@ -321,49 +321,6 @@ const toggleChatUIMode = () => {
   uiStore.toggleMode()
 }
 
-const shouldSuggestTaskHandoff = (raw: string): boolean => {
-  if (!isSecretaryMode.value) return false
-  const msg = String(raw || '').trim()
-  if (!msg) return false
-  if (msg.length < 10) return false
-  if (chatStore.isLoading || loadingHistory.value) return false
-  if (taskHandoffSubmitting.value) return false
-
-  const hasAskVerb =
-    msg.includes('帮我') ||
-    msg.includes('请你') ||
-    msg.includes('麻烦') ||
-    msg.includes('把') ||
-    msg.includes('生成') ||
-    msg.includes('导出')
-  if (!hasAskVerb) return false
-
-  const lower = msg.toLowerCase()
-  const looksLikeCodeWork =
-    msg.includes('跑测试') ||
-    msg.includes('测试') ||
-    msg.includes('修复') ||
-    msg.includes('重构') ||
-    msg.includes('改代码') ||
-    msg.includes('提交') ||
-    msg.includes('分支') ||
-    msg.includes('报告') ||
-    msg.includes('文件') ||
-    msg.includes('目录') ||
-    lower.includes('go test') ||
-    lower.includes('npm test') ||
-    lower.includes('pnpm') ||
-    lower.includes('yarn') ||
-    lower.includes('build') ||
-    lower.includes('refactor') ||
-    lower.includes('fix') ||
-    lower.includes('commit') ||
-    lower.includes('branch') ||
-    lower.includes('diff')
-
-  return looksLikeCodeWork
-}
-
 const closeTaskHandoffSuggest = () => {
   taskHandoffSuggestOpen.value = false
 }
