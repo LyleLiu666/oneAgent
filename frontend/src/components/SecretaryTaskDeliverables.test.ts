@@ -1,13 +1,26 @@
 // @vitest-environment jsdom
 
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const makeLocalStorage = () => {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, String(value)),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => void store.clear(),
+  };
+};
+
 const mocks = vi.hoisted(() => {
   return {
+    routerPush: vi.fn(),
     listTasks: vi.fn(async () => []),
+    resumeTask: vi.fn(),
     getTaskAttemptArtifact: vi.fn(async () => ({
       path: "findings.md",
       content: "# Findings\n- ok\n",
@@ -16,12 +29,26 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("vue-router", () => ({
+  useRouter: () => ({ push: mocks.routerPush }),
+}));
+
 vi.mock("@/api/client", () => ({
   listTasks: mocks.listTasks,
+  resumeTask: mocks.resumeTask,
   getTaskAttemptArtifact: mocks.getTaskAttemptArtifact,
 }));
 
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 it("renders deliverable cards for completed task artifacts", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
   mocks.listTasks.mockResolvedValueOnce([
     {
       id: "t1",
@@ -50,6 +77,7 @@ it("renders deliverable cards for completed task artifacts", async () => {
   );
   const wrapper = mount(SecretaryTaskDeliverables, {
     props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
   });
 
   await flushPromises();
@@ -65,6 +93,11 @@ it("renders deliverable cards for completed task artifacts", async () => {
 });
 
 it("opens artifact preview modal when clicking findings", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
   mocks.listTasks.mockResolvedValueOnce([
     {
       id: "t1",
@@ -98,6 +131,7 @@ it("opens artifact preview modal when clicking findings", async () => {
   );
   const wrapper = mount(SecretaryTaskDeliverables, {
     props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
   });
 
   await flushPromises();
@@ -115,3 +149,98 @@ it("opens artifact preview modal when clicking findings", async () => {
   wrapper.unmount();
 });
 
+it("surfaces failed tasks and allows resuming from secretary mode", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  const { useUIStore } = await import("@/stores/ui");
+  const ui = useUIStore();
+  ui.setMode("secretary");
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  expect(wrapper.find('[data-testid="secretary-task-recovery"]').exists()).toBe(true);
+  await wrapper.get('[data-testid="secretary-task-recovery-resume"]').trigger("click");
+  expect(mocks.resumeTask).toHaveBeenCalledWith("t1");
+
+  wrapper.unmount();
+});
+
+it("enters full mode and navigates to tasks when troubleshooting from secretary mode", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  const { useUIStore } = await import("@/stores/ui");
+  const ui = useUIStore();
+  ui.setMode("secretary");
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  await wrapper.get('[data-testid="secretary-task-recovery-troubleshoot"]').trigger("click");
+  expect(ui.mode).toBe("full");
+  expect(mocks.routerPush).toHaveBeenCalledWith("/tasks");
+
+  wrapper.unmount();
+});

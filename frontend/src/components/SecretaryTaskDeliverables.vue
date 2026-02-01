@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { getTaskAttemptArtifact, listTasks, type Task, type TaskAttempt, type TaskAttemptArtifactContent } from '@/api/client'
+import {
+  getTaskAttemptArtifact,
+  listTasks,
+  resumeTask,
+  type Task,
+  type TaskAttempt,
+  type TaskAttemptArtifactContent,
+} from '@/api/client'
 import ErrorBanner from '@/components/ErrorBanner.vue'
+import { useUIStore } from '@/stores/ui'
 
 type DeliverableArtifact = {
   kind: string
@@ -15,14 +24,24 @@ type DeliverableCard = {
   artifacts: DeliverableArtifact[]
 }
 
+type RecoveryCard = {
+  task: Task
+  attempt: TaskAttempt
+}
+
 const props = defineProps<{
   workspace?: string
   pollIntervalMs?: number
   maxCards?: number
+  maxRecoveryCards?: number
 }>()
+
+const ui = useUIStore()
+const router = useRouter()
 
 const pollIntervalMs = computed(() => (typeof props.pollIntervalMs === 'number' ? props.pollIntervalMs : 10_000))
 const maxCards = computed(() => (typeof props.maxCards === 'number' ? props.maxCards : 3))
+const maxRecoveryCards = computed(() => (typeof props.maxRecoveryCards === 'number' ? props.maxRecoveryCards : 2))
 
 const loading = ref(false)
 const error = ref<string>('')
@@ -33,6 +52,12 @@ let pollTimer: number | undefined
 const normalizeWorkspace = (ws: any) => String(ws || '').trim()
 
 const isTerminalAttempt = (a: TaskAttempt) => !['queued', 'running'].includes(String(a?.status || ''))
+const isSucceededAttempt = (a: TaskAttempt) => String(a?.status || '') === 'succeeded'
+
+const isNeedsAttentionAttempt = (a: TaskAttempt) => {
+  const s = String(a?.status || '')
+  return s === 'failed' || s === 'limit_exceeded' || s === 'timed_out' || s === 'interrupted'
+}
 
 const getLatestAttempt = (t: Task): TaskAttempt | null => {
   if (!t || !Array.isArray(t.attempts) || t.attempts.length === 0) return null
@@ -82,6 +107,31 @@ const deliverableCards = computed<DeliverableCard[]>(() => {
   return mapped.slice(0, Math.max(0, maxCards.value))
 })
 
+const recoveryCards = computed<RecoveryCard[]>(() => {
+  const normalized = normalizeWorkspace(props.workspace)
+  const filtered = tasks.value.filter((t) => {
+    if (!normalized) return true
+    return normalizeWorkspace((t as any)?.workspace) === normalized
+  })
+
+  const mapped: RecoveryCard[] = []
+  for (const t of filtered) {
+    const a = getLatestAttempt(t)
+    if (!a || !isTerminalAttempt(a)) continue
+    if (isSucceededAttempt(a)) continue
+    if (!isNeedsAttentionAttempt(a)) continue
+    mapped.push({ task: t, attempt: a })
+  }
+
+  mapped.sort((a, b) => {
+    const ta = Date.parse(a.attempt.finished_at || a.task.updated_at || a.task.created_at || '') || 0
+    const tb = Date.parse(b.attempt.finished_at || b.task.updated_at || b.task.created_at || '') || 0
+    return tb - ta
+  })
+
+  return mapped.slice(0, Math.max(0, maxRecoveryCards.value))
+})
+
 const refresh = async () => {
   const ws = normalizeWorkspace(props.workspace)
   loading.value = true
@@ -97,6 +147,32 @@ const refresh = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const recoverySubmittingTaskId = ref<string>('')
+const recoveryError = ref<string>('')
+
+const onResume = async (taskId: string) => {
+  const id = String(taskId || '').trim()
+  if (!id) return
+  if (recoverySubmittingTaskId.value) return
+
+  recoverySubmittingTaskId.value = id
+  recoveryError.value = ''
+  try {
+    await resumeTask(id)
+    await refresh()
+  } catch (e: any) {
+    const msg = e?.data?.error || e?.message || 'Failed to resume task.'
+    recoveryError.value = String(msg)
+  } finally {
+    recoverySubmittingTaskId.value = ''
+  }
+}
+
+const onTroubleshoot = async () => {
+  ui.setMode('full')
+  await router.push('/tasks')
 }
 
 const stopPolling = () => {
@@ -180,7 +256,78 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="deliverableCards.length || error" class="max-w-4xl mx-auto px-4 pb-3">
+  <div v-if="recoveryCards.length || deliverableCards.length || error" class="max-w-4xl mx-auto px-4 pb-3">
+    <div
+      v-if="recoveryCards.length"
+      data-testid="secretary-task-recovery"
+      class="mb-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 backdrop-blur px-4 py-3"
+    >
+      <div class="flex items-center justify-between gap-3">
+        <div class="text-xs font-semibold text-amber-200 tracking-wide">需要处理</div>
+        <div class="text-[11px] text-amber-200/70">最近 {{ recoveryCards.length }} 个任务</div>
+      </div>
+
+      <ErrorBanner v-if="recoveryError" :error="recoveryError" title="操作失败" class="mt-3" />
+
+      <div class="mt-3 grid grid-cols-1 gap-3">
+        <div
+          v-for="card in recoveryCards"
+          :key="card.task.id"
+          class="rounded-2xl bg-surface-900/40 p-4"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-surface-100 truncate">{{ card.task.title }}</div>
+              <div class="mt-1 text-xs text-surface-500 truncate">
+                status={{ card.attempt.status }} · attempt={{ card.attempt.id.slice(0, 8) }}
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3 space-y-2">
+            <div
+              v-if="card.attempt.summary"
+              class="text-xs text-surface-200 whitespace-pre-wrap"
+            >
+              {{ card.attempt.summary }}
+            </div>
+            <div
+              v-else-if="card.attempt.error"
+              class="text-xs text-surface-200 whitespace-pre-wrap"
+            >
+              {{ card.attempt.error }}
+            </div>
+            <div
+              v-if="card.attempt.observer?.next_steps"
+              class="rounded-xl border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-300 whitespace-pre-wrap"
+            >
+              {{ card.attempt.observer.next_steps }}
+            </div>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="secretary-task-recovery-resume"
+              class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="Boolean(recoverySubmittingTaskId)"
+              @click="onResume(card.task.id)"
+            >
+              继续
+            </button>
+            <button
+              type="button"
+              data-testid="secretary-task-recovery-troubleshoot"
+              class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+              @click="onTroubleshoot"
+            >
+              排障
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div
       v-if="deliverableCards.length"
       data-testid="secretary-task-deliverables"
