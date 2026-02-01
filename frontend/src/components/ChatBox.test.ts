@@ -358,3 +358,50 @@ it('does not handoff to task queue when workspace selection is canceled', async 
     expect(apiClient.createTask).not.toHaveBeenCalled()
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('do the thing')
 })
+
+it('suggests handing off long tasks on send in secretary mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    ;(apiClient.createTask as any).mockResolvedValueOnce({
+        id: 't1',
+        user_id: 'u1',
+        workspace: '/tmp/workspace',
+        title: 'T1',
+        prompt: 'p',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attempts: [],
+    })
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('帮我跑一下测试并修复失败用例')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="chat-handoff-suggest"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="chat-handoff-suggest-accept"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.createTask).toHaveBeenCalledTimes(1)
+    expect(apiClient.streamChat).not.toHaveBeenCalled()
+})

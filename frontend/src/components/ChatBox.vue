@@ -69,6 +69,7 @@ const activeStreamAbort = ref<AbortController | null>(null)
 const taskHandoffSubmitting = ref(false)
 const taskHandoffError = ref('')
 const taskHandoffSuccess = ref('')
+const taskHandoffSuggestOpen = ref(false)
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
   if (!msg.isStreaming) return undefined
@@ -295,6 +296,70 @@ const toolSummary = computed(() => {
 
 const toggleChatUIMode = () => {
   uiStore.toggleMode()
+}
+
+const shouldSuggestTaskHandoff = (raw: string): boolean => {
+  if (!isSecretaryMode.value) return false
+  const msg = String(raw || '').trim()
+  if (!msg) return false
+  if (msg.length < 10) return false
+  if (chatStore.isLoading || loadingHistory.value) return false
+  if (taskHandoffSubmitting.value) return false
+
+  const hasAskVerb =
+    msg.includes('帮我') ||
+    msg.includes('请你') ||
+    msg.includes('麻烦') ||
+    msg.includes('把') ||
+    msg.includes('生成') ||
+    msg.includes('导出')
+  if (!hasAskVerb) return false
+
+  const lower = msg.toLowerCase()
+  const looksLikeCodeWork =
+    msg.includes('跑测试') ||
+    msg.includes('测试') ||
+    msg.includes('修复') ||
+    msg.includes('重构') ||
+    msg.includes('改代码') ||
+    msg.includes('提交') ||
+    msg.includes('分支') ||
+    msg.includes('报告') ||
+    msg.includes('文件') ||
+    msg.includes('目录') ||
+    lower.includes('go test') ||
+    lower.includes('npm test') ||
+    lower.includes('pnpm') ||
+    lower.includes('yarn') ||
+    lower.includes('build') ||
+    lower.includes('refactor') ||
+    lower.includes('fix') ||
+    lower.includes('commit') ||
+    lower.includes('branch') ||
+    lower.includes('diff')
+
+  return looksLikeCodeWork
+}
+
+const closeTaskHandoffSuggest = () => {
+  taskHandoffSuggestOpen.value = false
+}
+
+const acceptTaskHandoffSuggest = async () => {
+  closeTaskHandoffSuggest()
+  await handoffToTask()
+}
+
+const sendChatFromSuggest = async () => {
+  const message = inputMessage.value.trim()
+  if (!message) {
+    closeTaskHandoffSuggest()
+    return
+  }
+  closeTaskHandoffSuggest()
+  inputMessage.value = ''
+  if (inputEl.value) inputEl.value.style.height = ''
+  await sendChat(message)
 }
 
 // Methods
@@ -1299,6 +1364,10 @@ const sendChat = async (rawMessage: string) => {
 const sendMessage = async () => {
   if (!canSend.value) return
   const message = inputMessage.value.trim()
+  if (shouldSuggestTaskHandoff(message)) {
+    taskHandoffSuggestOpen.value = true
+    return
+  }
   inputMessage.value = ''
   if (inputEl.value) inputEl.value.style.height = ''
   await sendChat(message)
@@ -1492,10 +1561,27 @@ const handoffToTask = async () => {
       return
     }
 
-    await createTask({
+    const created = await createTask({
       workspace: ws,
       prompt,
       model_id: String(selectedModelId.value || '').trim() || undefined,
+    })
+
+    const nextIdBase = Date.now()
+    chatStore.addMessage({
+      id: nextIdBase,
+      role: 'user',
+      type: 'text',
+      content: prompt,
+      createdAt: new Date(),
+    })
+    chatStore.addMessage({
+      id: nextIdBase + 1,
+      role: 'assistant',
+      type: 'text',
+      content: `收到。我已把这件事交给后台任务处理（task=${String((created as any)?.id || '').slice(0, 8) || 'unknown'}）。完成后你会在「交付」看到产物。`,
+      createdAt: new Date(),
+      isStreaming: false,
     })
 
     inputMessage.value = ''
@@ -1699,9 +1785,9 @@ onMounted(async () => {
                       清空
                     </button>
                   </div>
-                </div>
-              </div>
-            </template>
+	  </div>
+	</div>
+</template>
           </div>
         </div>
       </div>
@@ -1988,6 +2074,40 @@ onMounted(async () => {
             查看可用 skills；或运行 <span class="font-mono">oneagent skills status</span>。
           </p>
         </div>
+      </div>
+	  </div>
+	</div>
+
+  <div
+    v-if="taskHandoffSuggestOpen"
+    data-testid="chat-handoff-suggest"
+    class="fixed inset-0 z-50 flex items-center justify-center p-4"
+  >
+    <div class="absolute inset-0 bg-black/70" @click="closeTaskHandoffSuggest"></div>
+    <div class="relative w-full max-w-lg rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 bg-surface-800/50">
+        <div class="text-sm font-semibold text-surface-100">建议交给后台执行</div>
+        <div class="mt-1 text-xs text-surface-300">
+          这条消息看起来是长任务。交给后台可断点恢复，并会产出可点击的交付物。
+        </div>
+      </div>
+      <div class="p-5 flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          data-testid="chat-handoff-suggest-send-chat"
+          class="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm text-surface-100 hover:bg-surface-800"
+          @click="sendChatFromSuggest"
+        >
+          作为聊天发送
+        </button>
+        <button
+          type="button"
+          data-testid="chat-handoff-suggest-accept"
+          class="rounded-lg border border-primary-500/40 bg-primary-600 px-3 py-2 text-sm text-white hover:bg-primary-500"
+          @click="acceptTaskHandoffSuggest"
+        >
+          交给后台
+        </button>
       </div>
     </div>
   </div>
