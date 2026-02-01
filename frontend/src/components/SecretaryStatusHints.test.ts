@@ -3,6 +3,7 @@
 import { expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import type { Task } from '@/api/client'
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -25,7 +26,7 @@ const mocks = vi.hoisted(() => {
       learning_job_status: 'none',
       sop_proposed_count: 0,
     })),
-    listTasks: vi.fn(async () => []),
+    listTasks: vi.fn(async (): Promise<Task[]> => []),
   }
 })
 

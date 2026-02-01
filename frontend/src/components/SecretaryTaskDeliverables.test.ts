@@ -3,6 +3,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import type { Task } from "@/api/client";
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -19,7 +20,7 @@ const makeLocalStorage = () => {
 const mocks = vi.hoisted(() => {
   return {
     routerPush: vi.fn(),
-    listTasks: vi.fn(async () => []),
+    listTasks: vi.fn(async (): Promise<Task[]> => []),
     resumeTask: vi.fn(),
     getTaskAttemptArtifact: vi.fn(async () => ({
       path: "findings.md",
