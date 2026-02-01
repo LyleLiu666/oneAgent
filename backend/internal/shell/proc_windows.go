@@ -14,9 +14,10 @@ func setupCmdForProcessGroup(cmd *exec.Cmd) {
 		return
 	}
 	// Best-effort process grouping for later tree termination.
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	cmd.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
 }
 
 func killProcessTree(proc *os.Process) {

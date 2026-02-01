@@ -8,20 +8,20 @@ import (
 	"os/exec"
 )
 
-func newNativeBashCommand(command string, root string, tmpDir string, profileDir string) (*exec.Cmd, string, error) {
+func newNativeBashCommand(command string, root string, tmpDir string, profileDir string) (*exec.Cmd, func(), error) {
 	sandboxExecPath, err := exec.LookPath("sandbox-exec")
 	if err != nil {
-		return nil, "", fmt.Errorf("native sandbox unavailable: sandbox-exec not found (expected /usr/bin/sandbox-exec)")
+		return nil, nil, fmt.Errorf("native sandbox unavailable: sandbox-exec not found (expected /usr/bin/sandbox-exec)")
 	}
 
 	shellPath, err := ResolveBashPath()
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 
 	profilePath, err := writeNativeSandboxProfile(profileDir, root)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 
 	cmd := exec.Command(sandboxExecPath, "-f", profilePath, shellPath, "--noprofile", "--norc", "-lc", command)
@@ -36,6 +36,5 @@ func newNativeBashCommand(command string, root string, tmpDir string, profileDir
 		"BASH_ENV":      "",
 	})
 	setupCmdForProcessGroup(cmd)
-	return cmd, profilePath, nil
+	return cmd, func() {}, nil
 }
-

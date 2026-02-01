@@ -375,6 +375,7 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 	}
 
 	var cmd *exec.Cmd
+	var cleanupAfterStart func()
 	if mode == SandboxModeDocker {
 		args := []string{
 			"run",
@@ -394,7 +395,7 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 		cmd.Env = os.Environ()
 		setupCmdForProcessGroup(cmd)
 	} else if mode == SandboxModeNative {
-		cmd, _, err = newNativeBashCommand(trimmed, root, tmpDir, jobDir)
+		cmd, cleanupAfterStart, err = newNativeBashCommand(trimmed, root, tmpDir, jobDir)
 		if err != nil {
 			_ = os.RemoveAll(jobDir)
 			return "", err
@@ -431,10 +432,16 @@ func (m *asyncBashManager) start(command string, maxRuntime time.Duration, rootD
 	cmd.Stderr = stderrLog
 
 	if err := cmd.Start(); err != nil {
+		if cleanupAfterStart != nil {
+			cleanupAfterStart()
+		}
 		_ = stdoutLog.Close()
 		_ = stderrLog.Close()
 		_ = os.RemoveAll(jobDir)
 		return "", err
+	}
+	if cleanupAfterStart != nil {
+		cleanupAfterStart()
 	}
 
 	job := &asyncBashJob{
