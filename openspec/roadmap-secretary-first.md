@@ -43,16 +43,16 @@
 - Chat 工具 loop 已有 `max_steps` 上限：默认 `200`，可用环境变量覆盖：`ONEAGENT_CHAT_TOOL_MAX_STEPS`（并有 cap `ONEAGENT_CHAT_TOOL_MAX_STEPS_CAP`）。对应实现：`backend/internal/toolcalling/limits.go`。
 - 这解决了“无上限导致无限迭代/烧钱/卡死”的基础风险；后续更像是“默认值/可配置性/可观测性”的产品化问题。
 
-### 3.2 会话自动压缩：存在实现，但缺少可回归验证
+### 3.2 会话自动压缩：已补齐可回归验证（避免“体感很少触发”的不确定性）
 - 触发阈值：当 prompt 近似长度（runes）`> 80_000` 时触发压缩。对应实现：`backend/internal/handler/session_compress.go`。
 - 压缩行为：将早期历史摘要为一条以 `【会话压缩】` 开头的 assistant 消息，保留最近两轮对话（4 条 text message），并重建 prompt（system + summary + tail + 当前 user）。
-- 现状缺口：缺少专项测试与“如何触发/如何确认生效”的可操作路径，导致体感为“很少触发/不知道有没有生效”。
+- 现状补齐：已通过 `add-session-context-compression-verification` 补齐专项测试与可复现实验路径，可回归确认压缩确实生效（不依赖真实 LLM）。
 
-### 3.3 前端“秘书模式”已具备雏形，但全局侧边栏仍暴露
+### 3.3 前端“秘书模式”已具备雏形，且全局侧边栏已隐藏（默认更像微信）
 - 已存在独立路由：`/secretary`（`frontend/src/views/Secretary.vue`）。
 - `ChatBox` 支持 `secretary/full` 两种 UI 模式并持久化：`frontend/src/components/ChatBox.vue`（localStorage key：`oneagent-chat-ui-mode`）。
 - 秘书模式下已隐藏：历史面板、模型/工具/工作区选择、trace、TaskQueuePanel 等（best-effort）。
-- 当前关键缺口：`Sidebar` 在登录后全局渲染（`frontend/src/App.vue`），导致“秘书模式仍像管理系统”。
+- 已通过 `update-app-shell-secretary-first`：秘书模式不渲染全局 `Sidebar`；仅完全模式显示（progressive disclosure）。
 
 ---
 
@@ -67,7 +67,7 @@
 产出（建议拆成 changes）：
 - **会话压缩可回归**：`add-session-context-compression-verification`（补齐单测/可观测信号/可复现实验）。
 - **工具循环上限产品化**：确认默认值策略（例如 150/200）+ 在 doctor/config 中能看见当前生效值（best-effort）。
-- **中断/恢复**：对齐 `add-chat-stream-recovery-and-stop`（当前 active change）以支撑“像微信一样随时停/继续”的体验。
+- **中断/恢复**：`add-chat-stream-recovery-and-stop` 以支撑“像微信一样随时停/继续”的体验。
 
 验收（Hard Gate 示例）：
 - 存在测试能稳定触发一次压缩并断言：summary 写入 session 且 prompt 被重建（不依赖真实 LLM）
@@ -129,14 +129,14 @@
 > - ⏭️：下一步（建议新建 change）
 
 ### L0 地基：运行时边界与安全（跨平台能力）
-1) 🟡 `add-native-command-sandbox`：补齐 Linux/Windows native sandbox（Landlock/Restricted Token 等，best-effort）
+1) ✅ `add-native-command-sandbox`：补齐 Linux/Windows native sandbox（Landlock/Restricted Token 等，best-effort）
    - **模块边界**：仅触碰 `backend/internal/sandbox/**`（或等价）、命令工具执行层、doctor；不要把平台细节泄漏到 handler/业务层。
    - **Hard Gate**：集成测试“workspace 内可删、越界拒绝”，并在不可用平台上可预测 skip。
 
 ### L1 地基：对话主循环可靠性（长跑能力）
 2) ✅ `update-tool-loop-limits-and-write-file-no-truncate`：工具 loop max_steps 可配置 + write_file fail-fast
 3) ✅ `add-session-context-compression-verification`：会话压缩可回归 + 阈值可配置（dev/诊断）
-4) 🟡 `add-chat-stream-recovery-and-stop`：补齐 QA 收尾（把 4.1/4.2 变成可回归验证或至少可复现实验脚本）
+4) ✅ `add-chat-stream-recovery-and-stop`：补齐 QA 收尾（把 4.1/4.2 变成可回归验证或至少可复现实验脚本）
    - **模块边界**：Chat streaming 的可靠性验证优先在 backend integration test + frontend component test；避免把“测试逻辑/调试逻辑”混进生产代码。
    - **Hard Gate**：可回归验证“刷新后可 attach 继续”、“Stop 后不落盘 reply 且后端 generation 终止”。
 
@@ -145,7 +145,7 @@
    - **模块边界**：`ui_mode` 只由 `frontend/src/stores/ui.ts` 负责；任何页面/组件不得各自维护第二份 mode 状态。
 
 ### L3 上层：秘书模式的“低噪声可观测性”（不等于把侧边栏搬进来）
-6) ⏭️ `add-secretary-status-hints`（建议新建 change）
+6) ✅ `add-secretary-status-hints`
    - **做什么**：在 `ui_mode=secretary` 下提供极轻的状态提示（例如 SOP 待治理数、任务运行中），且不引入“管理系统外观”。
    - **模块边界**：
      - 状态拉取逻辑抽成 composable（例如 `useLedgerStatusToday`），Sidebar/SecretaryBar 复用，避免重复定时器逻辑。
@@ -153,19 +153,22 @@
    - **Hard Gate**：unit tests 覆盖 badge 出现/隐藏、点击进入 full mode 的路径；不依赖 UI 文案选择器。
 
 ### L4 上层：把“管理系统”变成自动化（任务化执行 + 交付）
-7) ⏭️ `add-secretary-chat-task-handoff`（建议新建 change）
+7) ✅ `add-secretary-chat-task-handoff`
    - **做什么**：秘书模式下将“长任务”自动落入 Task Queue（异步），对话仅展示进度与最终交付入口（而不是把全过程塞进一轮 chat）。
    - **模块边界**：
      - 后端新增“编排层”（secretary/orchestrator）负责判定/入队/回传状态；不要把 Task Queue 逻辑揉进 `chat.go`。
      - Chat 仍是即时对话；Task Queue 仍是长跑执行；二者通过明确的事件/引用桥接（receipt/task_id）。
    - **Hard Gate**：集成测试：发起一个模拟长任务 → 产生 task + events → 刷新后可恢复显示进度 → 完成后可打开 artifacts。
 
-8) ⏭️ `add-secretary-deliverable-cards`（建议新建 change）
+8) ✅ `add-secretary-deliverable-cards`
    - **做什么**：对话里结构化交付（文件路径/diff/导出文档/report 链接），形成“可点击卡片”。
    - **模块边界**：渲染组件独立（`DeliverableCard`），后端输出结构化引用（不要让前端从纯文本里用正则猜）。
 
-9) ⏭️ `add-secretary-recovery-actions`（建议新建 change）
+9) ✅ `add-secretary-recovery-actions`
    - **做什么**：失败时给出下一步（重试/继续/缩小范围/进入 full 排障），把“可恢复”做成默认体验。
 
+10) ✅ `add-secretary-task-completion-notifications`
+   - **做什么**：后台任务从 `queued/running` 进入终态时，在对话里自动追加一条低噪声通知（且不回放历史，避免首次加载刷屏）。
+
 ### L5 长期上层：多线程与复利（秘书=编排器）
-10) ✅/🟡 对齐 `add-workflow-orchestration-graph` 等长期方向，把“并行工作线/交付物传递/Hard&Soft Gate”落到 Secretary orchestration 上。
+11) ✅/🟡 对齐 `add-workflow-orchestration-graph` 等长期方向，把“并行工作线/交付物传递/Hard&Soft Gate”落到 Secretary orchestration 上。

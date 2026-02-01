@@ -19,15 +19,25 @@
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
-- `update-app-shell-secretary-first`：默认只保留秘书模式；仅完全模式显示 Sidebar/菜单
-- `add-session-context-compression-verification`：会话自动压缩的可回归验证（确认生效）
-- `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除、不断网）
-- `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
+- （暂无：当前 active changes 均已 `✓ Complete`；以 `openspec list` 为准）
 
 ### 0.2 Complete（已完成，待归档到 `openspec/changes/archive/`）
+- `update-app-shell-secretary-first`：默认只保留秘书模式；仅完全模式显示 Sidebar/菜单
+- `add-secretary-chat-task-handoff`：秘书模式下长任务 handoff 到 Task Queue（对话低噪声展示）
+- `update-secretary-task-handoff-ux`：handoff 确认与回执更像“微信聊天”
+- `add-secretary-deliverable-cards`：对话内交付卡片（仅任务产物 artifacts，可点开预览）
+- `add-secretary-recovery-actions`：失败任务的一键恢复/排障入口（best-effort）
+- `add-secretary-task-completion-notifications`：后台任务完成后自动在对话里追加低噪声通知
+- `add-secretary-status-hints`：秘书模式低噪声状态提示（不引入管理系统外观）
+- `add-secretary-task-status-hints`：秘书模式任务状态提示（运行中/完成等）
+- `add-chat-stream-recovery-and-stop`：Chat streaming 可 stop + 刷新后恢复（best-effort）
+- `add-session-context-compression-verification`：会话自动压缩可回归验证（确认生效）
+- `update-tool-loop-limits-and-write-file-no-truncate`：tool loop 上限可配置 + `write_file` 超限 fail-fast
+- `update-chat-ux-tool-progress-indicator`：工具执行进度提示（含秘书模式）
+- `add-high-risk-command-approvals`：高风险命令强制审批（安全护栏）
+- `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除）
 - `add-trash-file-tool`：软删除（回收站）工具（move-to-trash + 7 天保留清理）
-- `update-tool-loop-limits-and-write-file-no-truncate`：tool loop 上限提升 + `write_file` 超限 fail-fast
-- `update-chat-ux-tool-progress-indicator`：秘书模式下工具执行进度提示
+- `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
 
 ### 0.3 Archived（已交付，且已归档到 `openspec/changes/archive/`）
 - [x] `add-project-scripts`
