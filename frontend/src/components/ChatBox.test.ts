@@ -125,3 +125,43 @@ it('does not render tool_result output as a giant text bubble in secretary mode'
 
     expect(wrapper.text()).not.toContain('HUGE_TOOL_OUTPUT_SHOULD_NOT_RENDER')
 })
+
+it('renders streaming token count while waiting for content', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+    chat.setLastResponseTokens(7)
+    chat.setMessages([
+        {
+            id: 1,
+            role: 'assistant',
+            type: 'text',
+            content: '',
+            createdAt: new Date(),
+            isStreaming: true,
+        },
+    ])
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('思考中')
+    expect(wrapper.text()).toContain('7 tokens')
+})

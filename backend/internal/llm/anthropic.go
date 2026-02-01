@@ -373,27 +373,29 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 	var firstTokenReceived bool
 	toolCalls := make(map[int]*ToolCall)
 	toolArgs := make(map[int]*strings.Builder)
-	mergeToolArgs := func(builder *strings.Builder, fragment string) {
+	mergeToolArgs := func(builder *strings.Builder, fragment string) string {
 		if fragment == "" {
-			return
+			return ""
 		}
 		if builder.Len() == 0 {
 			builder.WriteString(fragment)
-			return
+			return fragment
 		}
 
 		// Be tolerant if a provider sends full JSON-so-far chunks instead of incremental deltas.
 		current := builder.String()
 		if strings.HasPrefix(fragment, current) {
 			if len(fragment) == len(current) {
-				return
+				return ""
 			}
+			delta := fragment[len(current):]
 			builder.Reset()
 			builder.WriteString(fragment)
-			return
+			return delta
 		}
 
 		builder.WriteString(fragment)
+		return fragment
 	}
 
 	for {
@@ -492,11 +494,11 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 					builder = &strings.Builder{}
 					toolArgs[*event.Index] = builder
 				}
-				mergeToolArgs(builder, event.Delta.PartialJSON)
+				added := mergeToolArgs(builder, event.Delta.PartialJSON)
 
 				// Trace: OnToken for tool call arguments
-				if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
-					opts.Trace.OnToken(ctx, event.Delta.PartialJSON)
+				if added != "" && opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+					opts.Trace.OnToken(ctx, added)
 				}
 			}
 		}

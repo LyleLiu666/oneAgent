@@ -396,26 +396,28 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 		return tc
 	}
 
-	mergeToolArgs := func(builder *strings.Builder, fragment string) {
+	mergeToolArgs := func(builder *strings.Builder, fragment string) string {
 		if fragment == "" {
-			return
+			return ""
 		}
 		if builder.Len() == 0 {
 			builder.WriteString(fragment)
-			return
+			return fragment
 		}
 
 		current := builder.String()
 		if strings.HasPrefix(fragment, current) {
 			if len(fragment) == len(current) {
-				return
+				return ""
 			}
+			delta := fragment[len(current):]
 			builder.Reset()
 			builder.WriteString(fragment)
-			return
+			return delta
 		}
 
 		builder.WriteString(fragment)
+		return fragment
 	}
 
 	getString := func(m map[string]any, key string) string {
@@ -528,10 +530,10 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 					builder = &strings.Builder{}
 					toolArgsByID[toolCall.ID] = builder
 				}
-				mergeToolArgs(builder, args)
+				added := mergeToolArgs(builder, args)
 				ensureFirstToken()
-				if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
-					opts.Trace.OnToken(ctx, args)
+				if added != "" && opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+					opts.Trace.OnToken(ctx, added)
 				}
 			}
 		}
@@ -568,10 +570,10 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 				builder = &strings.Builder{}
 				toolArgsByID[toolCall.ID] = builder
 			}
-			mergeToolArgs(builder, delta)
+			added := mergeToolArgs(builder, delta)
 			ensureFirstToken()
-			if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
-				opts.Trace.OnToken(ctx, delta)
+			if added != "" && opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+				opts.Trace.OnToken(ctx, added)
 			}
 		}
 	}

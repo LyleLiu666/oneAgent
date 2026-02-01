@@ -66,6 +66,13 @@ const serverBaseURL = ref('')
 const toolPickerOpen = ref(false)
 const toolPickerEl = ref<HTMLElement | null>(null)
 
+const streamTokenCount = (msg: ChatMessage): number | undefined => {
+  if (!msg.isStreaming) return undefined
+  if (typeof msg.responseTokens === 'number') return msg.responseTokens
+  if (typeof chatStore.lastResponseTokens === 'number') return chatStore.lastResponseTokens
+  return undefined
+}
+
 interface ModelOption {
   id: string
   name: string
@@ -1373,6 +1380,12 @@ onUnmounted(() => {
             <div class="flex-1 space-y-2 min-w-0">
               <div class="text-[10px] uppercase tracking-[0.2em] text-surface-500 px-1">
                 {{ message.rawRole || message.role }}
+                <span
+                  v-if="typeof streamTokenCount(message) === 'number'"
+                  class="ml-2 normal-case tracking-normal text-surface-600"
+                >
+                  {{ streamTokenCount(message) }} tokens
+                </span>
               </div>
               <div class="space-y-2">
                 <!-- Streaming placeholder -->
@@ -1388,10 +1401,10 @@ onUnmounted(() => {
                     <span>
                       思考中
                       <span
-                        v-if="message.responseTokens"
+                        v-if="typeof streamTokenCount(message) === 'number'"
                         class="text-surface-400 font-normal text-xs"
                       >
-                        ({{ message.responseTokens }} tokens)
+                        ({{ streamTokenCount(message) }} tokens)
                       </span>
                     </span>
                     <span class="flex gap-0.5 ml-0.5">
@@ -1446,11 +1459,6 @@ onUnmounted(() => {
                 >
                   <RotateCcw class="w-4 h-4" />
                 </button>
-                
-                <!-- Helper for streaming stats if content is showing -->
-                <div v-if="message.isStreaming && message.content && message.content.trim() && message.responseTokens" class="text-xs text-surface-500 ml-2">
-                  {{ message.responseTokens }} tokens
-                </div>
               </div>
               
               <!-- Trace Log Component -->

@@ -576,13 +576,13 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 	toolCalls := make(map[int]*ToolCall)
 	toolArgs := make(map[int]*strings.Builder)
 	finishReason := ""
-	mergeToolArgs := func(builder *strings.Builder, fragment string) {
+	mergeToolArgs := func(builder *strings.Builder, fragment string) string {
 		if fragment == "" {
-			return
+			return ""
 		}
 		if builder.Len() == 0 {
 			builder.WriteString(fragment)
-			return
+			return fragment
 		}
 
 		// Some OpenAI-compatible providers stream the full JSON-so-far each time instead of deltas.
@@ -590,14 +590,16 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 		current := builder.String()
 		if strings.HasPrefix(fragment, current) {
 			if len(fragment) == len(current) {
-				return
+				return ""
 			}
+			delta := fragment[len(current):]
 			builder.Reset()
 			builder.WriteString(fragment)
-			return
+			return delta
 		}
 
 		builder.WriteString(fragment)
+		return fragment
 	}
 
 	for {
@@ -685,11 +687,11 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 					builder = &strings.Builder{}
 					toolArgs[delta.Index] = builder
 				}
-				mergeToolArgs(builder, delta.Function.Arguments)
+				added := mergeToolArgs(builder, delta.Function.Arguments)
 
 				// Trace: OnToken for tool call arguments
-				if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
-					opts.Trace.OnToken(ctx, delta.Function.Arguments)
+				if added != "" && opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+					opts.Trace.OnToken(ctx, added)
 				}
 			}
 		}

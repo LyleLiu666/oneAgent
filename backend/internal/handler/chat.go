@@ -584,7 +584,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			// Token tracking state
-			var tokenCount int
+			var runeCount int
+			var lastBroadcastTokens int
 			var lastBroadcast time.Time
 
 			// UTF-8 buffering state
@@ -592,15 +593,22 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 			// Update the callback to use the state
 			traceCallback.OnToken = func(ctx context.Context, token string) {
-				tokenCount += utf8.RuneCountInString(token)
+				runeCount += utf8.RuneCountInString(token)
 
-				// Throttle updates: every 20 characters or 100ms
+				// Approx tokens: ~4 runes ≈ 1 token (stable across chunking boundaries).
+				approxTokens := (runeCount + 3) / 4
+				if approxTokens <= 0 || approxTokens == lastBroadcastTokens {
+					return
+				}
+
+				// Throttle updates: every 5 tokens or 100ms
 				now := time.Now()
-				if tokenCount%20 == 0 || now.Sub(lastBroadcast) > 100*time.Millisecond {
+				if approxTokens%5 == 0 || now.Sub(lastBroadcast) > 100*time.Millisecond {
 					broadcaster.Broadcast(StreamEvent{
 						Type: "usage",
-						Data: fmt.Sprintf(`{"response_tokens": %d}`, tokenCount),
+						Data: fmt.Sprintf(`{"response_tokens": %d}`, approxTokens),
 					})
+					lastBroadcastTokens = approxTokens
 					lastBroadcast = now
 				}
 			}
