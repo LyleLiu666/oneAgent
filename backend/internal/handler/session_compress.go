@@ -245,3 +245,22 @@ func compressSessionIfNeeded(
 
 	return true, newMessages, nil
 }
+
+func buildCompressionFallbackMessages(persistedMessages []model.ChatMessage, llmMessages []llm.ChatMessage, err error) []llm.ChatMessage {
+	if len(llmMessages) == 0 {
+		return llmMessages
+	}
+
+	_, toKeep := splitForCompression(persistedMessages, sessionCompressionKeepTextMsgs)
+	placeholder := fmt.Sprintf("%s摘要生成失败（%v），已仅保留最近两轮对话。", sessionCompressionSummaryPrefix, err)
+
+	fallback := make([]llm.ChatMessage, 0, 2+len(toKeep)+1)
+	fallback = append(fallback, llmMessages[0])
+	fallback = append(fallback, llm.BuildAssistantMessage(placeholder))
+	for _, msg := range toKeep {
+		fallback = append(fallback, llm.ChatMessage{Role: msg.Role, Content: msg.Content})
+	}
+	fallback = append(fallback, llmMessages[len(llmMessages)-1])
+
+	return fallback
+}

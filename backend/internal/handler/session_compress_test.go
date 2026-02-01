@@ -1,91 +1,144 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 )
 
-func TestSplitForCompression_KeepLastTwoRounds(t *testing.T) {
-	msgs := []model.ChatMessage{
-		{ID: 1, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u1"},
-		{ID: 2, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a1"},
-		{ID: 3, Role: model.MessageRoleAssistant, Type: model.MessageTypeToolCall, Content: `{"protocol":"json"}`},
-		{ID: 4, Role: model.MessageRoleTool, Type: model.MessageTypeToolResult, Content: `{"protocol":"json"}`},
-		{ID: 5, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u2"},
-		{ID: 6, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a2"},
-		{ID: 7, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u3"},
-		{ID: 8, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a3"},
-	}
-
-	toSummarize, toKeep := splitForCompression(msgs, 4)
-	if len(toKeep) != 4 {
-		t.Fatalf("expected 4 kept messages, got %d", len(toKeep))
-	}
-	if toKeep[0].ID != 5 || toKeep[1].ID != 6 || toKeep[2].ID != 7 || toKeep[3].ID != 8 {
-		t.Fatalf("unexpected kept IDs: %+v", []uint{toKeep[0].ID, toKeep[1].ID, toKeep[2].ID, toKeep[3].ID})
-	}
-	if len(toSummarize) != 4 {
-		t.Fatalf("expected 4 summarized messages, got %d", len(toSummarize))
-	}
-	if toSummarize[0].ID != 1 || toSummarize[3].ID != 4 {
-		t.Fatalf("unexpected summarized IDs: first=%d last=%d", toSummarize[0].ID, toSummarize[len(toSummarize)-1].ID)
-	}
+type fakeSummaryClient struct {
+	out string
+	err error
 }
 
-func TestFormatForSummaryInput_ToolMessages(t *testing.T) {
-	toolCalls := []llm.ToolCall{
-		{
-			ID:   "call_1",
-			Type: "function",
-			Function: llm.ToolCallFunction{
-				Name:      "bash",
-				Arguments: `{"cmd":"ls"}`,
-			},
-		},
-	}
+func (c fakeSummaryClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	return c.out, c.err
+}
 
-	callPayload, err := marshalPersistedToolCall("json", "running bash", "running bash", toolCalls)
+func (c fakeSummaryClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, cb llm.StreamCallback) error {
+	return errors.New("not implemented")
+}
+
+func TestCompressSessionIfNeeded_RewritesSessionAndPreservesCurrentUserMessage(t *testing.T) {
+	t.Parallel()
+
+	store, err := sessionstore.New(t.TempDir())
 	if err != nil {
-		t.Fatalf("marshalPersistedToolCall: %v", err)
+		t.Fatalf("new sessionstore: %v", err)
 	}
 
-	resultPayload, err := marshalPersistedToolResult("json", "call_1", "bash", `{"cmd":"ls"}`, `{"ok":true}`, nil)
+	sessionID := "s1"
+	if _, err := store.GetOrCreateSession(sessionID, "u1", "chat", "t"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	now := time.Now()
+	persisted := []model.ChatMessage{
+		{ID: 1, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u1", CreatedAt: now.Add(-6 * time.Minute)},
+		{ID: 2, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a1", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: 3, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u2", CreatedAt: now.Add(-4 * time.Minute)},
+		{ID: 4, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a2", CreatedAt: now.Add(-3 * time.Minute)},
+		{ID: 5, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u3", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: 6, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a3", CreatedAt: now.Add(-1 * time.Minute)},
+	}
+
+	currentUser := strings.Repeat("a", sessionCompressionMaxContextRunes+1)
+	llmMessages := []llm.ChatMessage{
+		llm.BuildSystemMessage("sys"),
+		llm.BuildUserMessage(currentUser),
+	}
+
+	client := fakeSummaryClient{out: "流水账:\n- did x\n\nFindings:\n- decided y"}
+
+	compressed, newMsgs, err := compressSessionIfNeeded(context.Background(), store, sessionID, persisted, llmMessages, client)
 	if err != nil {
-		t.Fatalf("marshalPersistedToolResult: %v", err)
+		t.Fatalf("compressSessionIfNeeded: %v", err)
+	}
+	if !compressed {
+		t.Fatalf("expected compressed=true")
 	}
 
-	input := formatForSummaryInput([]model.ChatMessage{
-		{ID: 10, Role: model.MessageRoleAssistant, Type: model.MessageTypeToolCall, Content: callPayload},
-		{ID: 11, Role: model.MessageRoleTool, Type: model.MessageTypeToolResult, Content: resultPayload},
-	})
-
-	if input == "" {
-		t.Fatal("expected non-empty summary input")
+	if len(newMsgs) != 7 {
+		t.Fatalf("expected 7 prompt messages, got %d", len(newMsgs))
 	}
-	if !strings.Contains(input, "tool_call: bash") || !strings.Contains(input, "tool_result: bash") {
-		t.Fatalf("unexpected summary input:\n%s", input)
+
+	if newMsgs[0].Role != model.MessageRoleSystem {
+		t.Fatalf("expected first prompt message to be system, got %q", newMsgs[0].Role)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(newMsgs[1].Content), sessionCompressionSummaryPrefix) {
+		t.Fatalf("expected summary message to start with %q", sessionCompressionSummaryPrefix)
+	}
+	if !strings.Contains(newMsgs[1].Content, "已压缩 2 条历史消息") {
+		t.Fatalf("expected summary header to mention compressed count")
+	}
+	if !strings.Contains(newMsgs[1].Content, "流水账") || !strings.Contains(newMsgs[1].Content, "Findings") {
+		t.Fatalf("expected summary to contain timeline/findings sections")
+	}
+
+	last := newMsgs[len(newMsgs)-1]
+	if last.Role != model.MessageRoleUser {
+		t.Fatalf("expected last prompt message to be user, got %q", last.Role)
+	}
+	if last.Content != currentUser {
+		t.Fatalf("expected current user message to be preserved")
+	}
+
+	_, storedMsgs, err := store.GetSessionWithMessages(sessionID, "")
+	if err != nil {
+		t.Fatalf("load stored messages: %v", err)
+	}
+
+	if len(storedMsgs) != 5 {
+		t.Fatalf("expected 5 stored messages after rewrite (summary + 4 tail), got %d", len(storedMsgs))
+	}
+	if !strings.HasPrefix(strings.TrimSpace(storedMsgs[0].Content), sessionCompressionSummaryPrefix) {
+		t.Fatalf("expected stored summary to start with %q", sessionCompressionSummaryPrefix)
 	}
 }
 
-func TestApproximateContextRunes_IncludesToolArguments(t *testing.T) {
-	msg := llm.ChatMessage{
-		Role:    "assistant",
-		Content: "",
-		ToolCalls: []llm.ToolCall{{
-			ID:   "call_1",
-			Type: "function",
-			Function: llm.ToolCallFunction{
-				Name:      "bash",
-				Arguments: "hello",
-			},
-		}},
+func TestBuildCompressionFallbackMessages_PreservesCurrentUserMessageAndTail(t *testing.T) {
+	t.Parallel()
+
+	sessionID := "s1"
+	now := time.Now()
+	persisted := []model.ChatMessage{
+		{ID: 1, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u1", CreatedAt: now.Add(-6 * time.Minute)},
+		{ID: 2, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a1", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: 3, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u2", CreatedAt: now.Add(-4 * time.Minute)},
+		{ID: 4, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a2", CreatedAt: now.Add(-3 * time.Minute)},
+		{ID: 5, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u3", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: 6, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a3", CreatedAt: now.Add(-1 * time.Minute)},
 	}
 
-	got := approximateContextRunes([]llm.ChatMessage{msg})
-	if got < len("hello") {
-		t.Fatalf("expected rune count to include tool arguments, got %d", got)
+	currentUser := strings.Repeat("b", sessionCompressionMaxContextRunes+1)
+	llmMessages := []llm.ChatMessage{
+		llm.BuildSystemMessage("sys"),
+		llm.BuildUserMessage(currentUser),
+	}
+
+	out := buildCompressionFallbackMessages(persisted, llmMessages, errors.New("boom"))
+	if len(out) != 7 {
+		t.Fatalf("expected 7 fallback prompt messages, got %d", len(out))
+	}
+
+	if out[0].Role != model.MessageRoleSystem {
+		t.Fatalf("expected first fallback message to be system, got %q", out[0].Role)
+	}
+	if out[1].Role != model.MessageRoleAssistant {
+		t.Fatalf("expected second fallback message to be assistant, got %q", out[1].Role)
+	}
+	if !strings.Contains(out[1].Content, "摘要生成失败") || !strings.Contains(out[1].Content, "boom") {
+		t.Fatalf("expected fallback placeholder to include failure reason")
+	}
+
+	if out[len(out)-1].Role != model.MessageRoleUser || out[len(out)-1].Content != currentUser {
+		t.Fatalf("expected fallback to preserve current user message")
 	}
 }
+

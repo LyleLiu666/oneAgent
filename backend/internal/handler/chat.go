@@ -493,21 +493,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 					// Fallback: keep the last two rounds and continue without DB mutation.
 					if before > sessionCompressionMaxContextRunes {
-						_, toKeep := splitForCompression(persistedMessages, sessionCompressionKeepTextMsgs)
-						placeholder := fmt.Sprintf("【会话压缩】摘要生成失败（%v），已仅保留最近两轮对话。", err)
-
-						fallback := make([]llm.ChatMessage, 0, 2+len(toKeep)+1)
-						if len(messages) > 0 {
-							fallback = append(fallback, messages[0])
-						}
-						fallback = append(fallback, llm.BuildAssistantMessage(placeholder))
-						for _, msg := range toKeep {
-							fallback = append(fallback, llm.ChatMessage{Role: msg.Role, Content: msg.Content})
-						}
-						if len(messages) > 0 {
-							fallback = append(fallback, messages[len(messages)-1])
-						}
-						messages = fallback
+						messages = buildCompressionFallbackMessages(persistedMessages, messages, err)
 					}
 				} else if compressed {
 					after := approximateContextRunes(compressedMessages)
