@@ -623,3 +623,71 @@ it('optimistically renders secretary message and prevents resubmission while pen
     expect(chat.messages.some((m: any) => Number(m.id) === 101 && Number(m.serverId) === 101)).toBe(true)
     expect(chat.messages.some((m: any) => Number(m.id) === 102 && m.role === 'assistant' && String(m.content).includes('收到'))).toBe(true)
 })
+
+it('queues recovery items and resumes them one-by-one via chat reply (secretary mode)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+
+    ;(apiClient.resumeTask as any).mockResolvedValue({})
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+            stubs: {
+                SecretaryTaskDeliverables: {
+                    template: `
+                      <button data-testid="emit-recovery-snapshot" @click="$emit('recovery-snapshot', [
+                        { taskId: 't1', attemptId: 'a1', title: 'task1', status: 'failed', summary: 's1', observer: { next_steps: 'n1', questions_for_user: ['q1'] } },
+                        { taskId: 't2', attemptId: 'a2', title: 'task2', status: 'failed', summary: 's2', observer: { next_steps: 'n2' } }
+                      ])"></button>
+                    `,
+                },
+            },
+        },
+    })
+
+    await flushPromises()
+    expect(chat.messages.length).toBe(0)
+
+    await wrapper.get('[data-testid="emit-recovery-snapshot"]').trigger('click')
+    await flushPromises()
+
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('我这里有 2 个事情'))).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('task1'))).toBe(true)
+
+    await wrapper.get('textarea').setValue('先按 next_steps 继续')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.resumeTask).toHaveBeenCalledTimes(1)
+    expect(apiClient.resumeTask).toHaveBeenCalledWith('t1', { review_notes: '先按 next_steps 继续' })
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(0)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('task2'))).toBe(true)
+
+    await wrapper.get('textarea').setValue('继续第二个')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.resumeTask).toHaveBeenCalledTimes(2)
+    expect(apiClient.resumeTask).toHaveBeenLastCalledWith('t2', { review_notes: '继续第二个' })
+
+    // After the queue drains, messages go back to normal secretary sending.
+    await wrapper.get('textarea').setValue('正常聊天')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
+})

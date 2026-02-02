@@ -16,6 +16,7 @@ import {
   chooseWorkspaceDir,
   getConfig,
   createTask,
+  resumeTask,
   appendSecretaryInboxMessage,
   secretaryTriage,
   getSecretaryState,
@@ -88,9 +89,31 @@ const taskHandoffSuggestOpen = ref(false)
 
 const secretaryCursorMessageId = ref(0)
 const secretaryInboxSubmitting = ref(false)
+const secretaryRecoverySubmitting = ref(false)
 const secretaryTriageSubmitting = ref(false)
 const secretaryTriageQueued = ref(false)
 let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
+
+type SecretaryRecoveryItem = {
+  taskId: string
+  attemptId: string
+  title?: string
+  status?: string
+  summary?: string
+  error?: string
+  observer?: {
+    reason?: string
+    next_steps?: string
+    questions_for_user?: string[]
+  }
+}
+
+const secretaryRecoveryQueue = ref<SecretaryRecoveryItem[]>([])
+const secretaryRecoverySeenKeys = ref<Set<string>>(new Set())
+const secretaryRecoveryIntroSent = ref(false)
+const secretaryRecoveryAwaitingReply = ref(false)
+const secretaryRecoveryTotal = ref(0)
+const secretaryRecoveryHandled = ref(0)
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
   if (!msg.isStreaming) return undefined
@@ -267,7 +290,7 @@ const canSend = computed(
     if (loadingHistory.value) return false
     if (workspaceOnboardingBlocking.value) return false
     if (!isSecretaryMode.value && chatStore.isLoading) return false
-    if (isSecretaryMode.value && secretaryInboxSubmitting.value) return false
+    if (isSecretaryMode.value && (secretaryInboxSubmitting.value || secretaryRecoverySubmitting.value)) return false
     return true
   }
 )
@@ -1540,6 +1563,204 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   }
 }
 
+const truncateForChat = (raw: any, maxLen: number) => {
+  const text = String(raw || '').trim()
+  if (!text) return ''
+  if (text.length <= maxLen) return text
+  return `${text.slice(0, Math.max(0, maxLen - 1))}…`
+}
+
+const recoveryKeyOf = (item: SecretaryRecoveryItem) => {
+  const tid = String(item?.taskId || '').trim()
+  const aid = String(item?.attemptId || '').trim()
+  if (!tid || !aid) return ''
+  return `${tid}:${aid}`
+}
+
+const enqueueRecoveryItems = (rawItems: any) => {
+  const items = Array.isArray(rawItems) ? rawItems : []
+  if (items.length === 0) return
+
+  const nextQueue = [...secretaryRecoveryQueue.value]
+  const seen = new Set(secretaryRecoverySeenKeys.value)
+
+  for (const it of items) {
+    const item: SecretaryRecoveryItem = {
+      taskId: String((it as any)?.taskId || (it as any)?.task_id || '').trim(),
+      attemptId: String((it as any)?.attemptId || (it as any)?.attempt_id || '').trim(),
+      title: String((it as any)?.title || '').trim(),
+      status: String((it as any)?.status || '').trim(),
+      summary: typeof (it as any)?.summary === 'string' ? (it as any).summary : undefined,
+      error: typeof (it as any)?.error === 'string' ? (it as any).error : undefined,
+      observer: (it as any)?.observer,
+    }
+
+    const key = recoveryKeyOf(item)
+    if (!key) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    nextQueue.push(item)
+  }
+
+  secretaryRecoverySeenKeys.value = seen
+  secretaryRecoveryQueue.value = nextQueue
+
+  if (secretaryRecoveryIntroSent.value) {
+    const total = secretaryRecoveryHandled.value + nextQueue.length
+    if (total > secretaryRecoveryTotal.value) secretaryRecoveryTotal.value = total
+  }
+}
+
+const formatRecoveryAsk = (item: SecretaryRecoveryItem, index: number, total: number) => {
+  const title = String(item?.title || '').trim() || '任务'
+  const status = String(item?.status || '').trim()
+  const header = total >= 2 ? `（${index}/${total}）` : ''
+
+  const reason = truncateForChat(item?.summary || item?.observer?.reason || item?.error, 180)
+  const nextSteps = truncateForChat(item?.observer?.next_steps, 240)
+  const questions = Array.isArray(item?.observer?.questions_for_user)
+    ? item.observer!.questions_for_user!.map((q) => String(q || '').trim()).filter(Boolean)
+    : []
+
+  const lines: string[] = []
+  lines.push(`${header}${title}${status ? `（${status}）` : ''}`)
+  if (reason) lines.push(`原因：${reason}`)
+  if (nextSteps) lines.push(`下一步：${nextSteps}`)
+  if (questions.length > 0) {
+    lines.push(`需要你确认：${questions.map((q, i) => `${i + 1}) ${truncateForChat(q, 120)}`).join(' ')}`)
+  }
+  lines.push('请直接回复你的决定/补充，我来继续推进。')
+  return lines.join('\n')
+}
+
+const maybeStartRecoveryConversation = () => {
+  if (!isSecretaryMode.value) return
+  if (secretaryRecoverySubmitting.value) return
+  if (secretaryRecoveryQueue.value.length === 0) return
+  if (secretaryRecoveryAwaitingReply.value) return
+
+  if (!secretaryRecoveryIntroSent.value) {
+    const n = secretaryRecoveryQueue.value.length
+    secretaryRecoveryHandled.value = 0
+    secretaryRecoveryTotal.value = n
+    const intro = n >= 2 ? `我这里有 ${n} 个事情，接下来一个个请示。` : '我这里有 1 个事情，需要你确认。'
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'assistant',
+      type: 'text',
+      content: intro,
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+    secretaryRecoveryIntroSent.value = true
+  }
+
+  const item = secretaryRecoveryQueue.value[0]
+  if (!item) return
+  const index = secretaryRecoveryHandled.value + 1
+  const total = Math.max(secretaryRecoveryTotal.value, secretaryRecoveryHandled.value+secretaryRecoveryQueue.value.length)
+  secretaryRecoveryTotal.value = total
+  const ask = formatRecoveryAsk(item, index, total)
+  chatStore.addMessage({
+    id: Date.now(),
+    role: 'assistant',
+    type: 'text',
+    content: ask,
+    createdAt: new Date(),
+    isStreaming: false,
+  })
+  secretaryRecoveryAwaitingReply.value = true
+  scrollToBottom()
+}
+
+const onRecoverySnapshot = (items: any) => {
+  enqueueRecoveryItems(items)
+  maybeStartRecoveryConversation()
+}
+
+const onTaskNeedsAttention = (item: any) => {
+  enqueueRecoveryItems([item])
+  if (secretaryRecoveryQueue.value.length === 1) {
+    // Start immediately when the first item arrives.
+    maybeStartRecoveryConversation()
+  }
+}
+
+const sendRecoveryReply = async (rawMessage: string) => {
+  const message = String(rawMessage || '').trim()
+  if (!message) return
+  if (loadingHistory.value) return
+  if (secretaryRecoverySubmitting.value) return
+
+  const item = secretaryRecoveryQueue.value[0]
+  const taskId = String(item?.taskId || '').trim()
+  if (!taskId) return
+
+  // Render user reply as a normal user message (traceable in chat).
+  chatStore.addMessage({
+    id: Date.now(),
+    role: 'user',
+    type: 'text',
+    content: message,
+    createdAt: new Date(),
+    isStreaming: false,
+  })
+  scrollToBottom()
+
+  secretaryRecoverySubmitting.value = true
+  try {
+    await resumeTask(taskId, { review_notes: message })
+    const shortID = taskId.slice(0, 8)
+    const title = String(item?.title || '').trim() || '任务'
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'assistant',
+      type: 'text',
+      content: `收到。我已按你的回复继续推进：${title}（task=${shortID}）。`,
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+
+    // Advance queue.
+    secretaryRecoveryAwaitingReply.value = false
+    secretaryRecoveryHandled.value += 1
+    secretaryRecoveryQueue.value = secretaryRecoveryQueue.value.slice(1)
+    if (secretaryRecoveryQueue.value.length > 0) {
+      const next = secretaryRecoveryQueue.value[0]
+      const index = secretaryRecoveryHandled.value + 1
+      const total = Math.max(secretaryRecoveryTotal.value, secretaryRecoveryHandled.value+secretaryRecoveryQueue.value.length)
+      secretaryRecoveryTotal.value = total
+      const ask = formatRecoveryAsk(next, index, total)
+      chatStore.addMessage({
+        id: Date.now(),
+        role: 'assistant',
+        type: 'text',
+        content: ask,
+        createdAt: new Date(),
+        isStreaming: false,
+      })
+      secretaryRecoveryAwaitingReply.value = true
+    } else {
+      secretaryRecoveryIntroSent.value = false
+      secretaryRecoveryTotal.value = 0
+      secretaryRecoveryHandled.value = 0
+    }
+  } catch (error) {
+    console.error('Failed to resume task from secretary recovery:', error)
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'system',
+      type: 'text',
+      content: '继续失败，请稍后再试。',
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+  } finally {
+    secretaryRecoverySubmitting.value = false
+    scrollToBottom()
+  }
+}
+
 const sendMessage = async () => {
   if (!canSend.value) return
   const message = inputMessage.value.trim()
@@ -1549,6 +1770,10 @@ const sendMessage = async () => {
   if (inputEl.value) inputEl.value.style.height = ''
 
   if (isSecretaryMode.value) {
+    if (secretaryRecoveryQueue.value.length > 0 || secretaryRecoverySubmitting.value) {
+      await sendRecoveryReply(message)
+      return
+    }
     await sendSecretaryMessage(message)
     return
   }
@@ -1981,7 +2206,13 @@ onMounted(async () => {
         </div>
       </div>
 
-      <SecretaryTaskDeliverables v-if="isSecretaryMode" :workspace="workspacePath" @task-completed="onTaskCompleted" />
+      <SecretaryTaskDeliverables
+        v-if="isSecretaryMode"
+        :workspace="workspacePath"
+        @task-completed="onTaskCompleted"
+        @recovery-snapshot="onRecoverySnapshot"
+        @task-needs-attention="onTaskNeedsAttention"
+      />
 
       <TaskQueuePanel v-if="!isSecretaryMode" :workspace="workspacePath" :model-id="selectedModelId" />
 
@@ -2200,7 +2431,7 @@ onMounted(async () => {
                 "
                 rows="1"
                 class="w-full px-4 py-3 pr-12 text-base leading-6 overflow-y-auto bg-surface-800 rounded-xl text-surface-50 placeholder-surface-500 resize-y focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all border border-surface-700"
-                :disabled="workspaceOnboardingBlocking || (!isSecretaryMode && chatStore.isLoading) || (isSecretaryMode && secretaryInboxSubmitting)"
+                :disabled="workspaceOnboardingBlocking || (!isSecretaryMode && chatStore.isLoading) || (isSecretaryMode && (secretaryInboxSubmitting || secretaryRecoverySubmitting))"
               />
             </div>
             <button

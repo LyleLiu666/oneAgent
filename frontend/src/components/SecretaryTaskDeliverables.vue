@@ -44,8 +44,24 @@ type TaskCompletedEvent = {
   status: string
 }
 
+type TaskNeedsAttentionEvent = {
+  taskId: string
+  attemptId: string
+  title: string
+  status: string
+  summary?: string
+  error?: string
+  observer?: TaskAttempt['observer']
+  findings_path?: string
+  trace_log_path?: string
+  diff_patch_path?: string
+  test_report_path?: string
+}
+
 const emit = defineEmits<{
   (e: 'task-completed', payload: TaskCompletedEvent): void
+  (e: 'task-needs-attention', payload: TaskNeedsAttentionEvent): void
+  (e: 'recovery-snapshot', payload: TaskNeedsAttentionEvent[]): void
 }>()
 
 const ui = useUIStore()
@@ -53,6 +69,8 @@ const router = useRouter()
 
 const STORAGE_RECOVERY_COLLAPSED = 'oneagent-secretary-recovery-collapsed'
 const STORAGE_DELIVERABLES_COLLAPSED = 'oneagent-secretary-deliverables-collapsed'
+const STORAGE_RECOVERY_DETAILS = 'oneagent-secretary-recovery-details-v1'
+const STORAGE_DELIVERABLE_DETAILS = 'oneagent-secretary-deliverables-details-v1'
 const STORAGE_DISMISSED_ATTEMPTS = 'oneagent-secretary-dismissed-attempts-v1'
 
 const pollIntervalMs = computed(() => (typeof props.pollIntervalMs === 'number' ? props.pollIntervalMs : 10_000))
@@ -117,10 +135,14 @@ const saveDismissedKeys = (ws: string, keys: Set<string>) => {
 
 const recoveryCollapsed = ref(loadBool(STORAGE_RECOVERY_COLLAPSED))
 const deliverablesCollapsed = ref(loadBool(STORAGE_DELIVERABLES_COLLAPSED))
+const recoveryDetailsExpanded = ref(loadBool(STORAGE_RECOVERY_DETAILS))
+const deliverablesDetailsExpanded = ref(loadBool(STORAGE_DELIVERABLE_DETAILS))
 const dismissedKeys = ref<Set<string>>(loadDismissedKeys(props.workspace || ''))
 
 watch(recoveryCollapsed, (v) => saveBool(STORAGE_RECOVERY_COLLAPSED, v))
 watch(deliverablesCollapsed, (v) => saveBool(STORAGE_DELIVERABLES_COLLAPSED, v))
+watch(recoveryDetailsExpanded, (v) => saveBool(STORAGE_RECOVERY_DETAILS, v))
+watch(deliverablesDetailsExpanded, (v) => saveBool(STORAGE_DELIVERABLE_DETAILS, v))
 
 const dismissAttempt = (taskId: string, attemptId: string) => {
   const tid = String(taskId || '').trim()
@@ -154,6 +176,20 @@ const getLatestAttempt = (t: Task): TaskAttempt | null => {
   if (!t || !Array.isArray(t.attempts) || t.attempts.length === 0) return null
   return t.attempts[t.attempts.length - 1] || null
 }
+
+const toNeedsAttentionEvent = (task: Task, attempt: TaskAttempt): TaskNeedsAttentionEvent => ({
+  taskId: String((task as any)?.id || '').trim(),
+  attemptId: String(attempt?.id || '').trim(),
+  title: String((task as any)?.title || '').trim(),
+  status: String(attempt?.status || '').trim(),
+  summary: typeof attempt?.summary === 'string' ? attempt.summary : undefined,
+  error: typeof attempt?.error === 'string' ? attempt.error : undefined,
+  observer: attempt?.observer,
+  findings_path: typeof attempt?.findings_path === 'string' ? attempt.findings_path : undefined,
+  trace_log_path: typeof attempt?.trace_log_path === 'string' ? attempt.trace_log_path : undefined,
+  diff_patch_path: typeof attempt?.diff_patch_path === 'string' ? attempt.diff_patch_path : undefined,
+  test_report_path: typeof attempt?.test_report_path === 'string' ? attempt.test_report_path : undefined,
+})
 
 const cardArtifactsForAttempt = (a: TaskAttempt): DeliverableArtifact[] => {
   const items: DeliverableArtifact[] = []
@@ -235,6 +271,7 @@ const refresh = async () => {
     const res = await listTasks(ws || undefined)
     const nextTasks = Array.isArray(res) ? res : []
     const nextLatestStatusByTaskID: Record<string, string> = {}
+    const hadBaseline = hasTaskBaseline.value
 
     for (const t of nextTasks) {
       const taskID = String((t as any)?.id || '').trim()
@@ -243,7 +280,7 @@ const refresh = async () => {
       nextLatestStatusByTaskID[taskID] = String(latest?.status || '').trim()
     }
 
-    if (hasTaskBaseline.value) {
+    if (hadBaseline) {
       const prev = lastLatestStatusByTaskID.value
 
       for (const t of nextTasks) {
@@ -264,6 +301,10 @@ const refresh = async () => {
           title: String((t as any)?.title || '').trim(),
           status: nextStatus,
         })
+
+        if (isNeedsAttentionAttempt(latest) && !isDismissedAttempt(taskID, String(latest.id || '').trim())) {
+          emit('task-needs-attention', toNeedsAttentionEvent(t, latest))
+        }
       }
     } else {
       hasTaskBaseline.value = true
@@ -271,6 +312,24 @@ const refresh = async () => {
 
     tasks.value = nextTasks
     lastLatestStatusByTaskID.value = nextLatestStatusByTaskID
+
+    // Initial snapshot: surface existing needs-attention items once per mount (best-effort).
+    if (!hadBaseline) {
+      const items: TaskNeedsAttentionEvent[] = []
+      for (const t of nextTasks) {
+        const a = getLatestAttempt(t)
+        if (!a || !isTerminalAttempt(a)) continue
+        if (isSucceededAttempt(a)) continue
+        if (!isNeedsAttentionAttempt(a)) continue
+        const taskID = String((t as any)?.id || '').trim()
+        if (!taskID) continue
+        const attemptID = String(a.id || '').trim()
+        if (!attemptID) continue
+        if (isDismissedAttempt(taskID, attemptID)) continue
+        items.push(toNeedsAttentionEvent(t, a))
+      }
+      if (items.length > 0) emit('recovery-snapshot', items)
+    }
   } catch (e: any) {
     const msg = e?.data?.error || e?.message || 'Failed to load tasks.'
     error.value = String(msg)
@@ -411,6 +470,14 @@ onUnmounted(() => {
           <div class="text-[11px] text-amber-700/80 dark:text-amber-200/70">最近 {{ recoveryCards.length }} 个任务</div>
           <button
             type="button"
+            data-testid="secretary-task-recovery-more"
+            class="rounded-full border border-surface-700/40 bg-surface-900/40 px-2 py-0.5 text-[11px] text-surface-200 hover:bg-surface-800/50"
+            @click="recoveryDetailsExpanded = !recoveryDetailsExpanded"
+          >
+            {{ recoveryDetailsExpanded ? '简洁' : '更多' }}
+          </button>
+          <button
+            type="button"
             data-testid="secretary-task-recovery-toggle"
             class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-900 dark:text-amber-100 hover:bg-amber-500/15"
             @click="recoveryCollapsed = !recoveryCollapsed"
@@ -438,7 +505,7 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div class="mt-3 space-y-2">
+            <div v-if="recoveryDetailsExpanded" class="mt-3 space-y-2">
               <div
                 v-if="card.attempt.summary"
                 class="text-xs text-surface-200 whitespace-pre-wrap"
@@ -459,19 +526,28 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="card.artifacts.length" class="mt-3 flex flex-wrap gap-2">
+            <div v-if="recoveryDetailsExpanded && card.artifacts.length" class="mt-3 flex flex-wrap gap-2">
               <button
                 v-for="a in card.artifacts"
                 :key="a.kind"
                 type="button"
                 class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+                :data-testid="
+                  a.kind === 'findings'
+                    ? 'recovery-open-findings'
+                    : a.kind === 'trace'
+                      ? 'recovery-open-trace'
+                      : a.kind === 'diff_patch'
+                        ? 'recovery-open-diff'
+                        : undefined
+                "
                 @click="openArtifactModal(card.task.id, card.attempt.id, a)"
               >
                 {{ a.label }}
               </button>
             </div>
 
-            <div class="mt-3 flex flex-wrap gap-2">
+            <div v-if="recoveryDetailsExpanded" class="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
                 data-testid="secretary-task-recovery-resume"
@@ -515,6 +591,14 @@ onUnmounted(() => {
           <div class="text-[11px] text-surface-500">最近 {{ deliverableCards.length }} 个任务</div>
           <button
             type="button"
+            data-testid="secretary-task-deliverables-more"
+            class="rounded-full border border-surface-700/40 bg-surface-900/40 px-2 py-0.5 text-[11px] text-surface-200 hover:bg-surface-800/50"
+            @click="deliverablesDetailsExpanded = !deliverablesDetailsExpanded"
+          >
+            {{ deliverablesDetailsExpanded ? '简洁' : '更多' }}
+          </button>
+          <button
+            type="button"
             data-testid="secretary-task-deliverables-toggle"
             class="rounded-full border border-surface-700/40 bg-surface-900/40 px-2 py-0.5 text-[11px] text-surface-200 hover:bg-surface-800/50"
             @click="deliverablesCollapsed = !deliverablesCollapsed"
@@ -549,11 +633,11 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <div v-if="card.attempt.summary" class="mt-3 text-xs text-surface-300 whitespace-pre-wrap">
+          <div v-if="deliverablesDetailsExpanded && card.attempt.summary" class="mt-3 text-xs text-surface-300 whitespace-pre-wrap">
             {{ card.attempt.summary }}
           </div>
 
-          <div class="mt-3 flex flex-wrap gap-2">
+          <div v-if="deliverablesDetailsExpanded" class="mt-3 flex flex-wrap gap-2">
             <button
               v-for="a in card.artifacts"
               :key="a.kind"

@@ -137,6 +137,9 @@ it("opens artifact preview modal when clicking findings", async () => {
 
   await flushPromises();
 
+  await wrapper.get('[data-testid="secretary-task-deliverables-more"]').trigger("click");
+  await flushPromises();
+
   const card = wrapper.get('[data-testid="secretary-task-deliverable-card"]');
   await card.get('[data-testid="deliverable-open-findings"]').trigger("click");
   await flushPromises();
@@ -192,6 +195,8 @@ it("surfaces failed tasks and allows resuming from secretary mode", async () => 
   await flushPromises();
 
   expect(wrapper.find('[data-testid="secretary-task-recovery"]').exists()).toBe(true);
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
   await wrapper.get('[data-testid="secretary-task-recovery-resume"]').trigger("click");
   expect(mocks.resumeTask).toHaveBeenCalledWith("t1");
 
@@ -239,6 +244,8 @@ it("enters full mode and navigates to tasks when troubleshooting from secretary 
 
   await flushPromises();
 
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
   await wrapper.get('[data-testid="secretary-task-recovery-troubleshoot"]').trigger("click");
   expect(ui.mode).toBe("full");
   expect(mocks.routerPush).toHaveBeenCalledWith("/tasks");
@@ -294,6 +301,8 @@ it("opens trace modal when troubleshooting a failed task with trace (stay in sec
 
   await flushPromises();
 
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
   await wrapper.get('[data-testid="secretary-task-recovery-troubleshoot"]').trigger("click");
   await flushPromises();
 
@@ -424,6 +433,9 @@ it("uses readable warning accents in light mode", async () => {
   expect(heading.classes()).toContain("text-amber-800");
   expect(heading.classes()).toContain("dark:text-amber-200");
 
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
+
   const resume = wrapper.get('[data-testid="secretary-task-recovery-resume"]');
   expect(resume.classes()).toContain("text-amber-900");
   expect(resume.classes()).toContain("dark:text-amber-100");
@@ -481,6 +493,59 @@ it("can collapse and expand deliverables in secretary mode", async () => {
   await wrapper.get('[data-testid="secretary-task-deliverables-toggle"]').trigger("click");
   await flushPromises();
   expect(wrapper.find('[data-testid="secretary-task-deliverable-card"]').exists()).toBe(
+    true,
+  );
+
+  wrapper.unmount();
+});
+
+it("hides recovery artifact actions behind a More toggle by default", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+          findings_path: "/tmp/ws/FINDINGS.md",
+          trace_log_path: "/tmp/ws/trace.jsonl",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  expect(wrapper.find('[data-testid="recovery-open-findings"]').exists()).toBe(
+    false,
+  );
+
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
+
+  expect(wrapper.find('[data-testid="recovery-open-findings"]').exists()).toBe(
     true,
   );
 
@@ -584,7 +649,10 @@ it("does not duplicate needs-attention tasks in deliverables", async () => {
 
   expect(wrapper.find('[data-testid="secretary-task-recovery"]').exists()).toBe(true);
   expect(wrapper.find('[data-testid="secretary-task-deliverables"]').exists()).toBe(false);
-  expect(wrapper.text()).toContain("diff");
+  expect(wrapper.find('[data-testid="recovery-open-diff"]').exists()).toBe(false);
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.find('[data-testid="recovery-open-diff"]').exists()).toBe(true);
 
   wrapper.unmount();
 });
