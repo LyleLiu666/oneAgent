@@ -20,29 +20,27 @@
 
 我建议把这件事拆成两层：**执行根目录（ExecutionRoot）** vs **交付根目录（NodeRoot）**，并让 NodeRoot 永远可追溯。
 
-## Recommended execution model (v1)
-**优先推荐 v1 使用“RunRoot 作为 workspaceRoot”**：
-- 为每次 workflow_run 创建一个 `RunRoot`（durable），并把 node agent 的 `WorkspaceRoot` 设置为 `RunRoot`
-- 对每个 node 设置 `WriteScope=["nodes/<node_id>/**"]`，让该 node 只能写自己的交付目录
-- 上游节点交付物位于同一个 `RunRoot` 下，下游节点可用相对路径读取（仍然是 path-only）
+## Recommended execution model (v1): execute in project workspace/worktree, then export
+你选择的是“一开始就支持在项目 workspace/worktree 内执行并导出交付物”，因此 v1 的推荐落地方式是：
 
-优点：
-- 不需要放宽“写 workspace 外”权限，也不需要新增写入工具
-- 节点间交付天然只传路径（同根目录可直接引用）
-- 证据链稳定（不依赖 worktree/临时目录）
+1) **执行**：node agent 在项目 `ExecutionRoot` 内运行（workspace 或 worktree）
+   - file tools 写边界仍然是项目代码目录（符合人类习惯；review 后改代码也合理）
+2) **声明交付**：node agent 在结束时输出“交付清单（paths only）”
+   - 交付清单只包含路径（不嵌入内容）
+   - 路径可以是绝对路径或相对 `ExecutionRoot` 的路径
+3) **导出（系统执行）**：系统将交付清单中的文件复制到 `NodeRoot/deliverables/`，并生成 `LEDGER.md`/`FINDINGS.md`/`artifacts.json`
+   - 这样即使 ExecutionRoot 是会被清理的 worktree，交付物仍然可追溯
+4) **交接**：下游节点只拿到上游 `NodeRoot` 下的路径（含 `artifacts.json` 路径），不拿内容
 
-限制：
-- 节点若需要修改项目代码（workspace repo），需要额外设计“挂载/复制/导出”机制（可作为 v2 扩展）
+这个模型的核心收益是：**代码修改能力** 与 **可追溯交付证据链** 两者都保留，并且不需要放宽 file tools 的写权限边界。
 
-## Alternative (v2): execute in project workspace/worktree, then export
-当工作流节点需要读写项目代码时，可以采用：
-- node agent 仍在项目 `ExecutionRoot`（workspace 或 worktree）内执行（file tools 作用域不变）
-- 节点结束后，系统将“声明的交付文件（paths only）”复制到 `NodeRoot/deliverables/`
-- `artifact manifest` 记录 `NodeRoot` 下的最终路径，供下游节点使用
+## Notes: “责任编辑润色/就地修改”与证据链
+你明确允许“就地修改上游交付文件，但必须有 diff 证据”，且也指出这在代码项目里很难严格限制。
 
-这能把“写代码/跑命令”和“交付物证据链”解耦，但需要补充：
-- 节点如何声明交付清单（例如输出一个机器可读的 `deliverables.json`）
-- 上游交付物如何注入到下游的 ExecutionRoot（copy/symlink，仍只传路径不传内容）
+因此我们采取的策略是：
+- **不做强限制**（不要求 copy-on-write），避免和真实工作流冲突
+- **尽量留痕**：每个 node_run 生成 best-effort 的 `diff_from_inputs` 证据（例如把输入 artifacts 导出的文件与本节点导出的文件做 diff；或记录 git patch）
+- **推荐但不强制**：文档类交付建议“加法/新文件”优先；代码类交付允许修改并依赖 review/diff 证据链
 
 ## Canonical layout
 术语：
@@ -76,9 +74,8 @@ WorkflowStoreRoot/
 ```
 
 ### Path conventions
-- `node_run.artifacts.artifacts[].path`：**绝对路径**（OS path），指向 `NodeRoot` 内的文件/目录。
-  - 这样即便节点执行根目录是 worktree（会被清理），交付物仍可用。
-  - UI 可以直接 copy path；后续如果补充“点击打开”，也可以用该路径作为指针。
+- `node_run.artifacts.artifacts[].path`：**绝对路径**（OS path），指向 `NodeRoot` 内的文件/目录（你选择：绝对路径为主）。
+  - UI 额外展示相对路径（若能计算，例如相对 workspace root 或相对 `ExecutionRoot`）。
 - `inputs.json`：只包含路径（string 数组 / 结构体），下游节点读取文件内容时必须通过 file tools（或等价机制）按路径读取。
 
 ## What each node MUST deliver
@@ -124,9 +121,8 @@ WorkflowStoreRoot/
 建议可配置项：
 - `workflow_artifacts_root`：artifact 根目录（默认 `ONEAGENT_HOME/.oneagent/data/workflows`）
 - `workflow_artifacts_retention_days`：保留天数（默认 30；0 表示不自动清理）
-- `workflow_publish_targets`（可选）：把某些 deliverables 同步/复制到 workspace 的目标路径（例如 editor 节点把 `deliverables/article.md` 复制到 `docs/published/article.md`）
 
-> publish/export 由系统执行（copy），避免让节点在写入权限上“既要能写 workspace，又要能写 artifacts root”导致 scope 复杂化。
+> 你选择“publish/export 完全由 agent 决定”：系统不预设 publish target；agent 可以直接在项目 workspace 内写入最终发布路径（例如 `docs/published/article.md`）。系统仅负责把 agent 声明的交付文件复制到 `NodeRoot` 形成证据链（export）。
 
 ## Retention & cleanup
 - `WorkflowStoreRoot` 下的 run/node artifacts 属于“证据链”，默认建议保留 30 天（或跟随现有 `log_retention_days`）。
@@ -135,8 +131,9 @@ WorkflowStoreRoot/
   - 仅清理终态 run（running 不清理）
 
 ## Open questions (need your decision)
-1) 交付物路径：你更希望 **绝对路径**（最稳）还是 **workspace 相对路径**（更可移植）？我倾向先绝对路径 + UI 里额外展示相对路径。
-2) “责任编辑润色”场景：是否要求 **每个节点输出不可变**（copy-on-write）？还是允许就地修改上游交付文件但必须生成 diff 证据？
-3) publish/export：你希望默认把最终交付同步到 workspace 的某个固定目录（比如 `<workspace>/deliverables/`），还是完全由 workflow 配置决定？
-4) 执行模型：你希望 workflow 节点 **v1 先只在 RunRoot 内产出交付物**（不碰项目代码），还是需要从一开始就支持“在项目 workspace/worktree 内执行并导出交付物”？
-5) “用户配置”具体指什么：仅 artifacts 存储策略，还是也要支持 **每个节点配置 skills/model/principal**（例如 reporter/writer/editor 各自 skills 列表）？如果需要，我建议单独开一个 change 做 graph schema 扩展。
+## Decisions captured
+- 交付物路径：先绝对路径 + UI 额外展示相对路径
+- “责任编辑润色/就地修改”：允许，但必须生成 diff 证据（best-effort；不做强限制）
+- publish/export：完全由 agent 决定（系统不预设 publish target；系统只做证据链 export）
+- 执行模型：从一开始就支持“在项目 workspace/worktree 内执行并导出交付物”
+- 用户配置：每个节点可配置 `skills/model/principal`

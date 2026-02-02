@@ -9,9 +9,11 @@
 ## What Changes
 - 定义 workflow_run / node_run 的 **统一文件布局（artifact layout）**：包含流水账、findings（含交付清单）、交付文件、trace/events、gate reports。
 - 明确 **path-only handoff**：节点间仅传交付物路径（含 manifest 路径），不传文件内容。
-- 增加 **用户可配置项（best-effort）**：artifact 根目录、保留策略、可选的 publish/export 到 workspace 目标路径。
+- 增加 **用户可配置项（best-effort）**：
+  - artifact 根目录、保留策略
+  - 每个节点的 skills/model/principal（节点执行配置）
+  - publish/export 由 agent 决定（系统仅做证据链 export）
 
 ## Impact
 - Affected specs: `system-workflow-orchestration` (modified)
 - Affected code (planned): `backend/internal/workflow/*`, `backend/internal/handler/*`, `frontend/src/components/WorkflowRunNodes.vue`
-

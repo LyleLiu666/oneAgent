@@ -33,9 +33,22 @@
 系统必须 (MUST) 提供用户可配置的 workflow artifact 存储策略（best-effort），至少包含：
 - artifacts 根目录（best-effort）
 - 保留策略（例如 retention days）（best-effort）
-- 可选的 publish/export 到 workspace 目标路径（best-effort）
 
 #### Scenario: User overrides artifact root
 - **GIVEN** 用户配置了 workflow artifacts 根目录（best-effort）
 - **WHEN** 用户执行一次 workflow_run（best-effort）
 - **THEN** 该 run 的 artifacts 落在用户指定的根目录下（best-effort）
+
+### Requirement: Workflow nodes MUST support per-node execution config (skills/model/principal) (best-effort)
+系统必须 (MUST) 支持为 workflow graph 的每个 node 配置独立的执行配置（best-effort），至少包含：
+- `principal_id`：该 node 的执行主体（用于 tool policy/审计归属）（best-effort）
+- `model` 或 `model_id`：该 node 使用的模型（best-effort）
+- `skills[]`：该 node 注入的技能集合（best-effort）
+
+系统必须 (MUST) 将该配置随 workflow_version 一起发布并固化（immutable snapshot）（best-effort），并在 workflow_run 中保留一份 resolved snapshot（best-effort）。
+
+#### Scenario: Node execution config is snapshotted in workflow_version and run
+- **GIVEN** workflow graph 中节点 writer 配置了 `principal_id=writer` 且 `skills=[reporter-v1]` 且 model 不同于 editor（best-effort）
+- **WHEN** 用户 publish 一个 workflow_version 并创建一次 workflow_run（best-effort）
+- **THEN** workflow_version 中的 graph snapshot 包含这些 node-level 配置（best-effort）
+- **AND** workflow_run 保存一份 resolved snapshot，运行过程中不得漂移（best-effort）
