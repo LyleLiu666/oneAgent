@@ -10,11 +10,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
+	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
 
 func writeOpenAITextDelta(w http.ResponseWriter, id, content string) {
@@ -348,5 +351,165 @@ func TestE2E_Chat_StopDiscardsAssistantReply(t *testing.T) {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
+	}
+}
+
+func TestE2E_Chat_AttachSnapshot_DoesNotIncludeFinishedXMLToolSteps(t *testing.T) {
+	t.Setenv("ONEAGENT_DISABLE_DAILY_LEARNING", "1")
+
+	step2Started := make(chan struct{})
+	var step2Once sync.Once
+	var callCount atomic.Int32
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		switch callCount.Add(1) {
+		case 1:
+			writeOpenAITextDelta(w, "cmpl-1", "step-0 visible\n")
+			writeOpenAITextDelta(w, "cmpl-1", "<tool_data><call><tool_name>does_not_exist</tool_name></call></tool_data>")
+			writeOpenAIDone(w)
+		case 2:
+			step2Once.Do(func() { close(step2Started) })
+			// Give the test time to attach while step-1 is in flight.
+			time.Sleep(500 * time.Millisecond)
+			writeOpenAITextDelta(w, "cmpl-2", "step-1 final\n")
+			writeOpenAIDone(w)
+		default:
+			writeOpenAIDone(w)
+		}
+	}))
+	t.Cleanup(mock.Close)
+
+	home := t.TempDir()
+	cfg, err := config.Load(config.LoadOptions{
+		Home:     home,
+		Profile:  "dev",
+		AuthMode: "token",
+	})
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
+
+	workspace := t.TempDir()
+	data, _ := json.Marshal(map[string]any{
+		"message":       "hi",
+		"tool_protocol": "xml",
+		"tool_ids":      []string{tool.ToolIDRunCommand},
+		"workspace":     workspace,
+	})
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/chat", bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("new chat request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+rt.AuthToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("chat request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		t.Fatalf("chat status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	sessionID := readSessionIDFromChatStream(t, resp.Body)
+	_ = resp.Body.Close()
+
+	select {
+	case <-step2Started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for xml tool loop to start step 2")
+	}
+
+	attachReq, err := http.NewRequest(http.MethodGet, srv.URL+"/api/sessions/"+sessionID+"/stream", nil)
+	if err != nil {
+		t.Fatalf("new attach request: %v", err)
+	}
+	attachReq.Header.Set("Authorization", "Bearer "+rt.AuthToken)
+
+	attachResp, err := http.DefaultClient.Do(attachReq)
+	if err != nil {
+		t.Fatalf("attach request: %v", err)
+	}
+	defer attachResp.Body.Close()
+	if attachResp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(attachResp.Body)
+		t.Fatalf("attach status=%d body=%s", attachResp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	startIDs := make([]string, 0, 2)
+	scanner := bufio.NewScanner(attachResp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		var evt streamEvent
+		if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+			continue
+		}
+		if evt.Type != "msg" {
+			continue
+		}
+		var msg struct {
+			Op      string `json:"op"`
+			ID      string `json:"id"`
+			MsgType string `json:"msg_type,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(evt.Data), &msg); err != nil {
+			continue
+		}
+		if msg.Op == "start" && msg.MsgType == "text" {
+			startIDs = append(startIDs, msg.ID)
+			if len(startIDs) >= 2 {
+				break
+			}
+		}
+		if msg.Op == "final" && msg.MsgType == "text" && len(startIDs) >= 1 {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan attach stream: %v", err)
+	}
+	if len(startIDs) != 1 {
+		t.Fatalf("expected 1 active text stream in snapshot, got %v", startIDs)
 	}
 }

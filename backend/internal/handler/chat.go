@@ -2349,13 +2349,8 @@ func (sb *StreamBroadcaster) recordStreamMsg(msg streamMsg) {
 	if id == "" {
 		return
 	}
-	if strings.TrimSpace(msg.Op) == "" {
-		return
-	}
-	if msg.MsgType != model.MessageTypeText {
-		return
-	}
-	if strings.TrimSpace(msg.Role) != model.MessageRoleAssistant {
+	op := strings.TrimSpace(msg.Op)
+	if op == "" {
 		return
 	}
 
@@ -2365,7 +2360,21 @@ func (sb *StreamBroadcaster) recordStreamMsg(msg streamMsg) {
 		sb.active = make(map[string]*streamMsgState)
 	}
 
-	switch msg.Op {
+	// Always clear active entries on final regardless of message type.
+	// Some flows (e.g., tool calling) start as assistant text but finalize as tool_call/tool_result.
+	if op == "final" {
+		delete(sb.active, id)
+		return
+	}
+
+	if msg.MsgType != model.MessageTypeText {
+		return
+	}
+	if strings.TrimSpace(msg.Role) != model.MessageRoleAssistant {
+		return
+	}
+
+	switch op {
 	case "start":
 		sb.active[id] = &streamMsgState{
 			ID:      id,
