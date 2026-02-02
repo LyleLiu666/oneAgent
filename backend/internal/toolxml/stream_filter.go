@@ -57,10 +57,11 @@ func (f *streamFilter) Feed(chunk string) string {
 		}
 
 		idxTool := indexCaseInsensitive(f.pending, toolDataStart)
+		idxToolEnd := indexCaseInsensitive(f.pending, toolDataEnd)
 		idxThinking := indexCaseInsensitive(f.pending, thinkingStart)
 		idxThink := indexCaseInsensitive(f.pending, thinkStart)
 
-		idx := minNonNegative(idxTool, idxThinking, idxThink)
+		idx := minNonNegative(idxTool, idxToolEnd, idxThinking, idxThink)
 		if idx == -1 {
 			if len(f.pending) <= maxSearchTail {
 				break
@@ -95,6 +96,8 @@ func (f *streamFilter) Feed(chunk string) string {
 		switch {
 		case hasPrefixCaseInsensitive(snippet, toolDataStart):
 			f.inToolData = true
+		case hasPrefixCaseInsensitive(snippet, toolDataEnd):
+			// Stray close tags should not be visible to users.
 		case hasPrefixCaseInsensitive(snippet, thinkingStart):
 			f.inThinking = true
 			f.thinkingClose = thinkingEnd

@@ -118,6 +118,32 @@ func TestStreamFilter_Normal(t *testing.T) {
 	}
 }
 
+func TestStreamFilter_StripsStrayToolDataCloseTag(t *testing.T) {
+	filter := &streamFilter{}
+	input := "hello </tool_data> world"
+
+	got := filter.Feed(input) + filter.Flush()
+	if got != "hello  world" {
+		t.Fatalf("expected %q, got %q", "hello  world", got)
+	}
+}
+
+func TestStreamFilter_StripsStrayToolDataCloseTagAcrossChunks(t *testing.T) {
+	filter := &streamFilter{}
+	chunks := []string{"hello </tool_", "data> world"}
+
+	var sb strings.Builder
+	for _, c := range chunks {
+		sb.WriteString(filter.Feed(c))
+	}
+	sb.WriteString(filter.Flush())
+
+	got := sb.String()
+	if got != "hello  world" {
+		t.Fatalf("expected %q, got %q", "hello  world", got)
+	}
+}
+
 func TestIndexCaseInsensitive(t *testing.T) {
 	tests := []struct {
 		s, sub string
