@@ -563,3 +563,63 @@ it('appends an assistant message when receiving a task-completed event (secretar
 
     expect(chat.messages.some((m: any) => m.role === 'assistant' && m.type === 'text')).toBe(true)
 })
+
+it('optimistically renders secretary message and prevents resubmission while pending', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+
+    let resolveAppend: ((value: any) => void) | undefined
+    const appendPromise = new Promise((resolve) => {
+        resolveAppend = resolve
+    })
+    ;(apiClient.appendSecretaryInboxMessage as any).mockImplementation(() => appendPromise)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    const textarea = wrapper.get('textarea')
+    await textarea.setValue('你好。可以帮我写一篇文章吗？')
+
+    const sendButton = wrapper.get('[data-testid="chat-send"]')
+    void sendButton.trigger('click')
+    await flushPromises()
+
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
+    expect(chat.messages.some((m: any) => m.role === 'user' && String(m.content).includes('可以帮我写一篇文章'))).toBe(true)
+
+    // While pending, input is disabled and a second click should not enqueue another request.
+    expect(textarea.attributes('disabled')).toBeDefined()
+    void sendButton.trigger('click')
+    await flushPromises()
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
+
+    resolveAppend?.({
+        session_id: 's1',
+        message_id: 101,
+        ack_message_id: 102,
+        ack_text: '收到，我来处理。',
+    })
+    await flushPromises()
+
+    expect(chat.messages.some((m: any) => Number(m.id) === 101 && Number(m.serverId) === 101)).toBe(true)
+    expect(chat.messages.some((m: any) => Number(m.id) === 102 && m.role === 'assistant' && String(m.content).includes('收到'))).toBe(true)
+})

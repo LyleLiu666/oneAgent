@@ -87,6 +87,7 @@ const taskHandoffSuccess = ref('')
 const taskHandoffSuggestOpen = ref(false)
 
 const secretaryCursorMessageId = ref(0)
+const secretaryInboxSubmitting = ref(false)
 const secretaryTriageSubmitting = ref(false)
 const secretaryTriageQueued = ref(false)
 let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
@@ -266,6 +267,7 @@ const canSend = computed(
     if (loadingHistory.value) return false
     if (workspaceOnboardingBlocking.value) return false
     if (!isSecretaryMode.value && chatStore.isLoading) return false
+    if (isSecretaryMode.value && secretaryInboxSubmitting.value) return false
     return true
   }
 )
@@ -1471,9 +1473,23 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   const message = String(rawMessage || '').trim()
   if (!message) return
   if (loadingHistory.value) return
+  if (secretaryInboxSubmitting.value) return
 
   const ensuredSessionId = ensureSessionId()
 
+  // Optimistically render user message so repeated submissions are less likely.
+  const optimisticMessageId = Date.now()
+  chatStore.addMessage({
+    id: optimisticMessageId,
+    role: 'user',
+    type: 'text',
+    content: message,
+    createdAt: new Date(),
+    isStreaming: false,
+  })
+  scrollToBottom()
+
+  secretaryInboxSubmitting.value = true
   try {
     const res: any = await appendSecretaryInboxMessage({
       session_id: ensuredSessionId,
@@ -1487,13 +1503,30 @@ const sendSecretaryMessage = async (rawMessage: string) => {
       chatStore.setCurrentSession(serverSessionId)
     }
 
-    upsertServerTextMessage(res?.message_id, 'user', message)
+    const serverUserID = Number(res?.message_id)
+    if (Number.isFinite(serverUserID) && serverUserID > 0) {
+      const optimistic = chatStore.messages.find((m) => Number(m?.id) === optimisticMessageId)
+      if (optimistic && optimistic.role === 'user' && String(optimistic.content || '').trim() === message) {
+        optimistic.id = serverUserID
+        optimistic.serverId = serverUserID
+      } else {
+        upsertServerTextMessage(serverUserID, 'user', message)
+      }
+    } else {
+      // Keep optimistic message as-is when server IDs are missing.
+    }
+
     upsertServerTextMessage(res?.ack_message_id, 'assistant', res?.ack_text)
     loadSessions()
 
     scheduleSecretaryTriage()
   } catch (error) {
     console.error('Failed to append secretary inbox message:', error)
+    // Mark the optimistic message as failed (best-effort).
+    const optimistic = chatStore.messages.find((m) => Number(m?.id) === optimisticMessageId)
+    if (optimistic && optimistic.role === 'user' && String(optimistic.content || '').trim() === message) {
+      optimistic.content = `${message}\n\n[Error] 发送失败。`
+    }
     chatStore.addMessage({
       id: Date.now(),
       role: 'system',
@@ -1502,6 +1535,8 @@ const sendSecretaryMessage = async (rawMessage: string) => {
       createdAt: new Date(),
       isStreaming: false,
     })
+  } finally {
+    secretaryInboxSubmitting.value = false
   }
 }
 
@@ -1625,6 +1660,8 @@ const parseMessageContent = (content: string) => {
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     if (event.isComposing) return
+    // Avoid repeated keydown firing when holding Enter.
+    if ((event as any).repeat) return
     event.preventDefault()
     sendMessage()
   }
@@ -2163,7 +2200,7 @@ onMounted(async () => {
                 "
                 rows="1"
                 class="w-full px-4 py-3 pr-12 text-base leading-6 overflow-y-auto bg-surface-800 rounded-xl text-surface-50 placeholder-surface-500 resize-y focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all border border-surface-700"
-                :disabled="(!isSecretaryMode && chatStore.isLoading) || workspaceOnboardingBlocking"
+                :disabled="workspaceOnboardingBlocking || (!isSecretaryMode && chatStore.isLoading) || (isSecretaryMode && secretaryInboxSubmitting)"
               />
             </div>
             <button

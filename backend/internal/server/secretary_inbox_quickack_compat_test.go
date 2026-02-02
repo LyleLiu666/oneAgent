@@ -164,7 +164,7 @@ func TestServer_SecretaryInboxMessage_EmptyStreamAck_FallsBack(t *testing.T) {
 	if strings.TrimSpace(inboxResp.AckText) == "" {
 		t.Fatalf("expected fallback ack, got empty")
 	}
-	if !strings.Contains(inboxResp.AckText, "已记下") {
-		t.Fatalf("expected fallback ack to mention 已记下, got %q", inboxResp.AckText)
+	if strings.Contains(inboxResp.AckText, "已记下") {
+		t.Fatalf("expected fallback ack to avoid repeating 已记下, got %q", inboxResp.AckText)
 	}
 }

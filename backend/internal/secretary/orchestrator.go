@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"strings"
@@ -601,14 +602,20 @@ func truncateString(s string, maxLen int) string {
 }
 
 func fallbackQuickAckText(userContent string) string {
-	snippet := []rune(strings.TrimSpace(userContent))
-	if len(snippet) == 0 {
-		return "已记下。"
+	text := strings.TrimSpace(userContent)
+	// Keep it short and natural; avoid repeating a fixed phrase like “已记下”.
+	templates := []string{
+		"收到，我来处理。",
+		"好的，我安排一下。",
+		"明白，我继续跟进。",
+		"了解，我马上处理。",
+		"收到，我继续推进。",
 	}
-	if len(snippet) > 12 {
-		snippet = snippet[:12]
+	if text == "" {
+		return templates[0]
 	}
-	return fmt.Sprintf("已记下：%s。", string(snippet))
+	idx := int(crc32.ChecksumIEEE([]byte(text)) % uint32(len(templates)))
+	return templates[idx]
 }
 
 // deriveTaskTitle matches handler/tasks.go logic (kept local to avoid circular deps).
