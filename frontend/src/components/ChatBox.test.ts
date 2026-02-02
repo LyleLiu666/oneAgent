@@ -691,3 +691,53 @@ it('queues recovery items and resumes them one-by-one via chat reply (secretary 
 
     expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
 })
+
+it('records direct recovery actions as secretary receipts (dismiss clears recovery mode)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+            stubs: {
+                SecretaryTaskDeliverables: {
+                    template: `
+                      <button data-testid="emit-recovery-snapshot" @click="$emit('recovery-snapshot', [
+                        { taskId: 't1', attemptId: 'a1', title: 'task1', status: 'failed', summary: 's1' }
+                      ])"></button>
+                      <button data-testid="emit-recovery-dismiss" @click="$emit('recovery-action', { action: 'dismiss', taskId: 't1', attemptId: 'a1', title: 'task1' })"></button>
+                    `,
+                },
+            },
+        },
+    })
+
+    await flushPromises()
+
+    await wrapper.get('[data-testid="emit-recovery-snapshot"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="emit-recovery-dismiss"]').trigger('click')
+    await flushPromises()
+
+    // Receipt exists and recovery mode is cleared (next send uses inbox append, not resume).
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('稍后处理'))).toBe(true)
+
+    await wrapper.get('textarea').setValue('正常聊天')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
+})

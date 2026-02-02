@@ -1686,6 +1686,59 @@ const onTaskNeedsAttention = (item: any) => {
   }
 }
 
+const onRecoveryAction = (raw: any) => {
+  if (!isSecretaryMode.value) return
+
+  const action = String((raw as any)?.action || '').trim()
+  const taskId = String((raw as any)?.taskId || (raw as any)?.task_id || '').trim()
+  const attemptId = String((raw as any)?.attemptId || (raw as any)?.attempt_id || '').trim()
+  if (!action || !taskId || !attemptId) return
+
+  const title = String((raw as any)?.title || '').trim() || '任务'
+  const shortID = taskId.slice(0, 8)
+
+  const key = `${taskId}:${attemptId}`
+  const prevLen = secretaryRecoveryQueue.value.length
+  const nextQueue = secretaryRecoveryQueue.value.filter((i) => recoveryKeyOf(i) !== key)
+  secretaryRecoveryQueue.value = nextQueue
+
+  if (prevLen !== nextQueue.length) {
+    secretaryRecoveryAwaitingReply.value = false
+    secretaryRecoveryHandled.value += 1
+    if (nextQueue.length === 0) {
+      secretaryRecoveryIntroSent.value = false
+      secretaryRecoveryTotal.value = 0
+      secretaryRecoveryHandled.value = 0
+    }
+  }
+
+  if (action === 'resume') {
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'assistant',
+      type: 'text',
+      content: `收到。我已按你的操作继续推进：${title}（task=${shortID}）。`,
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+  }
+  if (action === 'dismiss') {
+    chatStore.addMessage({
+      id: Date.now(),
+      role: 'assistant',
+      type: 'text',
+      content: `好的，先稍后处理：${title}（task=${shortID}）。`,
+      createdAt: new Date(),
+      isStreaming: false,
+    })
+  }
+
+  // If there are more queued items, ask the next one (best-effort).
+  if (secretaryRecoveryQueue.value.length > 0 && !secretaryRecoverySubmitting.value) {
+    maybeStartRecoveryConversation()
+  }
+}
+
 const sendRecoveryReply = async (rawMessage: string) => {
   const message = String(rawMessage || '').trim()
   if (!message) return
@@ -2212,6 +2265,7 @@ onMounted(async () => {
         @task-completed="onTaskCompleted"
         @recovery-snapshot="onRecoverySnapshot"
         @task-needs-attention="onTaskNeedsAttention"
+        @recovery-action="onRecoveryAction"
       />
 
       <TaskQueuePanel v-if="!isSecretaryMode" :workspace="workspacePath" :model-id="selectedModelId" />

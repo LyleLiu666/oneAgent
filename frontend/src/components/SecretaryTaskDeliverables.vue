@@ -58,10 +58,19 @@ type TaskNeedsAttentionEvent = {
   test_report_path?: string
 }
 
+type RecoveryActionEvent = {
+  action: 'resume' | 'dismiss'
+  taskId: string
+  attemptId: string
+  title?: string
+  status?: string
+}
+
 const emit = defineEmits<{
   (e: 'task-completed', payload: TaskCompletedEvent): void
   (e: 'task-needs-attention', payload: TaskNeedsAttentionEvent): void
   (e: 'recovery-snapshot', payload: TaskNeedsAttentionEvent[]): void
+  (e: 'recovery-action', payload: RecoveryActionEvent): void
 }>()
 
 const ui = useUIStore()
@@ -342,15 +351,23 @@ const refresh = async () => {
 const recoverySubmittingTaskId = ref<string>('')
 const recoveryError = ref<string>('')
 
-const onResume = async (taskId: string) => {
-  const id = String(taskId || '').trim()
-  if (!id) return
+const onResume = async (card: RecoveryCard) => {
+  const id = String(card?.task?.id || '').trim()
+  const attemptID = String(card?.attempt?.id || '').trim()
+  if (!id || !attemptID) return
   if (recoverySubmittingTaskId.value) return
 
   recoverySubmittingTaskId.value = id
   recoveryError.value = ''
   try {
     await resumeTask(id)
+    emit('recovery-action', {
+      action: 'resume',
+      taskId: id,
+      attemptId: attemptID,
+      title: String(card?.task?.title || '').trim() || undefined,
+      status: String(card?.attempt?.status || '').trim() || undefined,
+    })
     await refresh()
   } catch (e: any) {
     const msg = e?.data?.error || e?.message || 'Failed to resume task.'
@@ -358,6 +375,20 @@ const onResume = async (taskId: string) => {
   } finally {
     recoverySubmittingTaskId.value = ''
   }
+}
+
+const onDismiss = (card: RecoveryCard) => {
+  const id = String(card?.task?.id || '').trim()
+  const attemptID = String(card?.attempt?.id || '').trim()
+  if (!id || !attemptID) return
+  dismissAttempt(id, attemptID)
+  emit('recovery-action', {
+    action: 'dismiss',
+    taskId: id,
+    attemptId: attemptID,
+    title: String(card?.task?.title || '').trim() || undefined,
+    status: String(card?.attempt?.status || '').trim() || undefined,
+  })
 }
 
 const onTroubleshoot = async (card?: RecoveryCard) => {
@@ -553,7 +584,7 @@ onUnmounted(() => {
                 data-testid="secretary-task-recovery-resume"
                 class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-900 dark:text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 :disabled="Boolean(recoverySubmittingTaskId)"
-                @click="onResume(card.task.id)"
+                @click="onResume(card)"
               >
                 继续
               </button>
@@ -570,7 +601,7 @@ onUnmounted(() => {
                 data-testid="secretary-task-recovery-dismiss"
                 class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
                 title="暂时隐藏（仍可在任务工作台查看）"
-                @click="dismissAttempt(card.task.id, card.attempt.id)"
+                @click="onDismiss(card)"
               >
                 稍后
               </button>
