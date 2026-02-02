@@ -166,7 +166,7 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 	}
 
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < defaultAPIRetryAttempts; attempt++ {
 		body, err := json.Marshal(reqBody)
 		if err != nil {
 			return fmt.Errorf("failed to marshal request: %w", err)
@@ -203,7 +203,12 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 			continue
 		}
 
-		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		apiErr := openAIAPIErrorFromResponse(resp, respBody)
+		if isRetryableStatus(resp.StatusCode) && attempt < defaultAPIRetryAttempts-1 {
+			continue
+		}
+
+		err = apiErr
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
@@ -314,7 +319,7 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 	}
 
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < defaultAPIRetryAttempts; attempt++ {
 		body, err := json.Marshal(reqBody)
 		if err != nil {
 			return ChatCompletionResult{}, fmt.Errorf("failed to marshal request: %w", err)
@@ -351,7 +356,12 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 			continue
 		}
 
-		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		apiErr := openAIAPIErrorFromResponse(resp, respBody)
+		if isRetryableStatus(resp.StatusCode) && attempt < defaultAPIRetryAttempts-1 {
+			continue
+		}
+
+		err = apiErr
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}

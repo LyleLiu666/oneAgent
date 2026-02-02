@@ -115,19 +115,19 @@ type ToolCallFunction struct {
 // ChatCompletionOptions configures the chat completion request.
 // EXTENSION: Add provider-specific options as needed.
 type ChatCompletionOptions struct {
-	Model             string   `json:"model,omitempty"`             // Model override
-	Temperature       *float64 `json:"temperature,omitempty"`       // 0.0 to 2.0
-	MaxTokens         *int     `json:"max_tokens,omitempty"`        // Max response tokens
-	TopP              *float64 `json:"top_p,omitempty"`             // Nucleus sampling
-	FrequencyPenalty  *float64 `json:"frequency_penalty,omitempty"` // -2.0 to 2.0
-	PresencePenalty   *float64 `json:"presence_penalty,omitempty"`  // -2.0 to 2.0
-	Stop              []string `json:"stop,omitempty"`              // Stop sequences
-	PromptCacheKey    string   `json:"-"`
-	EnablePromptCache bool     `json:"-"`
-	PromptCacheDowngraded      bool   `json:"-"`
-	PromptCacheDowngradeReason string `json:"-"`
-	Tools             []Tool   `json:"-"`
-	ToolChoice        any      `json:"-"`
+	Model                      string   `json:"model,omitempty"`             // Model override
+	Temperature                *float64 `json:"temperature,omitempty"`       // 0.0 to 2.0
+	MaxTokens                  *int     `json:"max_tokens,omitempty"`        // Max response tokens
+	TopP                       *float64 `json:"top_p,omitempty"`             // Nucleus sampling
+	FrequencyPenalty           *float64 `json:"frequency_penalty,omitempty"` // -2.0 to 2.0
+	PresencePenalty            *float64 `json:"presence_penalty,omitempty"`  // -2.0 to 2.0
+	Stop                       []string `json:"stop,omitempty"`              // Stop sequences
+	PromptCacheKey             string   `json:"-"`
+	EnablePromptCache          bool     `json:"-"`
+	PromptCacheDowngraded      bool     `json:"-"`
+	PromptCacheDowngradeReason string   `json:"-"`
+	Tools                      []Tool   `json:"-"`
+	ToolChoice                 any      `json:"-"`
 
 	// Trace options
 	Trace *TraceCallback `json:"-"` // Not sent to API
@@ -332,7 +332,7 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 	}
 
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < defaultAPIRetryAttempts; attempt++ {
 		reqMessages := messages
 		if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
 			reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
@@ -401,7 +401,12 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 			continue
 		}
 
-		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		apiErr := openAIAPIErrorFromResponse(resp, respBody)
+		if isRetryableStatus(resp.StatusCode) && attempt < defaultAPIRetryAttempts-1 {
+			continue
+		}
+
+		err = apiErr
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
@@ -493,7 +498,7 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 	}
 
 	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < defaultAPIRetryAttempts; attempt++ {
 		reqMessages := messages
 		if opts != nil && opts.EnablePromptCache && c.cacheStyle != cacheControlStyleNone {
 			reqMessages = applyMessageCacheControl(messages, c.cacheStyle)
@@ -562,7 +567,12 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			continue
 		}
 
-		err = fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+		apiErr := openAIAPIErrorFromResponse(resp, respBody)
+		if isRetryableStatus(resp.StatusCode) && attempt < defaultAPIRetryAttempts-1 {
+			continue
+		}
+
+		err = apiErr
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, "", err)
 		}
