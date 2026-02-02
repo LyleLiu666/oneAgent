@@ -5,8 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"testing"
 	"strings"
+	"testing"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 )
@@ -128,5 +128,36 @@ func TestOutcomeObserver_Decide_RequiresClient(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("expected error")
+	}
+}
+
+func TestParseObserverDecision_FallbackMarkdown_PassTrue(t *testing.T) {
+	raw := "## 评估结果\n\n**Pass: true**\n\n### 理由\n\n这个 Attempt 合理完成了阶段目标。\n"
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if !got.Pass {
+		t.Fatalf("expected pass=true, got %+v", got)
+	}
+	if strings.TrimSpace(got.Reason) == "" {
+		t.Fatalf("expected reason to be parsed, got %+v", got)
+	}
+}
+
+func TestParseObserverDecision_FallbackMarkdown_PassFalse(t *testing.T) {
+	raw := "## 评估结果\n\n**Pass: false**\n\n### 理由\n\n缺少关键交付物。\n\n### 下一步\n\n1. 补齐交付物\n2. 重新运行测试\n"
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+	if strings.TrimSpace(got.Reason) == "" {
+		t.Fatalf("expected reason to be parsed, got %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) == "" {
+		t.Fatalf("expected next_steps to be parsed, got %+v", got)
 	}
 }

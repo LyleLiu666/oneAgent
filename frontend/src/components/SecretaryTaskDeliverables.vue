@@ -538,16 +538,16 @@ onUnmounted(() => {
 
             <div v-if="recoveryDetailsExpanded" class="mt-3 space-y-2">
               <div
-                v-if="card.attempt.summary"
-                class="text-xs text-surface-200 whitespace-pre-wrap"
-              >
-                {{ card.attempt.summary }}
-              </div>
-              <div
-                v-else-if="card.attempt.error"
+                v-if="card.attempt.error"
                 class="text-xs text-surface-200 whitespace-pre-wrap"
               >
                 {{ card.attempt.error }}
+              </div>
+              <div
+                v-else-if="card.attempt.summary"
+                class="text-xs text-surface-200 whitespace-pre-wrap"
+              >
+                {{ card.attempt.summary }}
               </div>
               <div
                 v-if="card.attempt.observer?.next_steps"

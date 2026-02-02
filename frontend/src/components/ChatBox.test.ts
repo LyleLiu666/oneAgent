@@ -208,6 +208,51 @@ it('renders streaming token count while waiting for content', async () => {
     expect(wrapper.text()).toContain('7 tokens')
 })
 
+it('recovery ask prefers error over summary (secretary mode)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+    chat.setMessages([])
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: { plugins: [pinia] },
+    })
+
+    await flushPromises()
+
+    const deliverables = wrapper.findComponent({ name: 'SecretaryTaskDeliverables' })
+    expect(deliverables.exists()).toBe(true)
+
+    deliverables.vm.$emit('recovery-snapshot', [
+        {
+            taskId: 't1',
+            attemptId: 'a1',
+            title: 'task1',
+            status: 'failed',
+            summary: 'subagent finished',
+            error: 'invalid observer output (expected JSON)',
+        },
+    ])
+
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('原因：invalid observer output (expected JSON)')
+    expect(wrapper.text()).not.toContain('原因：subagent finished')
+})
+
 it('shows a stop button while streaming and calls stop endpoint', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {

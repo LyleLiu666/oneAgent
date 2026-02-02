@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
@@ -18,9 +19,9 @@ type ObserveInput struct {
 	WorkspaceRoot string
 	Prompt        string
 
-	Summary      string
-	FindingsPath string
-	TraceLogPath string
+	Summary        string
+	FindingsPath   string
+	TraceLogPath   string
 	TestReportPath string
 }
 
@@ -29,7 +30,7 @@ type OutcomeObserver struct {
 
 	Model string
 
-	MaxFindingsBytes int
+	MaxFindingsBytes  int
 	MaxTraceTailBytes int
 }
 
@@ -174,6 +175,10 @@ func parseObserverDecision(out string) (ObserverDecision, error) {
 		}
 	}
 
+	if fallback, ok := parseObserverDecisionFromText(raw); ok {
+		return fallback, nil
+	}
+
 	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected JSON): %q", truncateString(raw, 300))
 }
 
@@ -221,6 +226,109 @@ func extractFirstJSONObject(raw string) string {
 	}
 
 	return ""
+}
+
+var reObserverPass = regexp.MustCompile(`(?im)\bpass\b\s*[:：]\s*(true|false)\b`)
+var reMarkdownOrderedListPrefix = regexp.MustCompile(`^\s*\d+\s*[.)]\s+`)
+
+func parseObserverDecisionFromText(raw string) (ObserverDecision, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ObserverDecision{}, false
+	}
+
+	match := reObserverPass.FindStringSubmatch(raw)
+	if len(match) < 2 {
+		return ObserverDecision{}, false
+	}
+
+	pass := strings.EqualFold(strings.TrimSpace(match[1]), "true")
+	decision := ObserverDecision{Pass: pass}
+
+	decision.Reason = extractMarkdownSection(raw, []string{"理由", "Reason", "原因"})
+	decision.NextSteps = extractMarkdownSection(raw, []string{"下一步", "Next steps", "Next Steps", "next_steps", "NextSteps"})
+	decision.Evidence = parseMarkdownList(extractMarkdownSection(raw, []string{"证据", "Evidence"}))
+	decision.QuestionsForUser = parseMarkdownList(extractMarkdownSection(raw, []string{"需要你确认", "Questions", "questions_for_user"}))
+
+	return decision, true
+}
+
+func extractMarkdownSection(raw string, headings []string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(headings) == 0 {
+		return ""
+	}
+
+	lines := strings.Split(raw, "\n")
+	start := -1
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		head := strings.TrimSpace(strings.TrimLeft(trimmed, "#"))
+		head = strings.TrimSpace(strings.TrimSuffix(head, ":"))
+		head = strings.TrimSpace(strings.TrimSuffix(head, "："))
+		for _, h := range headings {
+			h = strings.TrimSpace(h)
+			if h == "" {
+				continue
+			}
+			if strings.Contains(head, h) {
+				start = i + 1
+				break
+			}
+		}
+		if start >= 0 {
+			break
+		}
+	}
+
+	if start < 0 || start >= len(lines) {
+		return ""
+	}
+
+	end := len(lines)
+	for j := start; j < len(lines); j++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[j]), "#") {
+			end = j
+			break
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
+}
+
+func parseMarkdownList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		l := strings.TrimSpace(line)
+		if l == "" {
+			continue
+		}
+		// Basic bullet/numbered list support: "- x", "* x", "1. x", "1) x"
+		if strings.HasPrefix(l, "-") || strings.HasPrefix(l, "*") {
+			l = strings.TrimSpace(strings.TrimLeft(l, "-*"))
+		} else {
+			l = reMarkdownOrderedListPrefix.ReplaceAllString(l, "")
+			l = strings.TrimSpace(l)
+		}
+		if l == "" {
+			continue
+		}
+		out = append(out, l)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func readFileHead(path string, maxBytes int) (string, string) {

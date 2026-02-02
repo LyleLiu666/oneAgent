@@ -1616,7 +1616,7 @@ const formatRecoveryAsk = (item: SecretaryRecoveryItem, index: number, total: nu
   const status = String(item?.status || '').trim()
   const header = total >= 2 ? `（${index}/${total}）` : ''
 
-  const reason = truncateForChat(item?.summary || item?.observer?.reason || item?.error, 180)
+  const reason = truncateForChat(item?.error || item?.observer?.reason || item?.summary, 180)
   const nextSteps = truncateForChat(item?.observer?.next_steps, 240)
   const questions = Array.isArray(item?.observer?.questions_for_user)
     ? item.observer!.questions_for_user!.map((q) => String(q || '').trim()).filter(Boolean)
