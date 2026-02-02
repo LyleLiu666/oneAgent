@@ -27,6 +27,7 @@ type DeliverableCard = {
 type RecoveryCard = {
   task: Task
   attempt: TaskAttempt
+  artifacts: DeliverableArtifact[]
 }
 
 const props = defineProps<{
@@ -50,6 +51,10 @@ const emit = defineEmits<{
 const ui = useUIStore()
 const router = useRouter()
 
+const STORAGE_RECOVERY_COLLAPSED = 'oneagent-secretary-recovery-collapsed'
+const STORAGE_DELIVERABLES_COLLAPSED = 'oneagent-secretary-deliverables-collapsed'
+const STORAGE_DISMISSED_ATTEMPTS = 'oneagent-secretary-dismissed-attempts-v1'
+
 const pollIntervalMs = computed(() => (typeof props.pollIntervalMs === 'number' ? props.pollIntervalMs : 10_000))
 const maxCards = computed(() => (typeof props.maxCards === 'number' ? props.maxCards : 3))
 const maxRecoveryCards = computed(() => (typeof props.maxRecoveryCards === 'number' ? props.maxRecoveryCards : 2))
@@ -63,6 +68,78 @@ const lastLatestStatusByTaskID = ref<Record<string, string>>({})
 let pollTimer: number | undefined
 
 const normalizeWorkspace = (ws: any) => String(ws || '').trim()
+
+const loadBool = (key: string): boolean => {
+  try {
+    return localStorage.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+const saveBool = (key: string, value: boolean) => {
+  try {
+    localStorage.setItem(key, value ? '1' : '0')
+  } catch {
+    // ignore
+  }
+}
+
+const normalizeWorkspaceStorageKey = (ws: string) => {
+  const v = normalizeWorkspace(ws)
+  return v ? v : 'no-workspace'
+}
+
+const makeDismissKey = (taskId: string, attemptId: string) => `${taskId}:${attemptId}`
+
+const loadDismissedKeys = (ws: string): Set<string> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_DISMISSED_ATTEMPTS)
+    const parsed = raw ? JSON.parse(raw) : {}
+    const arr = parsed?.[normalizeWorkspaceStorageKey(ws)]
+    if (!Array.isArray(arr)) return new Set<string>()
+    return new Set(arr.map((v: any) => String(v || '').trim()).filter(Boolean))
+  } catch {
+    return new Set<string>()
+  }
+}
+
+const saveDismissedKeys = (ws: string, keys: Set<string>) => {
+  try {
+    const raw = localStorage.getItem(STORAGE_DISMISSED_ATTEMPTS)
+    const parsed = raw ? JSON.parse(raw) : {}
+    parsed[normalizeWorkspaceStorageKey(ws)] = Array.from(keys).slice(-200)
+    localStorage.setItem(STORAGE_DISMISSED_ATTEMPTS, JSON.stringify(parsed))
+  } catch {
+    // ignore
+  }
+}
+
+const recoveryCollapsed = ref(loadBool(STORAGE_RECOVERY_COLLAPSED))
+const deliverablesCollapsed = ref(loadBool(STORAGE_DELIVERABLES_COLLAPSED))
+const dismissedKeys = ref<Set<string>>(loadDismissedKeys(props.workspace || ''))
+
+watch(recoveryCollapsed, (v) => saveBool(STORAGE_RECOVERY_COLLAPSED, v))
+watch(deliverablesCollapsed, (v) => saveBool(STORAGE_DELIVERABLES_COLLAPSED, v))
+
+const dismissAttempt = (taskId: string, attemptId: string) => {
+  const tid = String(taskId || '').trim()
+  const aid = String(attemptId || '').trim()
+  if (!tid || !aid) return
+
+  const ws = normalizeWorkspace(props.workspace)
+  const next = new Set(dismissedKeys.value)
+  next.add(makeDismissKey(tid, aid))
+  dismissedKeys.value = next
+  saveDismissedKeys(ws, next)
+}
+
+const isDismissedAttempt = (taskId: string, attemptId: string) => {
+  const tid = String(taskId || '').trim()
+  const aid = String(attemptId || '').trim()
+  if (!tid || !aid) return false
+  return dismissedKeys.value.has(makeDismissKey(tid, aid))
+}
 
 const isTerminalAttempt = (a: TaskAttempt) => !['queued', 'running'].includes(String(a?.status || ''))
 const isSucceededAttempt = (a: TaskAttempt) => String(a?.status || '') === 'succeeded'
@@ -107,6 +184,8 @@ const deliverableCards = computed<DeliverableCard[]>(() => {
   for (const t of filtered) {
     const a = getLatestAttempt(t)
     if (!a || !isTerminalAttempt(a)) continue
+    if (!isSucceededAttempt(a) && isNeedsAttentionAttempt(a)) continue
+    if (isDismissedAttempt((t as any)?.id || '', a.id || '')) continue
     const artifacts = cardArtifactsForAttempt(a)
     if (artifacts.length === 0) continue
     mapped.push({ task: t, attempt: a, artifacts })
@@ -134,7 +213,8 @@ const recoveryCards = computed<RecoveryCard[]>(() => {
     if (!a || !isTerminalAttempt(a)) continue
     if (isSucceededAttempt(a)) continue
     if (!isNeedsAttentionAttempt(a)) continue
-    mapped.push({ task: t, attempt: a })
+    if (isDismissedAttempt((t as any)?.id || '', a.id || '')) continue
+    mapped.push({ task: t, attempt: a, artifacts: cardArtifactsForAttempt(a) })
   }
 
   mapped.sort((a, b) => {
@@ -292,6 +372,7 @@ const openArtifactModal = async (taskId: string, attemptId: string, artifact: De
 watch(
   () => props.workspace,
   async () => {
+    dismissedKeys.value = loadDismissedKeys(props.workspace || '')
     await refresh()
   }
 )
@@ -315,65 +396,98 @@ onUnmounted(() => {
     >
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs font-semibold text-amber-800 dark:text-amber-200 tracking-wide">需要处理</div>
-        <div class="text-[11px] text-amber-700/80 dark:text-amber-200/70">最近 {{ recoveryCards.length }} 个任务</div>
+        <div class="flex items-center gap-2">
+          <div class="text-[11px] text-amber-700/80 dark:text-amber-200/70">最近 {{ recoveryCards.length }} 个任务</div>
+          <button
+            type="button"
+            data-testid="secretary-task-recovery-toggle"
+            class="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-900 dark:text-amber-100 hover:bg-amber-500/15"
+            @click="recoveryCollapsed = !recoveryCollapsed"
+          >
+            {{ recoveryCollapsed ? '展开' : '收起' }}
+          </button>
+        </div>
       </div>
 
-      <ErrorBanner v-if="recoveryError" :error="recoveryError" title="操作失败" class="mt-3" />
+      <div v-if="!recoveryCollapsed">
+        <ErrorBanner v-if="recoveryError" :error="recoveryError" title="操作失败" class="mt-3" />
 
-      <div class="mt-3 grid grid-cols-1 gap-3">
-        <div
-          v-for="card in recoveryCards"
-          :key="card.task.id"
-          class="rounded-2xl bg-surface-900/40 p-4"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="text-sm font-semibold text-surface-100 truncate">{{ card.task.title }}</div>
-              <div class="mt-1 text-xs text-surface-500 truncate">
-                status={{ card.attempt.status }} · attempt={{ card.attempt.id.slice(0, 8) }}
+        <div class="mt-3 grid grid-cols-1 gap-3">
+          <div
+            v-for="card in recoveryCards"
+            :key="card.task.id"
+            class="rounded-2xl bg-surface-900/40 p-4"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-surface-100 truncate">{{ card.task.title }}</div>
+                <div class="mt-1 text-xs text-surface-500 truncate">
+                  status={{ card.attempt.status }} · attempt={{ card.attempt.id.slice(0, 8) }}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="mt-3 space-y-2">
-            <div
-              v-if="card.attempt.summary"
-              class="text-xs text-surface-200 whitespace-pre-wrap"
-            >
-              {{ card.attempt.summary }}
+            <div class="mt-3 space-y-2">
+              <div
+                v-if="card.attempt.summary"
+                class="text-xs text-surface-200 whitespace-pre-wrap"
+              >
+                {{ card.attempt.summary }}
+              </div>
+              <div
+                v-else-if="card.attempt.error"
+                class="text-xs text-surface-200 whitespace-pre-wrap"
+              >
+                {{ card.attempt.error }}
+              </div>
+              <div
+                v-if="card.attempt.observer?.next_steps"
+                class="rounded-xl border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-300 whitespace-pre-wrap"
+              >
+                {{ card.attempt.observer.next_steps }}
+              </div>
             </div>
-            <div
-              v-else-if="card.attempt.error"
-              class="text-xs text-surface-200 whitespace-pre-wrap"
-            >
-              {{ card.attempt.error }}
-            </div>
-            <div
-              v-if="card.attempt.observer?.next_steps"
-              class="rounded-xl border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-300 whitespace-pre-wrap"
-            >
-              {{ card.attempt.observer.next_steps }}
-            </div>
-          </div>
 
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              data-testid="secretary-task-recovery-resume"
-              class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-900 dark:text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="Boolean(recoverySubmittingTaskId)"
-              @click="onResume(card.task.id)"
-            >
-              继续
-            </button>
-            <button
-              type="button"
-              data-testid="secretary-task-recovery-troubleshoot"
-              class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
-              @click="onTroubleshoot"
-            >
-              排障
-            </button>
+            <div v-if="card.artifacts.length" class="mt-3 flex flex-wrap gap-2">
+              <button
+                v-for="a in card.artifacts"
+                :key="a.kind"
+                type="button"
+                class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+                @click="openArtifactModal(card.task.id, card.attempt.id, a)"
+              >
+                {{ a.label }}
+              </button>
+            </div>
+
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="secretary-task-recovery-resume"
+                class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-900 dark:text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
+                :disabled="Boolean(recoverySubmittingTaskId)"
+                @click="onResume(card.task.id)"
+              >
+                继续
+              </button>
+              <button
+                type="button"
+                data-testid="secretary-task-recovery-troubleshoot"
+                class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+                @click="onTroubleshoot"
+              >
+                排障
+              </button>
+              <button
+                type="button"
+                data-testid="secretary-task-recovery-dismiss"
+                class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+                title="暂时隐藏（仍可在任务工作台查看）"
+                @click="dismissAttempt(card.task.id, card.attempt.id)"
+              >
+                稍后
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -386,10 +500,20 @@ onUnmounted(() => {
     >
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs font-semibold text-surface-200 tracking-wide">交付</div>
-        <div class="text-[11px] text-surface-500">最近 {{ deliverableCards.length }} 个任务</div>
+        <div class="flex items-center gap-2">
+          <div class="text-[11px] text-surface-500">最近 {{ deliverableCards.length }} 个任务</div>
+          <button
+            type="button"
+            data-testid="secretary-task-deliverables-toggle"
+            class="rounded-full border border-surface-700/40 bg-surface-900/40 px-2 py-0.5 text-[11px] text-surface-200 hover:bg-surface-800/50"
+            @click="deliverablesCollapsed = !deliverablesCollapsed"
+          >
+            {{ deliverablesCollapsed ? '展开' : '收起' }}
+          </button>
+        </div>
       </div>
 
-      <div class="mt-3 grid grid-cols-1 gap-3">
+      <div v-if="!deliverablesCollapsed" class="mt-3 grid grid-cols-1 gap-3">
         <div
           v-for="card in deliverableCards"
           :key="card.task.id"
@@ -403,6 +527,15 @@ onUnmounted(() => {
                 status={{ card.attempt.status }} · attempt={{ card.attempt.id.slice(0, 8) }}
               </div>
             </div>
+            <button
+              type="button"
+              data-testid="secretary-task-deliverable-dismiss"
+              class="shrink-0 rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+              title="隐藏该交付卡片（仍可在任务工作台查看）"
+              @click="dismissAttempt(card.task.id, card.attempt.id)"
+            >
+              隐藏
+            </button>
           </div>
 
           <div v-if="card.attempt.summary" class="mt-3 text-xs text-surface-300 whitespace-pre-wrap">

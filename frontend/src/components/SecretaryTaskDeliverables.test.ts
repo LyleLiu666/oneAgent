@@ -368,3 +368,161 @@ it("uses readable warning accents in light mode", async () => {
 
   wrapper.unmount();
 });
+
+it("can collapse and expand deliverables in secretary mode", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "succeeded",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "done",
+          findings_path: "/tmp/ws/FINDINGS.md",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+  expect(wrapper.find('[data-testid="secretary-task-deliverable-card"]').exists()).toBe(
+    true,
+  );
+
+  await wrapper.get('[data-testid="secretary-task-deliverables-toggle"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.find('[data-testid="secretary-task-deliverable-card"]').exists()).toBe(
+    false,
+  );
+
+  await wrapper.get('[data-testid="secretary-task-deliverables-toggle"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.find('[data-testid="secretary-task-deliverable-card"]').exists()).toBe(
+    true,
+  );
+
+  wrapper.unmount();
+});
+
+it("can dismiss deliverable cards and persist them in localStorage", async () => {
+  const ls = makeLocalStorage();
+  vi.stubGlobal("localStorage", ls);
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "succeeded",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "done",
+          findings_path: "/tmp/ws/FINDINGS.md",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+  expect(wrapper.find('[data-testid="secretary-task-deliverable-card"]').exists()).toBe(
+    true,
+  );
+
+  await wrapper.get('[data-testid="secretary-task-deliverable-dismiss"]').trigger("click");
+  await flushPromises();
+  expect(wrapper.find('[data-testid="secretary-task-deliverable-card"]').exists()).toBe(
+    false,
+  );
+
+  const raw = ls.getItem("oneagent-secretary-dismissed-attempts-v1");
+  expect(raw).toBeTruthy();
+  const parsed = JSON.parse(String(raw));
+  expect(parsed["/tmp/ws"]).toContain("t1:a1");
+
+  wrapper.unmount();
+});
+
+it("does not duplicate needs-attention tasks in deliverables", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+          findings_path: "/tmp/ws/FINDINGS.md",
+          trace_log_path: "/tmp/ws/trace.jsonl",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  expect(wrapper.find('[data-testid="secretary-task-recovery"]').exists()).toBe(true);
+  expect(wrapper.find('[data-testid="secretary-task-deliverables"]').exists()).toBe(false);
+  expect(wrapper.text()).toContain("diff");
+
+  wrapper.unmount();
+});
