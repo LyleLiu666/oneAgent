@@ -12,11 +12,41 @@
 - 不在节点间传输文件内容（即使是小文件也不走 prompt/tool payload）。
 
 ## Key idea
-把 **node_run 的交付物目录（artifact root）**当成“节点的唯一写入口”，并将其置于**持久化工作流存储**中；节点执行可以发生在 workspace / worktree / sandbox，但交付物必须写到这个 durable 目录里，并在 `artifact manifest` 中只返回路径。
+把 **node_run 的交付物目录（artifact root）**当成“节点交付的唯一真相来源”，并将其置于**可持久化的工作流存储**中。
+
+但落地时必须同时满足现有系统约束：文件工具默认只允许写入 workspace 内文件（否则会触发 `path is outside workspace`）。因此需要明确：
+- 节点 agent 的 `WorkspaceRoot` 取什么（决定 file tools 的写边界）
+- artifacts 目录是由 agent 直接写，还是由系统在节点结束后“收集/复制”写入
+
+我建议把这件事拆成两层：**执行根目录（ExecutionRoot）** vs **交付根目录（NodeRoot）**，并让 NodeRoot 永远可追溯。
+
+## Recommended execution model (v1)
+**优先推荐 v1 使用“RunRoot 作为 workspaceRoot”**：
+- 为每次 workflow_run 创建一个 `RunRoot`（durable），并把 node agent 的 `WorkspaceRoot` 设置为 `RunRoot`
+- 对每个 node 设置 `WriteScope=["nodes/<node_id>/**"]`，让该 node 只能写自己的交付目录
+- 上游节点交付物位于同一个 `RunRoot` 下，下游节点可用相对路径读取（仍然是 path-only）
+
+优点：
+- 不需要放宽“写 workspace 外”权限，也不需要新增写入工具
+- 节点间交付天然只传路径（同根目录可直接引用）
+- 证据链稳定（不依赖 worktree/临时目录）
+
+限制：
+- 节点若需要修改项目代码（workspace repo），需要额外设计“挂载/复制/导出”机制（可作为 v2 扩展）
+
+## Alternative (v2): execute in project workspace/worktree, then export
+当工作流节点需要读写项目代码时，可以采用：
+- node agent 仍在项目 `ExecutionRoot`（workspace 或 worktree）内执行（file tools 作用域不变）
+- 节点结束后，系统将“声明的交付文件（paths only）”复制到 `NodeRoot/deliverables/`
+- `artifact manifest` 记录 `NodeRoot` 下的最终路径，供下游节点使用
+
+这能把“写代码/跑命令”和“交付物证据链”解耦，但需要补充：
+- 节点如何声明交付清单（例如输出一个机器可读的 `deliverables.json`）
+- 上游交付物如何注入到下游的 ExecutionRoot（copy/symlink，仍只传路径不传内容）
 
 ## Canonical layout
 术语：
-- `WorkflowStoreRoot`：工作流持久化根目录（当前实现为 `ONEAGENT_HOME/.oneagent/data/workflows`）。
+- `WorkflowStoreRoot`：工作流持久化根目录（当前实现为 `ONEAGENT_HOME/.oneagent/data/workflows`；也可通过配置迁移到 workspace 内的 `.oneagent/`）。
 - `RunRoot`：某次 workflow_run 的目录。
 - `NodeRoot`：某个 node_run 的目录。
 
@@ -108,4 +138,5 @@ WorkflowStoreRoot/
 1) 交付物路径：你更希望 **绝对路径**（最稳）还是 **workspace 相对路径**（更可移植）？我倾向先绝对路径 + UI 里额外展示相对路径。
 2) “责任编辑润色”场景：是否要求 **每个节点输出不可变**（copy-on-write）？还是允许就地修改上游交付文件但必须生成 diff 证据？
 3) publish/export：你希望默认把最终交付同步到 workspace 的某个固定目录（比如 `<workspace>/deliverables/`），还是完全由 workflow 配置决定？
-
+4) 执行模型：你希望 workflow 节点 **v1 先只在 RunRoot 内产出交付物**（不碰项目代码），还是需要从一开始就支持“在项目 workspace/worktree 内执行并导出交付物”？
+5) “用户配置”具体指什么：仅 artifacts 存储策略，还是也要支持 **每个节点配置 skills/model/principal**（例如 reporter/writer/editor 各自 skills 列表）？如果需要，我建议单独开一个 change 做 graph schema 扩展。
