@@ -20,6 +20,7 @@ func TestProviderInjection_OpenRouter_UsesCacheControl(t *testing.T) {
 		_ = json.Unmarshal(body, &got)
 
 		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"cmpl-test\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	t.Cleanup(mock.Close)
@@ -82,6 +83,7 @@ func TestProviderInjection_Bedrock_UsesCachePoint(t *testing.T) {
 		_ = json.Unmarshal(body, &got)
 
 		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"cmpl-test\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	t.Cleanup(mock.Close)
@@ -143,6 +145,7 @@ func TestProviderInjection_OpenAI_UsesPromptCacheKey(t *testing.T) {
 		_ = json.Unmarshal(body, &got)
 
 		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"id\":\"cmpl-test\",\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	t.Cleanup(mock.Close)
@@ -218,4 +221,3 @@ func TestProviderInjection_Claude_SetsPromptCachingHeader(t *testing.T) {
 		t.Fatalf("expected anthropic-beta=prompt-caching, got %q", gotHeader)
 	}
 }
-

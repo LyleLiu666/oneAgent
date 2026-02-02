@@ -97,8 +97,12 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 	}
 
 	ackText, resolvedModelID, err := o.generateQuickAck(ctx, userID, session.Metadata, content)
-	if err != nil {
-		return InboxAppendResult{}, err
+	if err != nil || strings.TrimSpace(ackText) == "" {
+		// Quick ack is best-effort. Persist a deterministic fallback so the UI
+		// stays responsive even when the LLM returns no content or the provider
+		// doesn't stream SSE.
+		ackText = fallbackQuickAckText(content)
+		resolvedModelID = ""
 	}
 
 	// Persist resolved model id for consistent behavior across refreshes (best-effort).
@@ -298,15 +302,15 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 
 	state.CursorMessageID = toID
 	state.TriageRuns = append(state.TriageRuns, TriageRun{
-		FromCursor:      cursor,
-		ToMessageID:     toID,
-		InputMessageIDs: messageIDs(newUserMsgs),
-		SummaryMessageID: summaryMsg.ID,
-		SummaryMessage:  summary,
-		CreatedTaskIDs:  append([]string{}, createdTaskIDs...),
-		Questions:       append([]string{}, questions...),
+		FromCursor:        cursor,
+		ToMessageID:       toID,
+		InputMessageIDs:   messageIDs(newUserMsgs),
+		SummaryMessageID:  summaryMsg.ID,
+		SummaryMessage:    summary,
+		CreatedTaskIDs:    append([]string{}, createdTaskIDs...),
+		Questions:         append([]string{}, questions...),
 		WorkspacesCreated: append([]string{}, workspacesCreated...),
-		CreatedAt:       time.Now().UTC(),
+		CreatedAt:         time.Now().UTC(),
 	})
 	if len(state.TriageRuns) > 20 {
 		state.TriageRuns = state.TriageRuns[len(state.TriageRuns)-20:]
@@ -347,9 +351,9 @@ func (o *Orchestrator) GetState(_ context.Context, userID, sessionID string) (St
 }
 
 type triagePlan struct {
-	SummaryMessage string      `json:"summary_message"`
+	SummaryMessage string       `json:"summary_message"`
 	Tasks          []triageTask `json:"tasks,omitempty"`
-	Questions      []string    `json:"questions,omitempty"`
+	Questions      []string     `json:"questions,omitempty"`
 }
 
 type triageTask struct {
@@ -594,6 +598,17 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen])
+}
+
+func fallbackQuickAckText(userContent string) string {
+	snippet := []rune(strings.TrimSpace(userContent))
+	if len(snippet) == 0 {
+		return "已记下。"
+	}
+	if len(snippet) > 12 {
+		snippet = snippet[:12]
+	}
+	return fmt.Sprintf("已记下：%s。", string(snippet))
 }
 
 // deriveTaskTitle matches handler/tasks.go logic (kept local to avoid circular deps).
