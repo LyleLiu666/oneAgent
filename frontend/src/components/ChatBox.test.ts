@@ -249,8 +249,8 @@ it('recovery ask prefers error over summary (secretary mode)', async () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('原因：invalid observer output (expected JSON)')
-    expect(wrapper.text()).not.toContain('原因：subagent finished')
+    expect(wrapper.text()).toContain('发生了什么：invalid observer output (expected JSON)')
+    expect(wrapper.text()).not.toContain('发生了什么：subagent finished')
 })
 
 it('shows a stop button while streaming and calls stop endpoint', async () => {
@@ -710,7 +710,7 @@ it('queues recovery items and resumes them one-by-one via chat reply (secretary 
     await wrapper.get('[data-testid="emit-recovery-snapshot"]').trigger('click')
     await flushPromises()
 
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('我这里有 2 个事情'))).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('有个任务需要你确认：task1'))).toBe(true)
     expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('task1'))).toBe(true)
 
     await wrapper.get('textarea').setValue('先按 next_steps 继续')

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -208,6 +210,58 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		}, nil
 	}
 
+	sessionWorkspace := ""
+	if raw, ok := session.Metadata["workspace"]; ok {
+		if v, ok := raw.(string); ok {
+			sessionWorkspace = strings.TrimSpace(v)
+		}
+	}
+
+	// If the user is asking progress/status, answer directly instead of dispatching workers.
+	if len(newUserMsgs) == 1 && looksLikeProgressQuery(newUserMsgs[0].Content) {
+		summary, questions, err := o.buildProgressReply(userID, sessionWorkspace, state)
+		if err != nil {
+			return TriageResult{}, err
+		}
+
+		summaryMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
+			Role:    model.MessageRoleAssistant,
+			Type:    model.MessageTypeText,
+			Content: summary,
+		})
+		if err != nil {
+			return TriageResult{}, err
+		}
+
+		state.CursorMessageID = toID
+		state.TriageRuns = append(state.TriageRuns, TriageRun{
+			FromCursor:        cursor,
+			ToMessageID:       toID,
+			InputMessageIDs:   messageIDs(newUserMsgs),
+			SummaryMessageID:  summaryMsg.ID,
+			SummaryMessage:    summary,
+			CreatedTaskIDs:    []string{},
+			Questions:         append([]string{}, questions...),
+			WorkspacesCreated: []string{},
+			CreatedAt:         time.Now().UTC(),
+		})
+		if len(state.TriageRuns) > 20 {
+			state.TriageRuns = state.TriageRuns[len(state.TriageRuns)-20:]
+		}
+
+		meta := upsertState(session.Metadata, state)
+		_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
+
+		return TriageResult{
+			SummaryMessage:    summary,
+			SummaryMessageID:  summaryMsg.ID,
+			CursorMessageID:   state.CursorMessageID,
+			CreatedTaskIDs:    []string{},
+			Questions:         questions,
+			WorkspacesCreated: []string{},
+		}, nil
+	}
+
 	plan, resolvedModelID, err := o.generateTriagePlan(ctx, userID, session.Metadata, newUserMsgs)
 	if err != nil {
 		return TriageResult{}, err
@@ -223,13 +277,6 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 			meta["model_id"] = resolvedModelID
 			_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
 			session.Metadata = meta
-		}
-	}
-
-	sessionWorkspace := ""
-	if raw, ok := session.Metadata["workspace"]; ok {
-		if v, ok := raw.(string); ok {
-			sessionWorkspace = strings.TrimSpace(v)
 		}
 	}
 
@@ -394,6 +441,7 @@ func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, meta
 
 	ack := strings.TrimSpace(out)
 	ack = strings.Trim(ack, "\"")
+	ack = sanitizeQuickAckText(userContent, ack)
 	if ack == "" {
 		return "", "", errors.New("empty quick ack")
 	}
@@ -517,9 +565,9 @@ func buildFallbackSummary(taskCount, questionCount int) string {
 	case taskCount > 0:
 		return fmt.Sprintf("我已安排 %d 个后台 worker 开始执行。", taskCount)
 	case questionCount > 0:
-		return fmt.Sprintf("我先记下了需求，但有 %d 个问题需要你确认后才能派工。", questionCount)
+		return fmt.Sprintf("我理解了需求，但有 %d 个问题需要你确认后才能派工。", questionCount)
 	default:
-		return "我已记下需求，正在整理下一步安排。"
+		return "收到，我正在整理下一步安排。"
 	}
 }
 
@@ -601,18 +649,349 @@ func truncateString(s string, maxLen int) string {
 	return string(runes[:maxLen])
 }
 
+func looksLikeProgressQuery(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return false
+	}
+	// Only treat clear progress/status questions as progress queries.
+	keywords := []string{
+		"写了多少",
+		"写到哪",
+		"写好了吗",
+		"写完了吗",
+		"进度",
+		"做到哪",
+		"做完了吗",
+		"完成了吗",
+		"跑完了吗",
+		"还在跑吗",
+		"还在运行吗",
+		"现在怎么样",
+		"进展如何",
+		"有结果吗",
+	}
+	for _, kw := range keywords {
+		if kw != "" && strings.Contains(t, kw) {
+			return true
+		}
+	}
+	if strings.HasSuffix(t, "了吗") || strings.HasSuffix(t, "了没") {
+		return true
+	}
+	return false
+}
+
+type workspaceTextStats struct {
+	FilesTotal     int
+	TextFilesTotal int
+	CharsTotal     int
+	Truncated      bool
+}
+
+func collectWorkspaceTextStats(root string) (workspaceTextStats, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return workspaceTextStats{}, errors.New("root is required")
+	}
+
+	const (
+		maxFiles  = 800
+		maxBytes  = int64(8 * 1024 * 1024) // total bytes read
+		maxSingle = int64(2 * 1024 * 1024)
+	)
+
+	var (
+		stats     workspaceTextStats
+		bytesRead int64
+	)
+
+	extAllowed := map[string]bool{
+		".md":       true,
+		".markdown": true,
+		".txt":      true,
+	}
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if name == ".tmp" || name == ".git" || name == "node_modules" {
+				return fs.SkipDir
+			}
+			if strings.HasPrefix(name, ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
+		if strings.HasPrefix(name, ".") {
+			return nil
+		}
+
+		stats.FilesTotal++
+		if stats.FilesTotal > maxFiles {
+			stats.Truncated = true
+			return fs.SkipAll
+		}
+
+		ext := strings.ToLower(filepath.Ext(name))
+		if !extAllowed[ext] {
+			return nil
+		}
+
+		info, statErr := d.Info()
+		if statErr != nil {
+			return nil
+		}
+		size := info.Size()
+		if size <= 0 {
+			return nil
+		}
+		if size > maxSingle || bytesRead+size > maxBytes {
+			stats.Truncated = true
+			return nil
+		}
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		bytesRead += int64(len(data))
+		stats.TextFilesTotal++
+
+		for _, r := range string(data) {
+			if unicode.IsSpace(r) {
+				continue
+			}
+			stats.CharsTotal++
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, fs.SkipAll) {
+		return workspaceTextStats{}, err
+	}
+	return stats, nil
+}
+
+func formatApproxChineseChars(n int) string {
+	if n <= 0 {
+		return "0字"
+	}
+	if n < 10_000 {
+		return fmt.Sprintf("%d字", n)
+	}
+	w := (n + 5000) / 10_000
+	if w <= 0 {
+		w = 1
+	}
+	return fmt.Sprintf("%dw字", w)
+}
+
+func looksLikeQuestion(text string) bool {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return false
+	}
+	if strings.ContainsAny(t, "？?") {
+		return true
+	}
+	if strings.HasSuffix(t, "吗") || strings.HasSuffix(t, "么") {
+		return true
+	}
+	keywords := []string{
+		"多少",
+		"进度",
+		"写到哪",
+		"写好",
+		"完成",
+		"到哪",
+		"跑得怎么样",
+		"跑了吗",
+		"状态",
+		"现在怎么样",
+		"情况如何",
+	}
+	for _, kw := range keywords {
+		if kw != "" && strings.Contains(t, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeQuickAckText(userContent, ack string) string {
+	text := strings.TrimSpace(ack)
+	if text == "" {
+		return ""
+	}
+
+	// Normalize common LLM “assistant-y” patterns to avoid looking dumb.
+	bannedPrefixes := []string{"已记下", "已记录", "收到您的", "收到你", "收到您"}
+	for _, p := range bannedPrefixes {
+		if strings.HasPrefix(text, p) {
+			return fallbackQuickAckText(userContent)
+		}
+	}
+	// Avoid colon-style receipts like "已记下：xxx".
+	if strings.ContainsAny(text, "：:") && strings.Contains(text, "记") {
+		return fallbackQuickAckText(userContent)
+	}
+
+	// Keep it short.
+	return truncateString(text, 60)
+}
+
+func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (summary string, questions []string, err error) {
+	if o == nil {
+		return "", nil, errors.New("orchestrator is nil")
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "local"
+	}
+
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		q := "我还不知道你在用哪个 workspace。请先指定/选择一个目录，我才能查看进度。"
+		return q, []string{q}, nil
+	}
+
+	normalized, err := scope.NormalizeWorkspaceRoot(workspace)
+	if err != nil {
+		return "", nil, err
+	}
+	workspace = normalized
+
+	running := 0
+	queued := 0
+	succeeded := 0
+	needsAttention := 0
+
+	if o.Tasks != nil {
+		tasks, _ := o.Tasks.ListTasks(userID, workspace)
+
+		created := make(map[string]bool)
+		for _, run := range st.TriageRuns {
+			for _, id := range run.CreatedTaskIDs {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				created[id] = true
+			}
+		}
+
+		relevant := tasks
+		if len(created) > 0 {
+			tmp := make([]taskqueue.Task, 0, len(tasks))
+			for _, t := range tasks {
+				if created[t.ID] {
+					tmp = append(tmp, t)
+				}
+			}
+			if len(tmp) > 0 {
+				relevant = tmp
+			}
+		}
+
+		for _, t := range relevant {
+			a := t.LatestAttempt()
+			if a == nil {
+				continue
+			}
+			switch a.Status {
+			case taskqueue.AttemptQueued:
+				queued++
+			case taskqueue.AttemptRunning:
+				running++
+			case taskqueue.AttemptSucceeded:
+				succeeded++
+			case taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
+				needsAttention++
+			default:
+				// ignore
+			}
+		}
+	}
+
+	// Only scan files for ephemeral workspaces to avoid accidentally reading huge repos.
+	shouldScan := false
+	wsPath := workspace
+	if real, err := filepath.EvalSymlinks(wsPath); err == nil && strings.TrimSpace(real) != "" {
+		wsPath = real
+	}
+	wsClean := filepath.Clean(wsPath) + string(os.PathSeparator)
+	if strings.Contains(wsClean, string(os.PathSeparator)+".oneagent"+string(os.PathSeparator)+"workspaces"+string(os.PathSeparator)) {
+		shouldScan = true
+	} else if root, err := o.workspacePoolRoot(); err == nil {
+		rootPath := root
+		if real, err := filepath.EvalSymlinks(rootPath); err == nil && strings.TrimSpace(real) != "" {
+			rootPath = real
+		}
+		rootClean := filepath.Clean(rootPath) + string(os.PathSeparator)
+		if strings.HasPrefix(wsClean, rootClean) {
+			shouldScan = true
+		}
+	}
+
+	stats := workspaceTextStats{}
+	if shouldScan {
+		if got, err := collectWorkspaceTextStats(workspace); err == nil {
+			stats = got
+		}
+	}
+
+	statusLine := ""
+	switch {
+	case running > 0 || queued > 0:
+		statusLine = "我看了下，还在运行中。"
+	case needsAttention > 0:
+		statusLine = "我看了下，有任务卡住了，需要你确认。"
+	case succeeded > 0:
+		statusLine = "我看了下，已经跑完了。"
+	default:
+		statusLine = "我看了下，暂时没看到在跑的任务。"
+	}
+
+	var details []string
+	if shouldScan {
+		if stats.FilesTotal > 0 && stats.CharsTotal > 0 {
+			details = append(details, fmt.Sprintf("一共有 %d 个文件，累计约 %s。", stats.FilesTotal, formatApproxChineseChars(stats.CharsTotal)))
+		} else if stats.FilesTotal > 0 {
+			details = append(details, fmt.Sprintf("一共有 %d 个文件。", stats.FilesTotal))
+		}
+		if stats.Truncated {
+			details = append(details, "（统计已截断）")
+		}
+	}
+
+	if len(details) == 0 {
+		// Always provide at least one actionable hint.
+		if running > 0 || queued > 0 {
+			details = append(details, "我会继续盯着，有更新再告诉你。")
+		} else {
+			details = append(details, "如需我统计字数/文件，请把任务放在系统创建的 workspace 里。")
+		}
+	}
+
+	return strings.TrimSpace(statusLine + strings.Join(details, "")), nil, nil
+}
+
 func fallbackQuickAckText(userContent string) string {
 	text := strings.TrimSpace(userContent)
 	// Keep it short and natural; avoid repeating a fixed phrase like “已记下”.
-	templates := []string{
-		"收到，我来处理。",
-		"好的，我安排一下。",
-		"明白，我继续跟进。",
-		"了解，我马上处理。",
-		"收到，我继续推进。",
-	}
+	templates := []string{"收到，我来处理。", "好的，我安排一下。", "明白，我继续跟进。", "了解，我马上处理。", "收到，我继续推进。"}
+	questionTemplates := []string{"我看看。", "我查一下。", "我确认一下。", "我看下进度。"}
 	if text == "" {
 		return templates[0]
+	}
+	looksQuestion := looksLikeQuestion(text)
+	if looksQuestion {
+		idx := int(crc32.ChecksumIEEE([]byte(text)) % uint32(len(questionTemplates)))
+		return questionTemplates[idx]
 	}
 	idx := int(crc32.ChecksumIEEE([]byte(text)) % uint32(len(templates)))
 	return templates[idx]
@@ -641,7 +1020,9 @@ ONEAGENT_SECRETARY_ACK
 你是用户的秘书。请对用户刚刚的消息做一个“快速确认”，满足：
 - 只输出一句中文，不要分析，不要列清单
 - 不要调用任何工具
-- 8~18 个字，尽量点出/复述 1 个关键信息，避免固定模板
+- 6~14 个字，语气自然（像真人助理），不要使用“已记下/已记录/收到您的…请求”等机械句式
+- 如果用户在问进度/状态/数量，优先回复“我看看/我查一下”这类短句
+- 尽量点出/复述 1 个关键信息，避免固定模板
 `
 
 const secretaryTriageSystemPrompt = `

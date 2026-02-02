@@ -172,8 +172,11 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	if strings.TrimSpace(r1.SessionID) == "" || r1.MessageID == 0 || r1.AckMessageID == 0 {
 		t.Fatalf("unexpected inbox response: %+v", r1)
 	}
-	if !strings.Contains(r1.AckText, "已记下") || !strings.Contains(r1.AckText, "整理") {
-		t.Fatalf("expected ack to reference message, got %q", r1.AckText)
+	if strings.TrimSpace(r1.AckText) == "" {
+		t.Fatalf("expected non-empty ack text")
+	}
+	if strings.Contains(r1.AckText, "已记下") || strings.Contains(r1.AckText, "已记录") {
+		t.Fatalf("expected ack to avoid mechanical phrasing, got %q", r1.AckText)
 	}
 
 	var r2 inboxResp
@@ -190,7 +193,7 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	var sess struct {
 		ID       string `json:"id"`
 		Messages []struct {
-			ID       uint  `json:"id"`
+			ID       uint   `json:"id"`
 			Role     string `json:"role"`
 			Type     string `json:"type"`
 			Content  string `json:"content"`
@@ -217,11 +220,11 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 
 	type triageResp struct {
-		SummaryMessage   string   `json:"summary_message"`
-		SummaryMessageID uint     `json:"summary_message_id"`
-		CursorMessageID  uint     `json:"cursor_message_id"`
-		CreatedTaskIDs   []string `json:"created_task_ids"`
-		Questions        []string `json:"questions"`
+		SummaryMessage    string   `json:"summary_message"`
+		SummaryMessageID  uint     `json:"summary_message_id"`
+		CursorMessageID   uint     `json:"cursor_message_id"`
+		CreatedTaskIDs    []string `json:"created_task_ids"`
+		Questions         []string `json:"questions"`
 		WorkspacesCreated []string `json:"workspaces_created"`
 	}
 
@@ -254,8 +257,8 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 
 	var tr2 triageResp
 	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/triage", map[string]any{
-		"session_id":         r1.SessionID,
-		"cursor_message_id":  0,
+		"session_id":        r1.SessionID,
+		"cursor_message_id": 0,
 	}, &tr2)
 	if len(tr2.CreatedTaskIDs) != len(tr1.CreatedTaskIDs) {
 		t.Fatalf("expected same tasks on retry, got %+v vs %+v", tr2.CreatedTaskIDs, tr1.CreatedTaskIDs)
@@ -319,5 +322,94 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 	if len(st.TriageRuns) == 0 {
 		t.Fatalf("expected triage_runs in state")
+	}
+}
+
+func TestServer_SecretaryTriage_ProgressQuery_ReturnsWorkspaceStats(t *testing.T) {
+	poolRoot := t.TempDir()
+	t.Setenv("ONEAGENT_WORKSPACE_POOL_DIR", poolRoot)
+
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	// Minimal task runner to satisfy secretary triage dependencies.
+	rt.TaskRunner = &taskqueue.TaskRunner{
+		Store: rt.Tasks,
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, _ *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+	}
+	if err := rt.TaskRunner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+
+	// Prepare an ephemeral workspace under pool root so progress query can scan files.
+	workspace := filepath.Join(poolRoot, "ws-progress")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "chapter1.md"), []byte(strings.Repeat("a", 12000)), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	// Create a queued task in the same workspace.
+	if _, err := rt.Tasks.CreateTask("local", workspace, "write", "p", "", taskqueue.Limits{}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	var inboxResp struct {
+		SessionID string `json:"session_id"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content":   "写了多少了？",
+		"workspace": workspace,
+	}, &inboxResp)
+	if strings.TrimSpace(inboxResp.SessionID) == "" {
+		t.Fatalf("expected session id")
+	}
+
+	var triageResp struct {
+		SummaryMessage    string   `json:"summary_message"`
+		CreatedTaskIDs    []string `json:"created_task_ids"`
+		WorkspacesCreated []string `json:"workspaces_created"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/triage", map[string]any{
+		"session_id": inboxResp.SessionID,
+	}, &triageResp)
+
+	if len(triageResp.CreatedTaskIDs) != 0 {
+		t.Fatalf("expected no tasks dispatched for progress query, got %+v", triageResp.CreatedTaskIDs)
+	}
+	if len(triageResp.WorkspacesCreated) != 0 {
+		t.Fatalf("expected no workspaces created for progress query, got %+v", triageResp.WorkspacesCreated)
+	}
+	if !strings.Contains(triageResp.SummaryMessage, "还在运行中") {
+		t.Fatalf("expected summary to include running status, got %q", triageResp.SummaryMessage)
+	}
+	if !strings.Contains(triageResp.SummaryMessage, "一共有") || !strings.Contains(triageResp.SummaryMessage, "文件") || !strings.Contains(triageResp.SummaryMessage, "字") {
+		t.Fatalf("expected summary to include workspace stats, got %q", triageResp.SummaryMessage)
 	}
 }

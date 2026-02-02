@@ -1614,7 +1614,6 @@ const enqueueRecoveryItems = (rawItems: any) => {
 const formatRecoveryAsk = (item: SecretaryRecoveryItem, index: number, total: number) => {
   const title = String(item?.title || '').trim() || '任务'
   const status = String(item?.status || '').trim()
-  const header = total >= 2 ? `（${index}/${total}）` : ''
 
   const reason = truncateForChat(item?.error || item?.observer?.reason || item?.summary, 180)
   const nextSteps = truncateForChat(item?.observer?.next_steps, 240)
@@ -1623,13 +1622,18 @@ const formatRecoveryAsk = (item: SecretaryRecoveryItem, index: number, total: nu
     : []
 
   const lines: string[] = []
-  lines.push(`${header}${title}${status ? `（${status}）` : ''}`)
-  if (reason) lines.push(`原因：${reason}`)
-  if (nextSteps) lines.push(`下一步：${nextSteps}`)
+  if (index > 1 && total >= 2) {
+    lines.push(`另外还有一件事需要你确认：${title}`)
+  } else {
+    lines.push(`有个任务需要你确认：${title}`)
+  }
+  if (status) lines.push(`当前状态：${status}`)
+  if (reason) lines.push(`发生了什么：${reason}`)
   if (questions.length > 0) {
     lines.push(`需要你确认：${questions.map((q, i) => `${i + 1}) ${truncateForChat(q, 120)}`).join(' ')}`)
   }
-  lines.push('请直接回复你的决定/补充，我来继续推进。')
+  if (nextSteps) lines.push(`我建议下一步：${nextSteps}`)
+  lines.push('你直接回复你的决定/补充，我来继续推进。')
   return lines.join('\n')
 }
 
@@ -1643,15 +1647,6 @@ const maybeStartRecoveryConversation = () => {
     const n = secretaryRecoveryQueue.value.length
     secretaryRecoveryHandled.value = 0
     secretaryRecoveryTotal.value = n
-    const intro = n >= 2 ? `我这里有 ${n} 个事情，接下来一个个请示。` : '我这里有 1 个事情，需要你确认。'
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'assistant',
-      type: 'text',
-      content: intro,
-      createdAt: new Date(),
-      isStreaming: false,
-    })
     secretaryRecoveryIntroSent.value = true
   }
 
@@ -1717,7 +1712,7 @@ const onRecoveryAction = (raw: any) => {
       id: Date.now(),
       role: 'assistant',
       type: 'text',
-      content: `收到。我已按你的操作继续推进：${title}（task=${shortID}）。`,
+      content: `好，我继续推进：${title}（task=${shortID}）。`,
       createdAt: new Date(),
       isStreaming: false,
     })
@@ -1769,7 +1764,7 @@ const sendRecoveryReply = async (rawMessage: string) => {
       id: Date.now(),
       role: 'assistant',
       type: 'text',
-      content: `收到。我已按你的回复继续推进：${title}（task=${shortID}）。`,
+      content: `明白，我继续推进：${title}（task=${shortID}）。`,
       createdAt: new Date(),
       isStreaming: false,
     })
