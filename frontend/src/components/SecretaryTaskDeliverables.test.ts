@@ -246,6 +246,68 @@ it("enters full mode and navigates to tasks when troubleshooting from secretary 
   wrapper.unmount();
 });
 
+it("opens trace modal when troubleshooting a failed task with trace (stay in secretary mode)", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  const { useUIStore } = await import("@/stores/ui");
+  const ui = useUIStore();
+  ui.setMode("secretary");
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+          trace_log_path: "/tmp/ws/trace.jsonl",
+        },
+      ],
+    },
+  ]);
+
+  mocks.getTaskAttemptArtifact.mockResolvedValueOnce({
+    path: "/tmp/ws/trace.jsonl",
+    content: "{\"type\":\"error\",\"error\":\"boom\"}\n",
+    truncated: false,
+  });
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  await wrapper.get('[data-testid="secretary-task-recovery-troubleshoot"]').trigger("click");
+  await flushPromises();
+
+  expect(ui.mode).toBe("secretary");
+  expect(mocks.routerPush).not.toHaveBeenCalled();
+  expect(mocks.getTaskAttemptArtifact).toHaveBeenCalledWith("t1", "a1", "trace");
+  expect(wrapper.find('[data-testid="secretary-task-artifact-modal"]').exists()).toBe(
+    true,
+  );
+  expect(wrapper.text()).toContain("\"type\":\"error\"");
+
+  wrapper.unmount();
+});
+
 it("emits task-completed when a running task finishes (no history replay)", async () => {
   vi.stubGlobal("localStorage", makeLocalStorage());
 

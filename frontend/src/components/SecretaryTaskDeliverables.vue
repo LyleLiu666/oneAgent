@@ -301,7 +301,18 @@ const onResume = async (taskId: string) => {
   }
 }
 
-const onTroubleshoot = async () => {
+const onTroubleshoot = async (card?: RecoveryCard) => {
+  const tid = String(card?.task?.id || '').trim()
+  const aid = String(card?.attempt?.id || '').trim()
+
+  if (tid && aid && Array.isArray(card?.artifacts)) {
+    const trace = card.artifacts.find((a) => String(a?.kind || '').trim() === 'trace')
+    if (trace) {
+      await openArtifactModal(tid, aid, trace)
+      return
+    }
+  }
+
   ui.setMode('full')
   await router.push('/tasks')
 }
@@ -474,7 +485,7 @@ onUnmounted(() => {
                 type="button"
                 data-testid="secretary-task-recovery-troubleshoot"
                 class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
-                @click="onTroubleshoot"
+                @click="onTroubleshoot(card)"
               >
                 排障
               </button>
