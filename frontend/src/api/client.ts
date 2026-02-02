@@ -670,6 +670,19 @@ export async function getTaskAttemptArtifact(
   );
 }
 
+export async function getWorkflowNodeArtifact(
+  workflowId: string,
+  runId: string,
+  nodeId: string,
+  kind: string,
+  workspace: string,
+): Promise<TaskAttemptArtifactContent> {
+  const qs = new URLSearchParams({ workspace });
+  return api(
+    `/api/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/artifacts/${encodeURIComponent(kind)}?${qs.toString()}`,
+  );
+}
+
 export async function getSubagentRunArtifact(
   sessionId: string,
   runId: string,
@@ -744,6 +757,9 @@ export interface WorkflowGraphNode {
   node_id: string;
   title?: string;
   prompt?: string;
+  principal_id?: string;
+  model_id?: string;
+  skills?: string[];
 }
 
 export interface WorkflowGraphEdge {

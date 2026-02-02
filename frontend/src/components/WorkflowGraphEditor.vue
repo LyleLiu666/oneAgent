@@ -37,7 +37,14 @@ const generateNodeId = () => {
 };
 
 const addNode = () => {
-  const node: WorkflowGraphNode = { node_id: generateNodeId(), title: "", prompt: "" };
+  const node: WorkflowGraphNode = {
+    node_id: generateNodeId(),
+    title: "",
+    prompt: "",
+    principal_id: "",
+    model_id: "",
+    skills: [],
+  };
   updateGraph({ nodes: [...graph.value.nodes, node], edges: graph.value.edges });
 };
 
@@ -70,6 +77,18 @@ const addEdge = () => {
 const deleteEdge = (idx: number) => {
   const nextEdges = graph.value.edges.filter((_, i) => i !== idx);
   updateGraph({ nodes: graph.value.nodes, edges: nextEdges });
+};
+
+const formatSkills = (skills: unknown): string => {
+  if (!Array.isArray(skills)) return "";
+  return skills.map((s) => String(s || "").trim()).filter(Boolean).join(", ");
+};
+
+const parseSkills = (raw: string): string[] => {
+  return String(raw || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 };
 </script>
 
@@ -127,6 +146,41 @@ const deleteEdge = (idx: number) => {
                 :value="node.prompt || ''"
                 placeholder="Optional prompt"
                 @input="updateNode(node.node_id, { prompt: ($event.target as HTMLTextAreaElement).value })"
+              />
+            </label>
+          </div>
+
+          <div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <label class="block">
+              <div class="text-xs text-surface-500">principal_id</div>
+              <input
+                :data-testid="`workflow-node-${node.node_id}-principal`"
+                class="mt-1 w-full rounded-lg border border-surface-800 bg-surface-950/40 px-3 py-2 text-sm text-surface-200 placeholder:text-surface-600"
+                :value="node.principal_id || ''"
+                placeholder="Optional principal (default: current user)"
+                @input="
+                  updateNode(node.node_id, { principal_id: ($event.target as HTMLInputElement).value })
+                "
+              />
+            </label>
+            <label class="block">
+              <div class="text-xs text-surface-500">model_id</div>
+              <input
+                :data-testid="`workflow-node-${node.node_id}-model`"
+                class="mt-1 w-full rounded-lg border border-surface-800 bg-surface-950/40 px-3 py-2 text-sm text-surface-200 placeholder:text-surface-600"
+                :value="node.model_id || ''"
+                placeholder="Optional model (default: user's default model)"
+                @input="updateNode(node.node_id, { model_id: ($event.target as HTMLInputElement).value })"
+              />
+            </label>
+            <label class="block">
+              <div class="text-xs text-surface-500">skills</div>
+              <input
+                :data-testid="`workflow-node-${node.node_id}-skills`"
+                class="mt-1 w-full rounded-lg border border-surface-800 bg-surface-950/40 px-3 py-2 text-sm text-surface-200 placeholder:text-surface-600"
+                :value="formatSkills(node.skills)"
+                placeholder="Comma-separated skill IDs"
+                @input="updateNode(node.node_id, { skills: parseSkills(($event.target as HTMLInputElement).value) })"
               />
             </label>
           </div>
@@ -202,4 +256,3 @@ const deleteEdge = (idx: number) => {
     </section>
   </div>
 </template>
-

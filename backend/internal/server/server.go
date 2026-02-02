@@ -176,6 +176,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/workflows/:id/publish", handler.PublishWorkflowVersion)
 		api.POST("/workflows/:id/runs", handler.CreateWorkflowRun)
 		api.GET("/workflows/:id/runs/:run_id", handler.GetWorkflowRun)
+		api.GET("/workflows/:id/runs/:run_id/nodes/:node_id/artifacts/:kind", handler.GetWorkflowNodeArtifact)
 		api.POST("/workflows/:id/runs/:run_id/execute", handler.ExecuteWorkflowRun)
 		api.POST("/workflows/:id/runs/:run_id/cancel", handler.CancelWorkflowRun)
 

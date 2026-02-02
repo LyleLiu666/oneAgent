@@ -113,6 +113,16 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		return nil, err
 	}
 
+	// Optional workflow artifacts root override (best-effort).
+	if strings.TrimSpace(cfg.WorkflowArtifactsRoot) != "" {
+		root := strings.TrimSpace(cfg.WorkflowArtifactsRoot)
+		if err := os.MkdirAll(root, 0o700); err == nil {
+			if s, err := workflow.NewStore(root); err == nil {
+				workflows = s
+			}
+		}
+	}
+
 	rt := &Runtime{
 		Config:     cfg,
 		Layout:     layout,
@@ -127,6 +137,9 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		Workflows:  workflows,
 	}
 	rt.bgCtx, rt.bgCancel = context.WithCancel(context.Background())
+
+	// Best-effort workflow run cleanup.
+	_ = workflows.CleanupOldRuns(context.Background(), cfg.WorkflowArtifactsRetentionDays, now)
 	return rt, nil
 }
 

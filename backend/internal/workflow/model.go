@@ -19,6 +19,10 @@ type Node struct {
 	NodeID string `json:"node_id"`
 	Title  string `json:"title,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
+
+	PrincipalID string   `json:"principal_id,omitempty"`
+	ModelID     string   `json:"model_id,omitempty"`
+	Skills      []string `json:"skills,omitempty"`
 }
 
 type Edge struct {
@@ -27,9 +31,9 @@ type Edge struct {
 }
 
 type WorkflowVersion struct {
-	VersionID  string    `json:"version_id"`
-	WorkflowID string    `json:"workflow_id"`
-	Published  bool      `json:"published"`
+	VersionID   string    `json:"version_id"`
+	WorkflowID  string    `json:"workflow_id"`
+	Published   bool      `json:"published"`
 	PublishedAt time.Time `json:"published_at,omitempty"`
 
 	Graph Graph `json:"graph"`
@@ -87,8 +91,8 @@ type WorkflowRun struct {
 	VersionID     string `json:"version_id"`
 	WorkspaceRoot string `json:"workspace_root"`
 
-	GraphSnapshot Graph            `json:"graph_snapshot"`
-	Inputs        map[string]any   `json:"inputs,omitempty"`
+	GraphSnapshot Graph              `json:"graph_snapshot"`
+	Inputs        map[string]any     `json:"inputs,omitempty"`
 	NodeRuns      map[string]NodeRun `json:"node_runs,omitempty"`
 
 	Status     RunStatus `json:"status"`

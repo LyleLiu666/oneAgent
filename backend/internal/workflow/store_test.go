@@ -150,3 +150,44 @@ func TestStore_RenameAndDeleteWorkflow(t *testing.T) {
 		t.Fatalf("expected empty list after delete, got %+v", list)
 	}
 }
+
+func TestStore_PublishVersion_PersistsNodeExecutionConfig(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "workflows"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws := filepath.Join(t.TempDir(), "project-a")
+	ctx := context.Background()
+
+	wf, err := store.CreateWorkflow(ctx, ws, "Demo")
+	if err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+
+	graph := Graph{
+		Nodes: []Node{{
+			NodeID:      "writer",
+			Title:       "Writer",
+			Prompt:      "write",
+			PrincipalID: "principal-writer",
+			ModelID:     "model-writer",
+			Skills:      []string{"skill-a", "skill-b"},
+		}},
+	}
+	v, err := store.PublishVersion(ctx, ws, wf.WorkflowID, graph)
+	if err != nil {
+		t.Fatalf("PublishVersion: %v", err)
+	}
+	got, err := store.GetVersion(ctx, ws, wf.WorkflowID, v.VersionID)
+	if err != nil {
+		t.Fatalf("GetVersion: %v", err)
+	}
+	if len(got.Graph.Nodes) != 1 {
+		t.Fatalf("expected 1 node, got %+v", got.Graph.Nodes)
+	}
+	n := got.Graph.Nodes[0]
+	if n.PrincipalID != "principal-writer" || n.ModelID != "model-writer" || len(n.Skills) != 2 {
+		t.Fatalf("unexpected node config: %+v", n)
+	}
+}

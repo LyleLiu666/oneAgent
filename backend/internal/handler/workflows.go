@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
 	"github.com/liu_y/oneAgent/backend/internal/workflow"
+	"github.com/liu_y/oneAgent/backend/internal/workflowexec"
 )
 
 type createWorkflowRequest struct {
@@ -227,12 +227,6 @@ type executeRunRequest struct {
 	Concurrency   int    `json:"concurrency,omitempty"`
 }
 
-type noopExecutor struct{}
-
-func (e noopExecutor) ExecuteNode(_ context.Context, _ workflow.WorkflowRun, _ workflow.Node) (workflow.ArtifactManifest, error) {
-	return workflow.ArtifactManifest{Artifacts: nil}, nil
-}
-
 func ExecuteWorkflowRun(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Workflows == nil {
@@ -258,7 +252,23 @@ func ExecuteWorkflowRun(c *gin.Context) {
 		return
 	}
 
-	run, err := rt.Workflows.RunWorkflow(c.Request.Context(), req.WorkspaceRoot, workflowID, runID, noopExecutor{}, workflow.RunOptions{
+	principalID := strings.TrimSpace(middleware.GetUserID(c))
+	if principalID == "" {
+		principalID = "local"
+	}
+
+	exec, cleanup, err := workflowexec.Prepare(c.Request.Context(), rt, rt.Workflows, principalID, workflowexec.PrepareOptions{
+		WorkspaceRoot: req.WorkspaceRoot,
+		WorkflowID:    workflowID,
+		RunID:         runID,
+	})
+	if err != nil {
+		RespondError(c, http.StatusBadRequest, err)
+		return
+	}
+	defer cleanup()
+
+	run, err := rt.Workflows.RunWorkflow(c.Request.Context(), req.WorkspaceRoot, workflowID, runID, exec, workflow.RunOptions{
 		Concurrency: req.Concurrency,
 	})
 	if err != nil {

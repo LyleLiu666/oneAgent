@@ -35,7 +35,37 @@ func TestServer_WorkflowsAPI_CreatePublishRunExecute(t *testing.T) {
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
-	workspace := "/tmp/ws-demo"
+	workspace := t.TempDir()
+
+	// Mock LLM provider used by workflow execution.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// One content chunk + DONE (no tool calls).
+		_, _ = w.Write([]byte("data: {\"id\":\"cmpl-test\",\"choices\":[{\"delta\":{\"content\":\"<subagent_handoff><summary>ok</summary><timeline>## 流水账\\n- done</timeline><findings>## Findings\\n- ok</findings><changed_files>## 变更文件\\n- （无）</changed_files></subagent_handoff>\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	t.Cleanup(mock.Close)
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
 
 	// Create workflow.
 	body := bytes.NewReader([]byte(`{"workspace_root":"` + workspace + `","name":"Demo"}`))

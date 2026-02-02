@@ -46,6 +46,14 @@ type Config struct {
 
 	LogRetentionDays int
 
+	// WorkflowArtifactsRoot overrides the default workflow store root.
+	// When empty, defaults to <ONEAGENT_HOME>/.oneagent/data/workflows.
+	WorkflowArtifactsRoot string
+
+	// WorkflowArtifactsRetentionDays controls best-effort cleanup for finished workflow runs.
+	// When <=0, defaults to 30.
+	WorkflowArtifactsRetentionDays int
+
 	// Deprecated / unsupported (kept only to provide a clear error message if set).
 	DatabaseURL string
 }
@@ -64,6 +72,9 @@ type LoadOptions struct {
 	BashRootDir string
 
 	LogRetentionDays int
+
+	WorkflowArtifactsRoot          string
+	WorkflowArtifactsRetentionDays int
 }
 
 var AppConfig *Config
@@ -119,13 +130,15 @@ func GetConfig() *Config {
 
 func defaultConfig() *Config {
 	return &Config{
-		Profile:          "local",
-		Bind:             "",
-		Port:             "8080",
-		AuthMode:         "token",
-		EnableTrace:      false,
-		BashRootDir:      "",
-		LogRetentionDays: 30,
+		Profile:                        "local",
+		Bind:                           "",
+		Port:                           "8080",
+		AuthMode:                       "token",
+		EnableTrace:                    false,
+		BashRootDir:                    "",
+		LogRetentionDays:               30,
+		WorkflowArtifactsRoot:          "",
+		WorkflowArtifactsRetentionDays: 30,
 	}
 }
 
@@ -144,6 +157,9 @@ type configFile struct {
 	BashRootDir *string `yaml:"bash_root_dir"`
 
 	LogRetentionDays *int `yaml:"log_retention_days"`
+
+	WorkflowArtifactsRoot          *string `yaml:"workflow_artifacts_root"`
+	WorkflowArtifactsRetentionDays *int    `yaml:"workflow_artifacts_retention_days"`
 }
 
 func loadConfigFile(cfg *Config) error {
@@ -191,6 +207,12 @@ func loadConfigFile(cfg *Config) error {
 	if parsed.LogRetentionDays != nil {
 		cfg.LogRetentionDays = *parsed.LogRetentionDays
 	}
+	if parsed.WorkflowArtifactsRoot != nil {
+		cfg.WorkflowArtifactsRoot = *parsed.WorkflowArtifactsRoot
+	}
+	if parsed.WorkflowArtifactsRetentionDays != nil {
+		cfg.WorkflowArtifactsRetentionDays = *parsed.WorkflowArtifactsRetentionDays
+	}
 
 	return nil
 }
@@ -226,6 +248,14 @@ func applyEnv(cfg *Config) {
 			cfg.LogRetentionDays = n
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("WORKFLOW_ARTIFACTS_ROOT")); v != "" {
+		cfg.WorkflowArtifactsRoot = v
+	}
+	if v := strings.TrimSpace(os.Getenv("WORKFLOW_ARTIFACTS_RETENTION_DAYS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.WorkflowArtifactsRetentionDays = n
+		}
+	}
 
 	// Unsupported.
 	cfg.DatabaseURL = strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -257,6 +287,12 @@ func applyOptions(cfg *Config, opts LoadOptions) {
 	if opts.LogRetentionDays != 0 {
 		cfg.LogRetentionDays = opts.LogRetentionDays
 	}
+	if v := strings.TrimSpace(opts.WorkflowArtifactsRoot); v != "" {
+		cfg.WorkflowArtifactsRoot = v
+	}
+	if opts.WorkflowArtifactsRetentionDays != 0 {
+		cfg.WorkflowArtifactsRetentionDays = opts.WorkflowArtifactsRetentionDays
+	}
 }
 
 func normalize(cfg *Config) {
@@ -266,6 +302,7 @@ func normalize(cfg *Config) {
 	cfg.Port = strings.TrimSpace(cfg.Port)
 	cfg.BashRootDir = strings.TrimSpace(cfg.BashRootDir)
 	cfg.DefaultWorkspace = strings.TrimSpace(cfg.DefaultWorkspace)
+	cfg.WorkflowArtifactsRoot = strings.TrimSpace(cfg.WorkflowArtifactsRoot)
 
 	if cfg.AuthMode == "password" {
 		cfg.AuthMode = "token"
@@ -305,6 +342,16 @@ func normalize(cfg *Config) {
 
 	if cfg.LogRetentionDays <= 0 {
 		cfg.LogRetentionDays = 30
+	}
+
+	if cfg.WorkflowArtifactsRoot != "" {
+		expanded, err := expandPath(cfg.WorkflowArtifactsRoot)
+		if err == nil {
+			cfg.WorkflowArtifactsRoot = expanded
+		}
+	}
+	if cfg.WorkflowArtifactsRetentionDays <= 0 {
+		cfg.WorkflowArtifactsRetentionDays = 30
 	}
 }
 

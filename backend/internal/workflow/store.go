@@ -520,3 +520,127 @@ func writeJSONAtomic(path string, v any, mode os.FileMode) error {
 	}
 	return nil
 }
+
+// RunRoot returns the durable directory for a workflow run.
+//
+// Layout:
+//
+//	<storeRoot>/<workspaceKey>/workflows/<workflow_id>/runs/<run_id>/
+func (s *Store) RunRoot(workspaceRoot, workflowID, runID string) string {
+	if s == nil {
+		return ""
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	workflowID = strings.TrimSpace(workflowID)
+	runID = strings.TrimSpace(runID)
+	if workspaceRoot == "" || workflowID == "" || runID == "" {
+		return ""
+	}
+	return s.runDir(workspaceRoot, workflowID, runID)
+}
+
+// NodeRoot returns the durable directory for a node run within a workflow run.
+//
+// Layout:
+//
+//	<RunRoot>/nodes/<node_id>/
+func (s *Store) NodeRoot(workspaceRoot, workflowID, runID, nodeID string) string {
+	if s == nil {
+		return ""
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	workflowID = strings.TrimSpace(workflowID)
+	runID = strings.TrimSpace(runID)
+	nodeID = strings.TrimSpace(nodeID)
+	if workspaceRoot == "" || workflowID == "" || runID == "" || nodeID == "" {
+		return ""
+	}
+	return filepath.Join(s.runDir(workspaceRoot, workflowID, runID), "nodes", nodeID)
+}
+
+func (s *Store) EnsureNodeRoot(workspaceRoot, workflowID, runID, nodeID string) (string, error) {
+	root := s.NodeRoot(workspaceRoot, workflowID, runID, nodeID)
+	if root == "" {
+		return "", errors.New("node root is required")
+	}
+	if err := os.MkdirAll(filepath.Join(root, "deliverables"), 0o700); err != nil {
+		return "", fmt.Errorf("ensure deliverables dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "gates"), 0o700); err != nil {
+		return "", fmt.Errorf("ensure gates dir: %w", err)
+	}
+	return root, nil
+}
+
+// CleanupOldRuns removes finished workflow runs older than retentionDays.
+//
+// It is best-effort: individual deletion failures are ignored.
+func (s *Store) CleanupOldRuns(ctx context.Context, retentionDays int, now time.Time) error {
+	if s == nil {
+		return errors.New("store is nil")
+	}
+	_ = ctx
+
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	cutoff := now.Add(-time.Duration(retentionDays) * 24 * time.Hour)
+
+	wsDirs, err := os.ReadDir(s.root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	for _, wsEnt := range wsDirs {
+		if !wsEnt.IsDir() {
+			continue
+		}
+		wsDir := filepath.Join(s.root, wsEnt.Name())
+		wfsDir := filepath.Join(wsDir, "workflows")
+		wfs, err := os.ReadDir(wfsDir)
+		if err != nil {
+			continue
+		}
+		for _, wfEnt := range wfs {
+			if !wfEnt.IsDir() {
+				continue
+			}
+			wfDir := filepath.Join(wfsDir, wfEnt.Name())
+			runsDir := filepath.Join(wfDir, "runs")
+			runs, err := os.ReadDir(runsDir)
+			if err != nil {
+				continue
+			}
+			for _, runEnt := range runs {
+				if !runEnt.IsDir() {
+					continue
+				}
+				runDir := filepath.Join(runsDir, runEnt.Name())
+				runJSON := filepath.Join(runDir, "run.json")
+
+				data, err := os.ReadFile(runJSON)
+				if err != nil {
+					continue
+				}
+				var run WorkflowRun
+				if err := json.Unmarshal(data, &run); err != nil {
+					continue
+				}
+				if run.FinishedAt.IsZero() {
+					continue
+				}
+				if run.Status == RunStatusRunning || run.Status == RunStatusQueued {
+					continue
+				}
+				if run.FinishedAt.Before(cutoff) {
+					_ = os.RemoveAll(runDir)
+				}
+			}
+		}
+	}
+
+	return nil
+}
