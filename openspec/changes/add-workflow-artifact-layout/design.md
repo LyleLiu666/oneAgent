@@ -10,6 +10,7 @@
 ## Non-goals
 - 不做跨机器的远程 artifact 存储（S3/OSS）与分发。
 - 不在节点间传输文件内容（即使是小文件也不走 prompt/tool payload）。
+- 不尝试把“跨机/外部 agent 执行”的安全与回溯留在当前 oneAgent 服务里：若节点在外部系统执行，则应由外部系统负责其权限边界与证据链存储；oneAgent 仅保留最小化的指针/摘要（例如 run_id / request_id / 外部报告链接）用于索引与跳转（best-effort）。
 
 ## Key idea
 把 **node_run 的交付物目录（artifact root）**当成“节点交付的唯一真相来源”，并将其置于**可持久化的工作流存储**中。
@@ -41,6 +42,15 @@
 - **不做强限制**（不要求 copy-on-write），避免和真实工作流冲突
 - **尽量留痕**：每个 node_run 生成 best-effort 的 `diff_from_inputs` 证据（例如把输入 artifacts 导出的文件与本节点导出的文件做 diff；或记录 git patch）
 - **推荐但不强制**：文档类交付建议“加法/新文件”优先；代码类交付允许修改并依赖 review/diff 证据链
+
+## Scope note: local-first
+本 change 的落地假设是 **workspace 与执行环境在同一台机器（local-first）**，因此：
+- artifacts 以 OS 路径指针为主（绝对路径 + UI 展示相对路径）
+- “可追溯过程”主要落在本机的文件与日志中（符合 current oneAgent 的 local runtime 画像）
+
+当未来引入“跨机/外部 agent 节点”时，本 change 不尝试让 oneAgent 承担其安全与回溯存储；建议单独拆 capability：
+- 外部执行平台负责：权限隔离、日志/交付物存储、可审计证据链
+- oneAgent 仅保存：最小索引（外部 run_id/request_id）与可跳转链接（best-effort）
 
 ## Canonical layout
 术语：
