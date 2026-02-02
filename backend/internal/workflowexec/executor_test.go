@@ -23,6 +23,7 @@ func (r fakeResolver) ResolveClient(_ context.Context, _ string, _ string) (llm.
 
 type fakeToolClient struct {
 	content string
+	seen    []llm.ChatMessage
 }
 
 func (c *fakeToolClient) ChatCompletion(_ context.Context, _ []llm.ChatMessage, _ *llm.ChatCompletionOptions) (string, error) {
@@ -33,7 +34,8 @@ func (c *fakeToolClient) ChatCompletionStream(_ context.Context, _ []llm.ChatMes
 	return nil
 }
 
-func (c *fakeToolClient) ChatCompletionWithTools(_ context.Context, _ []llm.ChatMessage, _ *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+func (c *fakeToolClient) ChatCompletionWithTools(_ context.Context, messages []llm.ChatMessage, _ *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+	c.seen = append([]llm.ChatMessage(nil), messages...)
 	return llm.ChatCompletionResult{Content: c.content}, nil
 }
 
@@ -76,6 +78,7 @@ func TestExecutor_ExportsDeliverablesAndWritesManifest(t *testing.T) {
 		Nodes: []workflow.Node{{
 			NodeID: "writer",
 			Prompt: "write an article",
+			Skills: []string{"s1"},
 		}},
 	})
 	if err != nil {
@@ -98,10 +101,11 @@ func TestExecutor_ExportsDeliverablesAndWritesManifest(t *testing.T) {
 </subagent_handoff>
 `)
 
+	fakeClient := &fakeToolClient{content: handOff}
 	exec := &Executor{
 		Store:              store,
 		Runtime:            rt,
-		Resolver:           fakeResolver{client: &fakeToolClient{content: handOff}},
+		Resolver:           fakeResolver{client: fakeClient},
 		DefaultPrincipalID: "local",
 		WorkspaceRoot:      ws,
 		ExecutionRoot:      ws,
@@ -144,5 +148,16 @@ func TestExecutor_ExportsDeliverablesAndWritesManifest(t *testing.T) {
 	}
 	if _, err := os.Stat(foundManifest); err != nil {
 		t.Fatalf("expected manifest file to exist: %v", err)
+	}
+
+	sawSkills := false
+	for _, m := range fakeClient.seen {
+		if strings.Contains(m.Content, "技能建议") && strings.Contains(m.Content, "s1") {
+			sawSkills = true
+			break
+		}
+	}
+	if !sawSkills {
+		t.Fatalf("expected skills summary in prompt")
 	}
 }

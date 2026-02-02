@@ -19,6 +19,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
+	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 	"github.com/liu_y/oneAgent/backend/internal/workflow"
@@ -170,7 +171,7 @@ func (e *Executor) ExecuteNode(ctx context.Context, run workflow.WorkflowRun, no
 		task = nodeID
 	}
 
-	skillsSummary := ""
+	skillsSummary := buildSkillsSummary(ctx, e.Runtime.Skills, run.WorkspaceRoot, node.Skills)
 
 	result, runErr := subagent.Run(toolCtx, subagent.RunRequest{
 		ParentSessionID:   run.RunID,
@@ -720,4 +721,76 @@ func writeChangedFilesOnly(nodeRoot, workspaceRoot string, changedFiles []string
 		Reason:           "not a git workspace",
 		IsGitWorkspace:   false,
 	}
+}
+
+func buildSkillsSummary(ctx context.Context, manager *skill.Manager, workspaceRoot string, skillIDs []string) string {
+	if len(skillIDs) == 0 {
+		return ""
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot == "" {
+		return ""
+	}
+
+	loadCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	cat, err := manager.Load(loadCtx, workspaceRoot)
+	cancel()
+	if err != nil || cat == nil {
+		var b strings.Builder
+		for _, raw := range skillIDs {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(name)
+			b.WriteString("\n")
+		}
+		if b.Len() == 0 {
+			return ""
+		}
+		b.WriteString("（注意：当前环境无法加载技能目录；如可用请调用 `skill_read` 读取技能详情；兼容旧名：`skill.read`。）\n")
+		return b.String()
+	}
+
+	seen := make(map[string]bool)
+	var b strings.Builder
+	for _, raw := range skillIDs {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		s, ok := cat.ByID(name)
+		if !ok {
+			s, ok = cat.ByName(name)
+		}
+		if ok {
+			b.WriteString("- ")
+			b.WriteString(strings.TrimSpace(s.Name))
+			b.WriteString(": ")
+			if strings.TrimSpace(s.Description) != "" {
+				b.WriteString(strings.TrimSpace(s.Description))
+			} else {
+				b.WriteString("（无描述）")
+			}
+			b.WriteString(" (")
+			b.WriteString(string(s.Source))
+			b.WriteString(")\n")
+			continue
+		}
+		b.WriteString("- ")
+		b.WriteString(name)
+		b.WriteString(": （未找到该 skill）\n")
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	b.WriteString("如需使用某个技能，请先调用 `skill_read`（按技能名称）读取该技能的 `SKILL.md`（兼容旧名：`skill.read`）。\n")
+	return b.String()
 }
