@@ -1783,7 +1783,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex h-full bg-surface-950 overflow-hidden">
+  <div class="flex h-full min-h-0 bg-surface-950 overflow-hidden">
     
     <!-- History Sidebar -->
     <ChatHistoryList
@@ -1794,7 +1794,7 @@ onMounted(async () => {
     />
 
     <!-- Main Chat Area -->
-    <div class="flex-1 flex flex-col h-full min-w-0 bg-surface-950 relative">
+    <div class="flex-1 flex flex-col h-full min-h-0 min-w-0 bg-surface-950 relative">
       
       <!-- Toggle History Button / Header -->
       <div v-if="!showHistory" class="absolute top-4 left-4 z-20">
@@ -1951,7 +1951,7 @@ onMounted(async () => {
       <!-- Messages area -->
       <div
         ref="messagesContainer"
-        class="flex-1 overflow-y-auto px-4 py-6 space-y-6"
+        class="flex-1 min-h-0 overflow-y-auto px-4 py-6 space-y-6"
         @scroll="handleScroll"
       >
         <div v-if="loadingHistory" class="flex items-center justify-center py-6 text-surface-400">

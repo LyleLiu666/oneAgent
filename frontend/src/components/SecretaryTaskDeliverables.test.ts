@@ -319,3 +319,52 @@ it("emits task-completed when a running task finishes (no history replay)", asyn
 
   wrapper.unmount();
 });
+
+it("uses readable warning accents in light mode", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  const recovery = wrapper.get('[data-testid="secretary-task-recovery"]');
+  const heading = recovery.get("div.text-xs.font-semibold");
+  expect(heading.classes()).toContain("text-amber-800");
+  expect(heading.classes()).toContain("dark:text-amber-200");
+
+  const resume = wrapper.get('[data-testid="secretary-task-recovery-resume"]');
+  expect(resume.classes()).toContain("text-amber-900");
+  expect(resume.classes()).toContain("dark:text-amber-100");
+
+  wrapper.unmount();
+});

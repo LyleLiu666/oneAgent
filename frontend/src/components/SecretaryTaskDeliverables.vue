@@ -314,8 +314,8 @@ onUnmounted(() => {
       class="mb-3 rounded-2xl border border-amber-500/20 bg-amber-500/5 backdrop-blur px-4 py-3"
     >
       <div class="flex items-center justify-between gap-3">
-        <div class="text-xs font-semibold text-amber-200 tracking-wide">需要处理</div>
-        <div class="text-[11px] text-amber-200/70">最近 {{ recoveryCards.length }} 个任务</div>
+        <div class="text-xs font-semibold text-amber-800 dark:text-amber-200 tracking-wide">需要处理</div>
+        <div class="text-[11px] text-amber-700/80 dark:text-amber-200/70">最近 {{ recoveryCards.length }} 个任务</div>
       </div>
 
       <ErrorBanner v-if="recoveryError" :error="recoveryError" title="操作失败" class="mt-3" />
@@ -360,7 +360,7 @@ onUnmounted(() => {
             <button
               type="button"
               data-testid="secretary-task-recovery-resume"
-              class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
+              class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-900 dark:text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
               :disabled="Boolean(recoverySubmittingTaskId)"
               @click="onResume(card.task.id)"
             >

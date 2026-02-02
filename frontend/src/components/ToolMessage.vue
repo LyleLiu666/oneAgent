@@ -216,7 +216,7 @@ const loadSubagentArtifact = async (kind: 'trace' | 'findings') => {
 	            <span class="text-[11px] text-surface-500">{{ subtitle }}</span>
 	            <span
 	              v-if="approvalInfo?.kind === 'required'"
-	              class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px]"
+	              class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 text-[10px]"
 	            >
 	              需要审批
 	            </span>

@@ -103,6 +103,32 @@ it('keeps session header above messages (for tool popover)', async () => {
     expect(header.classes()).toContain('z-30')
 })
 
+it('allows messages pane to scroll (min-h-0)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+
+    const messages = wrapper.get({ ref: 'messagesContainer' })
+    expect(messages.classes()).toContain('min-h-0')
+})
+
 it('does not render tool_result output as a giant text bubble in secretary mode', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {

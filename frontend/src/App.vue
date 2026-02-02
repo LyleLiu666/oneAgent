@@ -3,8 +3,11 @@ import { computed } from 'vue'
 import { RouterView } from 'vue-router'
 import { useRoute } from 'vue-router'
 import Sidebar from '@/components/Sidebar.vue'
+import { initTheme } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
+
+initTheme()
 
 const authStore = useAuthStore()
 const uiStore = useUIStore()
