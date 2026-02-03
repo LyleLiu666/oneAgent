@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -12,12 +13,15 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/llmlog"
+	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 	"github.com/liu_y/oneAgent/backend/internal/workflow"
 	"github.com/liu_y/oneAgent/backend/internal/workledger"
+
+	"github.com/google/uuid"
 )
 
 type Runtime struct {
@@ -29,6 +33,7 @@ type Runtime struct {
 	Pairing *PairingService
 
 	Settings *settingsdb.DB
+	Memory   *memorydb.DB
 	Sessions *sessionstore.Store
 	LLMLog   *llmlog.Writer
 	Skills   *skill.Manager
@@ -83,33 +88,44 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		return nil, err
 	}
 
+	memory, err := memorydb.Open(layout.MemoryDBPath)
+	if err != nil {
+		_ = settings.Close()
+		return nil, err
+	}
+
 	sessions, err := sessionstore.New(layout.SessionsDir)
 	if err != nil {
 		_ = settings.Close()
+		_ = memory.Close()
 		return nil, err
 	}
 
 	llmLogger, err := llmlog.New(layout.LLMLogsDir, cfg.LogRetentionDays)
 	if err != nil {
 		_ = settings.Close()
+		_ = memory.Close()
 		return nil, err
 	}
 
 	tasks, err := taskqueue.NewStore(layout.TasksDir)
 	if err != nil {
 		_ = settings.Close()
+		_ = memory.Close()
 		return nil, err
 	}
 
 	ledger, err := workledger.NewStore(layout.LedgerDir)
 	if err != nil {
 		_ = settings.Close()
+		_ = memory.Close()
 		return nil, err
 	}
 
 	workflows, err := workflow.NewStore(layout.WorkflowsDir)
 	if err != nil {
 		_ = settings.Close()
+		_ = memory.Close()
 		return nil, err
 	}
 
@@ -129,6 +145,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		AuthToken:  token,
 		Pairing:    NewPairingService(),
 		Settings:   settings,
+		Memory:     memory,
 		Sessions:   sessions,
 		LLMLog:     llmLogger,
 		Skills:     skill.NewManager(30 * time.Second),
@@ -201,17 +218,24 @@ func (r *Runtime) Close() error {
 			firstErr = err
 		}
 	}
+	if r.Memory != nil {
+		if err := r.Memory.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	return firstErr
 }
 
 type HealthStatus struct {
 	Status       string `json:"status"`
 	SettingsDBOK bool   `json:"settings_db"`
+	MemoryDBOK   bool   `json:"memory_db"`
 	DataDirOK    bool   `json:"data_dir"`
 	LogsDirOK    bool   `json:"logs_dir"`
 	AuthMode     string `json:"auth_mode"`
 	OneAgentHome string `json:"oneagent_home"`
 	SettingsDB   string `json:"settings_db_path"`
+	MemoryDB     string `json:"memory_db_path"`
 }
 
 func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
@@ -223,6 +247,7 @@ func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
 		AuthMode:     r.Config.AuthMode,
 		OneAgentHome: r.Layout.Home,
 		SettingsDB:   r.Layout.SettingsDBPath,
+		MemoryDB:     r.Layout.MemoryDBPath,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -235,6 +260,13 @@ func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
 		status.SettingsDBOK = true
 	}
 
+	if r.Memory == nil || r.Memory.HealthCheck(ctx) != nil {
+		status.Status = "degraded"
+		status.MemoryDBOK = false
+	} else {
+		status.MemoryDBOK = true
+	}
+
 	// Check directory writability by trying to create a temp file.
 	status.DataDirOK = canWriteDir(r.Layout.DataDir)
 	status.LogsDirOK = canWriteDir(r.Layout.LogsDir)
@@ -243,6 +275,34 @@ func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
 	}
 
 	return status, nil
+}
+
+const settingsKeySecretarySessionID = "secretary_session_id"
+
+// ResolveSecretarySessionID returns the canonical secretary session id for the given principal.
+// It is persisted to Settings and MUST remain stable across reloads and restarts (best-effort).
+func (r *Runtime) ResolveSecretarySessionID(ctx context.Context, principalID string) (string, error) {
+	if r == nil || r.Settings == nil {
+		return "", errors.New("runtime settings not initialized")
+	}
+	principalID = strings.TrimSpace(principalID)
+	if principalID == "" {
+		principalID = "local"
+	}
+
+	val, err := r.Settings.GetUserSetting(ctx, principalID, settingsKeySecretarySessionID)
+	if err == nil && strings.TrimSpace(val) != "" {
+		return strings.TrimSpace(val), nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+
+	id := uuid.NewString()
+	if err := r.Settings.SetUserSetting(ctx, principalID, settingsKeySecretarySessionID, id); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func canWriteDir(dir string) bool {

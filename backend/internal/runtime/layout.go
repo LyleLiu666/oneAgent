@@ -19,6 +19,7 @@ type Layout struct {
 	TmpDir    string
 
 	SettingsDBPath string
+	MemoryDBPath   string
 	AuthTokenPath  string
 
 	SessionsDir string
@@ -45,6 +46,7 @@ func EnsureLayout(home string) (*Layout, error) {
 		LogsDir:       filepath.Join(oneagentDir, "logs"),
 		TmpDir:        filepath.Join(oneagentDir, "tmp"),
 		SettingsDBPath: filepath.Join(oneagentDir, "settings.db"),
+		MemoryDBPath:   filepath.Join(oneagentDir, "memory.db"),
 		AuthTokenPath:  filepath.Join(oneagentDir, "config", "auth_token"),
 		SessionsDir:    filepath.Join(oneagentDir, "data", "sessions"),
 		TasksDir:       filepath.Join(oneagentDir, "data", "tasks"),

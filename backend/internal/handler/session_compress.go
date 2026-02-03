@@ -3,8 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -25,19 +23,9 @@ const (
 )
 
 // sessionCompressionMaxContextRunes returns the threshold after which the system will attempt to compress
-// the chat history. It is intentionally configurable for dev/diagnostics.
-//
-// Env overrides:
-// - ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES
+// the chat history.
 func sessionCompressionMaxContextRunes() int {
-	maxRunes := defaultSessionCompressionMaxContextRunes
-	if v := envInt("ONEAGENT_SESSION_COMPRESSION_MAX_CONTEXT_RUNES"); v > 0 {
-		maxRunes = v
-	}
-	if maxRunes < 1 {
-		return 1
-	}
-	return maxRunes
+	return defaultSessionCompressionMaxContextRunes
 }
 
 func approximateContextRunes(messages []llm.ChatMessage) int {
@@ -281,16 +269,4 @@ func buildCompressionFallbackMessages(persistedMessages []model.ChatMessage, llm
 	fallback = append(fallback, llmMessages[len(llmMessages)-1])
 
 	return fallback
-}
-
-func envInt(key string) int {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return 0
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0
-	}
-	return v
 }

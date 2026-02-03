@@ -13,6 +13,7 @@ declare module 'vue' {
     EventLogViewer: typeof import('./components/EventLogViewer.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    SecretaryChatBox: typeof import('./components/SecretaryChatBox.vue')['default']
     SecretaryStatusHints: typeof import('./components/SecretaryStatusHints.vue')['default']
     SecretaryTaskDeliverables: typeof import('./components/SecretaryTaskDeliverables.vue')['default']
     Sidebar: typeof import('./components/Sidebar.vue')['default']

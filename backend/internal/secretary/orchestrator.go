@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/model"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
@@ -29,6 +30,7 @@ type Orchestrator struct {
 	Sessions *sessionstore.Store
 	Tasks    *taskqueue.Store
 	Runner   *taskqueue.TaskRunner
+	Memory   *memorydb.DB
 
 	ResolveModel ResolveModelFunc
 
@@ -130,6 +132,18 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 	})
 	if err != nil {
 		return InboxAppendResult{}, err
+	}
+
+	// Best-effort: record a user-facing worklog entry so SW (or future agents) can sync it.
+	if o.Memory != nil {
+		_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
+			PrincipalID: userID,
+			Writer:      "SU",
+			Type:        "worklog",
+			Workspace:   workspace,
+			Title:       "user_message",
+			Content:     content,
+		})
 	}
 
 	return InboxAppendResult{
@@ -252,6 +266,17 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		meta := upsertState(session.Metadata, state)
 		_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
 
+		if o.Memory != nil {
+			_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
+				PrincipalID: userID,
+				Writer:      "SU",
+				Type:        "findings",
+				Workspace:   sessionWorkspace,
+				Title:       "progress_reply",
+				Content:     summary,
+			})
+		}
+
 		return TriageResult{
 			SummaryMessage:    summary,
 			SummaryMessageID:  summaryMsg.ID,
@@ -367,6 +392,17 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	meta := upsertState(session.Metadata, state)
 	_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
 
+	if o.Memory != nil {
+		_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
+			PrincipalID: userID,
+			Writer:      "SU",
+			Type:        "findings",
+			Workspace:   sessionWorkspace,
+			Title:       "triage_summary",
+			Content:     summary,
+		})
+	}
+
 	return TriageResult{
 		SummaryMessage:    summary,
 		SummaryMessageID:  summaryMsg.ID,
@@ -424,10 +460,11 @@ func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, meta
 	}
 
 	sys := strings.TrimSpace(secretaryAckSystemPrompt)
-	msgs := []llm.ChatMessage{
-		llm.BuildSystemMessage(sys),
-		llm.BuildUserMessage(userContent),
+	msgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
+	if injected := o.buildMemorySyncPrompt(ctx, userID, "SU", "SW"); strings.TrimSpace(injected) != "" {
+		msgs = append(msgs, llm.BuildUserMessage(injected))
 	}
+	msgs = append(msgs, llm.BuildUserMessage(userContent))
 
 	temp := 0.2
 	maxTokens := 80
@@ -475,10 +512,13 @@ func (o *Orchestrator) generateTriagePlan(ctx context.Context, userID string, me
 
 	temp := 0.2
 	maxTokens := 1500
-	out, err := client.ChatCompletion(ctx, []llm.ChatMessage{
-		llm.BuildSystemMessage(sys),
-		llm.BuildUserMessage(user),
-	}, &llm.ChatCompletionOptions{
+	requestMsgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
+	if injected := o.buildMemorySyncPrompt(ctx, userID, "SU", "SW"); strings.TrimSpace(injected) != "" {
+		requestMsgs = append(requestMsgs, llm.BuildUserMessage(injected))
+	}
+	requestMsgs = append(requestMsgs, llm.BuildUserMessage(user))
+
+	out, err := client.ChatCompletion(ctx, requestMsgs, &llm.ChatCompletionOptions{
 		Temperature: &temp,
 		MaxTokens:   &maxTokens,
 	})
@@ -508,6 +548,34 @@ func (o *Orchestrator) generateTriagePlan(ctx context.Context, userID string, me
 	}
 
 	return plan, resolvedID, nil
+}
+
+func (o *Orchestrator) buildMemorySyncPrompt(ctx context.Context, principalID, channel, peerWriter string) string {
+	if o == nil || o.Memory == nil {
+		return ""
+	}
+	res, err := o.Memory.PullSync(ctx, principalID, channel, peerWriter, 10)
+	if err != nil {
+		return ""
+	}
+	if len(res.Entries) == 0 && res.Omitted == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("[MEMORY_SYNC from=%s omitted=%d]\n", peerWriter, res.Omitted))
+	for _, e := range res.Entries {
+		title := strings.TrimSpace(e.Title)
+		if title == "" {
+			title = e.Type
+		}
+		content := strings.TrimSpace(e.Content)
+		if len([]rune(content)) > 500 {
+			content = truncateString(content, 500)
+		}
+		b.WriteString(fmt.Sprintf("- (%s) %s: %s\n", e.Writer, title, content))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func decodeState(meta model.JSONB) (State, bool) {

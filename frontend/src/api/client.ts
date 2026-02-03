@@ -324,6 +324,7 @@ export async function appendSecretaryInboxMessage(payload: {
 }
 
 export interface SecretaryTriageResponse {
+  session_id: string;
   summary_message: string;
   summary_message_id: number;
   cursor_message_id: number;
@@ -333,13 +334,14 @@ export interface SecretaryTriageResponse {
 }
 
 export async function secretaryTriage(payload: {
-  session_id: string;
+  session_id?: string;
   cursor_message_id?: number;
 }): Promise<SecretaryTriageResponse> {
   return api("/api/secretary/triage", { method: "POST", body: payload });
 }
 
 export interface SecretaryStateResponse {
+  session_id: string;
   cursor_message_id: number;
   triage_runs?: Array<{
     from_cursor: number;
@@ -353,9 +355,11 @@ export interface SecretaryStateResponse {
   }>;
 }
 
-export async function getSecretaryState(sessionId: string): Promise<SecretaryStateResponse> {
+export async function getSecretaryState(sessionId?: string): Promise<SecretaryStateResponse> {
   const id = String(sessionId || "").trim();
-  if (!id) throw new Error("sessionId is required");
+  if (!id) {
+    return api(`/api/secretary/state`);
+  }
   return api(`/api/secretary/state?session_id=${encodeURIComponent(id)}`);
 }
 

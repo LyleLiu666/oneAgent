@@ -813,6 +813,8 @@ const generateSessionId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+// Note: in Secretary Mode we MUST NOT invent session ids on the client.
+// The backend resolves a canonical permanent secretary session per principal.
 const ensureSessionId = () => {
   const existing = String(chatStore.currentSessionId || '').trim()
   if (existing) return existing
@@ -1452,7 +1454,6 @@ const scheduleSecretaryTriage = () => {
 
 const runSecretaryTriage = async () => {
   const sessionId = String(chatStore.currentSessionId || '').trim()
-  if (!sessionId) return
 
   if (secretaryTriageSubmitting.value) {
     secretaryTriageQueued.value = true
@@ -1461,10 +1462,17 @@ const runSecretaryTriage = async () => {
 
   secretaryTriageSubmitting.value = true
   try {
-    const res: any = await secretaryTriage({
-      session_id: sessionId,
+    const payload: any = {
       cursor_message_id: Number(secretaryCursorMessageId.value || 0),
-    })
+    }
+    if (sessionId) payload.session_id = sessionId
+
+    const res: any = await secretaryTriage(payload)
+
+    const serverSessionId = String(res?.session_id || '').trim()
+    if (serverSessionId && serverSessionId !== chatStore.currentSessionId) {
+      chatStore.setCurrentSession(serverSessionId)
+    }
 
     const nextCursor = Number(res?.cursor_message_id)
     if (Number.isFinite(nextCursor) && nextCursor >= 0) {
@@ -1498,7 +1506,7 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   if (loadingHistory.value) return
   if (secretaryInboxSubmitting.value) return
 
-  const ensuredSessionId = ensureSessionId()
+  const sessionId = String(chatStore.currentSessionId || '').trim()
 
   // Optimistically render user message so repeated submissions are less likely.
   const optimisticMessageId = Date.now()
@@ -1514,12 +1522,14 @@ const sendSecretaryMessage = async (rawMessage: string) => {
 
   secretaryInboxSubmitting.value = true
   try {
-    const res: any = await appendSecretaryInboxMessage({
-      session_id: ensuredSessionId,
+    const payload: any = {
       content: message,
       // Best-effort: bind workspace if the session already has one.
       workspace: String(sessionWorkspace.value || '').trim() || undefined,
-    })
+    }
+    if (sessionId) payload.session_id = sessionId
+
+    const res: any = await appendSecretaryInboxMessage(payload)
 
     const serverSessionId = String(res?.session_id || '').trim()
     if (serverSessionId && serverSessionId !== chatStore.currentSessionId) {
@@ -2061,35 +2071,51 @@ onMounted(async () => {
   await loadTools()
   await loadModels()
   await loadSessions()
-  const persistedId = chatStore.currentSessionId
-	  if (persistedId) {
-	    const exists = chatStore.sessions.some((s) => s.id === persistedId)
-	    if (exists) {
-	      await loadSessionMessages(persistedId)
-	      await attachIfNeeded(persistedId)
-	    } else {
-	      // Avoid requesting a non-existent session on boot.
-	      chatStore.clearMessages()
-	    }
-	  }
+
+  if (isSecretaryMode.value) {
+    try {
+      const st: any = await getSecretaryState()
+      const sid = String(st?.session_id || '').trim()
+      if (sid) {
+        await loadSessionMessages(sid)
+      } else {
+        chatStore.clearMessages()
+      }
+    } catch (error) {
+      console.warn('Failed to bootstrap secretary session:', error)
+      chatStore.clearMessages()
+    }
+  } else {
+    const persistedId = chatStore.currentSessionId
+    if (persistedId) {
+      const exists = chatStore.sessions.some((s) => s.id === persistedId)
+      if (exists) {
+        await loadSessionMessages(persistedId)
+        await attachIfNeeded(persistedId)
+      } else {
+        // Avoid requesting a non-existent session on boot.
+        chatStore.clearMessages()
+      }
+    }
+  }
 
   applyWorkspaceDefaultsForNewSession()
 })
 
-	onUnmounted(() => {
-	  try {
-	    activeStreamAbort.value?.abort()
-	  } catch {
-	    // ignore
-	  } finally {
-	    activeStreamAbort.value = null
-	  }
-	  if (secretaryTriageTimer) {
-	    clearTimeout(secretaryTriageTimer)
-	    secretaryTriageTimer = undefined
-	  }
-	  document.removeEventListener('click', handleDocumentClick)
-	})
+onUnmounted(() => {
+  try {
+    activeStreamAbort.value?.abort()
+  } catch {
+    // ignore
+  } finally {
+    activeStreamAbort.value = null
+  }
+  if (secretaryTriageTimer) {
+    clearTimeout(secretaryTriageTimer)
+    secretaryTriageTimer = undefined
+  }
+  document.removeEventListener('click', handleDocumentClick)
+})
 </script>
 
 <template>
