@@ -8,7 +8,7 @@
 ## 2. Implementation (after approval)
 - [x] 2.1 Introduce `backend/internal/agent/**` (AgentSpec + AgentFactory + AgentRuntime)
 - [x] 2.2 Add prompt stability tests (stable prefix / volatile context / cache key)
-- [ ] 2.3 Add structured output channel (tool-call first, fallback to loose tags)
+- [x] 2.3 Add structured output channel (tool-call first, fallback to loose tags)
 - [ ] 2.4 Migrate Secretary SW planner to AgentFactory (no more “strict JSON in text”)
 - [ ] 2.5 Migrate Secretary SU report generation to AgentFactory (optional; keep message list append-only)
 - [ ] 2.6 Keep Worker Chat behavior stable; migrate only if tests prove zero regression
