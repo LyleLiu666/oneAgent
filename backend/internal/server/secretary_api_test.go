@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -94,32 +93,42 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 			}
 		}
 
-		var content string
 		switch {
 		case strings.Contains(system, "ONEAGENT_SECRETARY_ACK"):
 			http.Error(w, "unexpected ack request (quick-ack is disabled)", http.StatusBadRequest)
 			return
 		case strings.Contains(system, "ONEAGENT_SECRETARY_TRIAGE"):
-			content = `{"summary_message":"我理解为 2 件事：①整理一份报告；②跑 backend 测试。我已分别安排 worker。","tasks":[{"title":"整理报告","prompt":"整理一份报告，输出 report.md，并确保内容结构清晰。","workspace_strategy":"new"},{"title":"跑 backend 测试","prompt":"在 repo 内运行 go test ./...，如失败请修复并补齐测试。","workspace_strategy":"session"}],"questions":[]}`
+			args := `{"intent":"dispatch","summary_message":"我理解为 2 件事：①整理一份报告；②跑 backend 测试。我已分别安排 worker。","tasks":[{"title":"整理报告","prompt":"整理一份报告，输出 report.md，并确保内容结构清晰。","workspace_strategy":"new"},{"title":"跑 backend 测试","prompt":"在 repo 内运行 go test ./...，如失败请修复并补齐测试。","workspace_strategy":"session"}],"questions":[]}`
+			resp := map[string]any{
+				"id": "cmpl-test",
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role":    "assistant",
+							"content": "",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "call_1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "secretary_triage_plan",
+										"arguments": args,
+									},
+								},
+							},
+						},
+						"finish_reason": "stop",
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(resp)
+			return
 		default:
 			http.Error(w, "unexpected system prompt", http.StatusBadRequest)
 			return
 		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-
-		chunk := map[string]any{
-			"id": "cmpl-test",
-			"choices": []any{
-				map[string]any{
-					"delta": map[string]any{"content": content},
-				},
-			},
-		}
-		data, _ := json.Marshal(chunk)
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-		_, _ = fmt.Fprintf(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(mock.Close)
 

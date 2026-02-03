@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/liu_y/oneAgent/backend/internal/agent"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/model"
@@ -533,6 +534,7 @@ func (o *Orchestrator) GetState(_ context.Context, userID, sessionID string) (St
 }
 
 type triagePlan struct {
+	Intent         string       `json:"intent,omitempty"`
 	SummaryMessage string       `json:"summary_message"`
 	Tasks          []triageTask `json:"tasks,omitempty"`
 	Questions      []string     `json:"questions,omitempty"`
@@ -542,6 +544,195 @@ type triageTask struct {
 	Title             string `json:"title"`
 	Prompt            string `json:"prompt"`
 	WorkspaceStrategy string `json:"workspace_strategy"`
+}
+
+func normalizeTriagePlan(plan *triagePlan) {
+	if plan == nil {
+		return
+	}
+	plan.Intent = strings.TrimSpace(plan.Intent)
+	plan.SummaryMessage = strings.TrimSpace(plan.SummaryMessage)
+
+	if len(plan.Tasks) > 0 {
+		out := make([]triageTask, 0, len(plan.Tasks))
+		for _, t := range plan.Tasks {
+			t.Title = strings.TrimSpace(t.Title)
+			t.Prompt = strings.TrimSpace(t.Prompt)
+			t.WorkspaceStrategy = strings.TrimSpace(t.WorkspaceStrategy)
+			if t.Title == "" && t.Prompt == "" && t.WorkspaceStrategy == "" {
+				continue
+			}
+			out = append(out, t)
+		}
+		plan.Tasks = out
+	}
+
+	if len(plan.Questions) > 0 {
+		out := make([]string, 0, len(plan.Questions))
+		for _, q := range plan.Questions {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			out = append(out, q)
+		}
+		plan.Questions = out
+	}
+}
+
+func buildSecretaryTriagePlanTool() llm.Tool {
+	return llm.Tool{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name:        "secretary_triage_plan",
+			Description: "Return the secretary triage plan (intent + summary_message + tasks + questions).",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"intent": map[string]any{
+						"type": "string",
+						"enum": []string{"progress", "dispatch", "clarify"},
+					},
+					"summary_message": map[string]any{"type": "string"},
+					"tasks": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"title":              map[string]any{"type": "string"},
+								"prompt":             map[string]any{"type": "string"},
+								"workspace_strategy": map[string]any{"type": "string", "enum": []string{"new", "session", "ask"}},
+							},
+							"required": []string{"title", "prompt", "workspace_strategy"},
+						},
+					},
+					"questions": map[string]any{
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
+					},
+				},
+				"required": []string{"intent", "summary_message", "tasks", "questions"},
+			},
+		},
+	}
+}
+
+func buildSecretaryTriagePlanToolInstruction() string {
+	return strings.TrimSpace(`
+请立刻调用 tool：secretary_triage_plan。
+要求：
+- 只通过 tool arguments 返回结构化字段，不要输出任何额外文本
+- intent 只能是：progress | dispatch | clarify
+- tasks/questions 允许为空，但字段必须存在（为空则用 []）
+`)
+}
+
+func buildSecretaryTriagePlanTagsInstruction() string {
+	return strings.TrimSpace(`
+请只输出一个宽松的 tags block（不要输出 JSON / 代码块 / 额外解释），格式如下：
+
+<secretary_triage_plan>
+  <intent>progress|dispatch|clarify</intent>
+  <summary_message>...</summary_message>
+  <tasks>
+    <task>
+      <title>...</title>
+      <prompt>...</prompt>
+      <workspace_strategy>new|session|ask</workspace_strategy>
+    </task>
+  </tasks>
+  <questions>
+    <item>...</item>
+  </questions>
+</secretary_triage_plan>
+`)
+}
+
+func parseSecretaryTriagePlanTags(text string) (triagePlan, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return triagePlan{}, false
+	}
+
+	block, ok := agent.ExtractLatestTagBlock(text, "secretary_triage_plan")
+	if !ok {
+		block, ok = agent.ExtractLatestTagBlock(text, "triage_plan")
+	}
+	if !ok {
+		return triagePlan{}, false
+	}
+
+	stopTags := []string{"intent", "summary_message", "tasks", "questions", "task", "item"}
+
+	intent, _ := agent.ExtractTagValue(block, "intent", stopTags)
+	summary, _ := agent.ExtractTagValue(block, "summary_message", stopTags)
+	tasksRaw, _ := agent.ExtractTagValue(block, "tasks", stopTags)
+	questionsRaw, _ := agent.ExtractTagValue(block, "questions", stopTags)
+
+	plan := triagePlan{
+		Intent:         strings.TrimSpace(intent),
+		SummaryMessage: strings.TrimSpace(summary),
+	}
+
+	for _, taskBlock := range extractAllTagBlocks(tasksRaw, "task") {
+		title, _ := agent.ExtractTagValue(taskBlock, "title", []string{"prompt", "workspace_strategy"})
+		promptText, _ := agent.ExtractTagValue(taskBlock, "prompt", []string{"title", "workspace_strategy"})
+		strategy, _ := agent.ExtractTagValue(taskBlock, "workspace_strategy", []string{"title", "prompt"})
+		t := triageTask{
+			Title:             strings.TrimSpace(title),
+			Prompt:            strings.TrimSpace(promptText),
+			WorkspaceStrategy: strings.TrimSpace(strategy),
+		}
+		if t.Title == "" && t.Prompt == "" && t.WorkspaceStrategy == "" {
+			continue
+		}
+		plan.Tasks = append(plan.Tasks, t)
+	}
+
+	for _, item := range extractAllTagBlocks(questionsRaw, "item") {
+		v, _ := agent.ExtractTagValue(item, "item", nil)
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		plan.Questions = append(plan.Questions, v)
+	}
+
+	normalizeTriagePlan(&plan)
+	if plan.SummaryMessage == "" {
+		return triagePlan{}, false
+	}
+	return plan, true
+}
+
+func extractAllTagBlocks(text string, tag string) []string {
+	text = strings.TrimSpace(text)
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	if text == "" || tag == "" {
+		return nil
+	}
+
+	lower := strings.ToLower(text)
+	closeTag := "</" + tag + ">"
+
+	var out []string
+	search := 0
+	for {
+		openRel := strings.Index(lower[search:], "<"+tag)
+		if openRel == -1 {
+			break
+		}
+		open := search + openRel
+		closeRel := strings.Index(lower[open:], closeTag)
+		if closeRel == -1 {
+			out = append(out, strings.TrimSpace(text[open:]))
+			break
+		}
+		end := open + closeRel + len(closeTag)
+		out = append(out, strings.TrimSpace(text[open:end]))
+		search = end
+	}
+	return out
 }
 
 func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, metadata model.JSONB, userContent string) (ackText string, resolvedModelID string, err error) {
@@ -612,20 +803,37 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	}
 
 	sys := strings.TrimSpace(secretaryDispatchSystemPromptSW)
+	factory := agent.NewFactory()
+	agentRuntime, err := factory.Build(agent.BuildRequest{
+		Spec: agent.AgentSpec{
+			ID:           "secretary-sw",
+			BaseOverride: sys,
+			ToolIDs:      nil,
+			ToolProtocol: "",
+		},
+		Client: client,
+	})
+	if err != nil {
+		return triagePlan{}, "", err
+	}
+	sys = agentRuntime.FullSystemPrompt()
 	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
 	workspaceHint := "(unset)"
 	if sessionWorkspace != "" {
 		workspaceHint = sessionWorkspace
 	}
-	user := "Context:\n- session_workspace_root: " + workspaceHint + "\n"
-	if strings.TrimSpace(progressSnapshot) != "" {
-		user += "\n当前可用的任务看板快照（best-effort，仅供参考；用它来回答进度/已完成/卡住等问题）：\n" + strings.TrimSpace(progressSnapshot) + "\n"
-	}
-	user += "\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input + "\n\n请按 schema 输出 JSON。"
-	// SW: before dispatching, pull-sync the latest SU entries (best-effort).
+
+	userPrompt := "Context:\n- session_workspace_root: " + workspaceHint + "\n\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input
+
+	turnContextParts := make([]string, 0, 2)
 	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SW", "SU")); injected != "" {
-		user = injected + "\n\n" + user
+		turnContextParts = append(turnContextParts, injected)
 	}
+	if snap := strings.TrimSpace(progressSnapshot); snap != "" {
+		turnContextParts = append(turnContextParts, "## 任务看板快照\n"+snap)
+	}
+	turnContext := strings.TrimSpace(strings.Join(turnContextParts, "\n\n"))
+	turnCtxMsg, hasTurnCtx := llm.BuildTurnContextMessage(turnContext)
 
 	temp := 0.2
 	maxTokens := 1500
@@ -663,10 +871,14 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 
 		// Soft compression for the SW prompt (no ReplaceMessages). If the prompt is too large,
 		// append a new stable summary message and rebuild the prompt as:
-		// system + summary + current user prompt.
+		// system + summary + turn context + current user prompt.
 		cOpts := sessioncompress.DefaultOptions()
 		cOpts.SummaryPrefix = sessioncompress.DefaultSummaryPrefix
-		llmMessages := append(append([]llm.ChatMessage{}, requestMsgs...), llm.BuildUserMessage(user))
+		llmMessages := append([]llm.ChatMessage{}, requestMsgs...)
+		if hasTurnCtx {
+			llmMessages = append(llmMessages, turnCtxMsg)
+		}
+		llmMessages = append(llmMessages, llm.BuildUserMessage(userPrompt))
 		if sessioncompress.ApproximateContextRunes(llmMessages) > cOpts.MaxContextRunes {
 			base := swMsgs
 			if lastSummaryIdx >= 0 && lastSummaryIdx < len(swMsgs) {
@@ -696,8 +908,11 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 				requestMsgs = []llm.ChatMessage{
 					llm.BuildSystemMessage(sys),
 					llm.BuildSessionSummaryMessage(summaryContent),
-					llm.BuildUserMessage(user),
 				}
+				if hasTurnCtx {
+					requestMsgs = append(requestMsgs, turnCtxMsg)
+				}
+				requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
 			} else {
 				requestMsgs = sessioncompress.BuildFallbackMessages(swMsgs, llmMessages, errors.New("SW prompt too large"), cOpts)
 			}
@@ -705,36 +920,43 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 			requestMsgs = llmMessages
 		}
 	} else {
-		requestMsgs = append(requestMsgs, llm.BuildUserMessage(user))
+		if hasTurnCtx {
+			requestMsgs = append(requestMsgs, turnCtxMsg)
+		}
+		requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
 	}
 
-	out, err := client.ChatCompletion(ctx, requestMsgs, &llm.ChatCompletionOptions{
+	toolSpec := buildSecretaryTriagePlanTool()
+	toolInstruction := buildSecretaryTriagePlanToolInstruction()
+	tagsInstruction := buildSecretaryTriagePlanTagsInstruction()
+
+	plan, meta, err := agent.RequestStructuredOutput[triagePlan](ctx, client, requestMsgs, &llm.ChatCompletionOptions{
 		Temperature: &temp,
 		MaxTokens:   &maxTokens,
+	}, agent.StructuredOutputSpec[triagePlan]{
+		Tool:            toolSpec,
+		ToolName:        toolSpec.Function.Name,
+		ToolInstruction: toolInstruction,
+		TagsInstruction: tagsInstruction,
+		ParseToolArgs: func(raw json.RawMessage) (triagePlan, error) {
+			var p triagePlan
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return triagePlan{}, err
+			}
+			normalizeTriagePlan(&p)
+			return p, nil
+		},
+		ParseTags: func(text string) (triagePlan, bool) {
+			p, ok := parseSecretaryTriagePlanTags(text)
+			if !ok {
+				return triagePlan{}, false
+			}
+			normalizeTriagePlan(&p)
+			return p, true
+		},
 	})
 	if err != nil {
 		return triagePlan{}, "", err
-	}
-
-	raw := strings.TrimSpace(out)
-	jsonText, err := extractJSONObject(raw)
-	if err != nil {
-		return triagePlan{}, "", err
-	}
-
-	var plan triagePlan
-	if err := json.Unmarshal([]byte(jsonText), &plan); err != nil {
-		return triagePlan{}, "", fmt.Errorf("parse triage json: %w", err)
-	}
-
-	plan.SummaryMessage = strings.TrimSpace(plan.SummaryMessage)
-	for i := range plan.Tasks {
-		plan.Tasks[i].Title = strings.TrimSpace(plan.Tasks[i].Title)
-		plan.Tasks[i].Prompt = strings.TrimSpace(plan.Tasks[i].Prompt)
-		plan.Tasks[i].WorkspaceStrategy = strings.TrimSpace(plan.Tasks[i].WorkspaceStrategy)
-	}
-	for i := range plan.Questions {
-		plan.Questions[i] = strings.TrimSpace(plan.Questions[i])
 	}
 
 	// Best-effort: record SW decision into the SW session (not user-facing).
@@ -744,10 +966,18 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 			Type:    model.MessageTypeText,
 			Content: strings.TrimSpace("triage_input:\n" + input),
 		})
+		decision := ""
+		if b, err := json.MarshalIndent(plan, "", "  "); err == nil && len(b) > 0 {
+			decision = string(b)
+		}
+		if decision == "" {
+			decision = fmt.Sprintf("intent=%s\nsummary_message=%s\n(mode=%s)", strings.TrimSpace(plan.Intent), strings.TrimSpace(plan.SummaryMessage), meta.Mode)
+		}
+
 		_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
 			Role:    model.MessageRoleAssistant,
 			Type:    model.MessageTypeText,
-			Content: jsonText,
+			Content: decision,
 		})
 	}
 
@@ -1513,19 +1743,9 @@ ONEAGENT_SECRETARY_TRIAGE
 - 你不直接和用户对话（SU 负责对话）；你只产出派工计划（summary_message/tasks/questions）。
 - 你不执行工具，不写/改文件；只做“派工/排队/需要用户确认的问题”的决策。
 - 你会收到一个“任务看板快照”（如果存在）。当用户在问进度/已完成/卡住/报错时，优先用该快照直接回答；不要为此新建任务或追加无意义的问题。
-
-请严格只输出 JSON（不要代码块，不要额外解释），schema：
-{
-  "summary_message": "给用户的低噪声汇报（中文）",
-  "tasks": [
-    {
-      "title": "任务标题（短）",
-      "prompt": "交给 worker 的工作说明（包含验收标准，鼓励先写测试再改动）",
-      "workspace_strategy": "new|session|ask"
-    }
-  ],
-  "questions": ["需要用户确认的问题（可为空）"]
-}
+输出：
+- 你将通过系统提供的“结构化输出通道”返回 triage plan（intent/summary_message/tasks/questions）。
+- 不要尝试输出纯文本 JSON 来满足 schema（这很脆弱且容易降智）；用 tool-call 或宽松 tags（由系统约束与解析）。
 
 summary_message 写作要求（非常重要）：
 - 这是“用户会看到的一段话”，要像真人秘书在说话：自然、具体、可执行

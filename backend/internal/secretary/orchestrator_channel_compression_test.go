@@ -35,6 +35,38 @@ func (c scriptedClient) ChatCompletion(ctx context.Context, messages []llm.ChatM
 	}
 }
 
+func (c scriptedClient) ChatCompletionWithTools(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+	sys := ""
+	for _, m := range messages {
+		if m.Role == model.MessageRoleSystem {
+			sys = m.Content
+			break
+		}
+	}
+
+	switch {
+	case strings.Contains(sys, "ONEAGENT_SECRETARY_TRIAGE"):
+		return llm.ChatCompletionResult{
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:   "call_1",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "secretary_triage_plan",
+						Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"questions":[]}`,
+					},
+				},
+			},
+		}, nil
+	default:
+		out, err := c.ChatCompletion(ctx, messages, opts)
+		if err != nil {
+			return llm.ChatCompletionResult{}, err
+		}
+		return llm.ChatCompletionResult{Content: out}, nil
+	}
+}
+
 func (c scriptedClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, cb llm.StreamCallback) error {
 	return errors.New("not implemented")
 }

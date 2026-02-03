@@ -15,32 +15,70 @@ import (
 )
 
 type promptAssertingClient struct {
-	wantSubstrings []string
-	called         bool
+	wantUserPromptSubstrings  []string
+	wantTurnContextSubstrings []string
+	called                    bool
 }
 
 func (c *promptAssertingClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	return "", errors.New("unexpected ChatCompletion call (expected tool calling)")
+}
+
+func (c *promptAssertingClient) ChatCompletionWithTools(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
 	_ = ctx
 	_ = opts
+
+	foundUserPrompt := false
+	foundTurnContext := false
 	for _, m := range messages {
 		if m.Role != model.MessageRoleUser {
+			continue
+		}
+		if strings.HasPrefix(m.Content, "【TurnContext（每轮变化") {
+			for _, want := range c.wantTurnContextSubstrings {
+				if strings.TrimSpace(want) == "" {
+					continue
+				}
+				if !strings.Contains(m.Content, want) {
+					return llm.ChatCompletionResult{}, fmt.Errorf("expected turn context to include %q, got %q", want, m.Content)
+				}
+			}
+			foundTurnContext = true
 			continue
 		}
 		if !strings.Contains(m.Content, "session_workspace_root:") {
 			continue
 		}
-		for _, want := range c.wantSubstrings {
-			if want == "" {
+		for _, want := range c.wantUserPromptSubstrings {
+			if strings.TrimSpace(want) == "" {
 				continue
 			}
 			if !strings.Contains(m.Content, want) {
-				return "", fmt.Errorf("expected SW prompt to include %q, got %q", want, m.Content)
+				return llm.ChatCompletionResult{}, fmt.Errorf("expected SW prompt to include %q, got %q", want, m.Content)
 			}
 		}
-		c.called = true
-		return `{"summary_message":"ok","tasks":[],"questions":[]}`, nil
+		foundUserPrompt = true
 	}
-	return "", errors.New("missing SW user prompt")
+	if !foundUserPrompt {
+		return llm.ChatCompletionResult{}, errors.New("missing SW user prompt")
+	}
+	if len(c.wantTurnContextSubstrings) > 0 && !foundTurnContext {
+		return llm.ChatCompletionResult{}, errors.New("missing turn context message")
+	}
+
+	c.called = true
+	return llm.ChatCompletionResult{
+		ToolCalls: []llm.ToolCall{
+			{
+				ID:   "call_1",
+				Type: "function",
+				Function: llm.ToolCallFunction{
+					Name:      "secretary_triage_plan",
+					Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"questions":[]}`,
+				},
+			},
+		},
+	}, nil
 }
 
 func (c *promptAssertingClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, cb llm.StreamCallback) error {
@@ -73,8 +111,12 @@ func TestTriage_ProgressQuestion_UsesSWPlanAndIncludesTaskSnapshot(t *testing.T)
 	}
 
 	client := &promptAssertingClient{
-		wantSubstrings: []string{
+		wantUserPromptSubstrings: []string{
+			"session_workspace_root:",
 			"现在有几个任务在进行",
+		},
+		wantTurnContextSubstrings: []string{
+			"## 任务看板快照",
 			"我查了下：运行",
 			"写武侠小说",
 		},

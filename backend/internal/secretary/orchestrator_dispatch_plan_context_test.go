@@ -17,6 +17,15 @@ type contextAssertingClient struct {
 }
 
 func (c contextAssertingClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	_ = ctx
+	_ = messages
+	_ = opts
+	return "", errors.New("not implemented")
+}
+
+func (c contextAssertingClient) ChatCompletionWithTools(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+	_ = ctx
+	_ = opts
 	for _, m := range messages {
 		if m.Role != model.MessageRoleUser {
 			continue
@@ -25,11 +34,22 @@ func (c contextAssertingClient) ChatCompletion(ctx context.Context, messages []l
 			continue
 		}
 		if !strings.Contains(m.Content, c.wantWorkspace) {
-			return "", fmt.Errorf("expected SW prompt to include session workspace %q, got %q", c.wantWorkspace, m.Content)
+			return llm.ChatCompletionResult{}, fmt.Errorf("expected SW prompt to include session workspace %q, got %q", c.wantWorkspace, m.Content)
 		}
-		return `{"summary_message":"ok","tasks":[],"questions":[]}`, nil
+		return llm.ChatCompletionResult{
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:   "call_1",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "secretary_triage_plan",
+						Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"questions":[]}`,
+					},
+				},
+			},
+		}, nil
 	}
-	return "", errors.New("missing session_workspace_root context in SW prompt")
+	return llm.ChatCompletionResult{}, errors.New("missing session_workspace_root context in SW prompt")
 }
 
 func (c contextAssertingClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, cb llm.StreamCallback) error {
