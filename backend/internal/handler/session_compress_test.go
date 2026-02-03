@@ -141,3 +141,43 @@ func TestBuildCompressionFallbackMessages_PreservesCurrentUserMessageAndTail(t *
 		t.Fatalf("expected fallback to preserve current user message")
 	}
 }
+
+func TestCompressSessionIfNeeded_NoCompressionBelowThreshold(t *testing.T) {
+	store, err := sessionstore.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new sessionstore: %v", err)
+	}
+
+	sessionID := "s1"
+	if _, err := store.GetOrCreateSession(sessionID, "u1", "chat", "t"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	now := time.Now()
+	persisted := []model.ChatMessage{
+		{ID: 1, SessionID: sessionID, Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "u1", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: 2, SessionID: sessionID, Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: "a1", CreatedAt: now.Add(-1 * time.Minute)},
+	}
+
+	llmMessages := []llm.ChatMessage{
+		llm.BuildSystemMessage("sys"),
+		llm.BuildUserMessage("hi"),
+	}
+
+	client := fakeSummaryClient{out: "unused"}
+	compressed, newMsgs, err := compressSessionIfNeeded(context.Background(), store, sessionID, persisted, llmMessages, client)
+	if err != nil {
+		t.Fatalf("compressSessionIfNeeded: %v", err)
+	}
+	if compressed {
+		t.Fatalf("expected compressed=false")
+	}
+	if len(newMsgs) != len(llmMessages) {
+		t.Fatalf("expected unchanged messages, got %d", len(newMsgs))
+	}
+	for i := range llmMessages {
+		if newMsgs[i].Role != llmMessages[i].Role || newMsgs[i].Content != llmMessages[i].Content {
+			t.Fatalf("expected messages unchanged, got %+v", newMsgs)
+		}
+	}
+}

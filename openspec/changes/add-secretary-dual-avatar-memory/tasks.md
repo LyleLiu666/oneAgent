@@ -6,18 +6,18 @@
 - [x] 1.5 Run `openspec validate add-secretary-dual-avatar-memory --strict --no-interactive`
 
 ## 2. Backend
-- [ ] 2.1 Add a secretary memory store (SQLite) with append + time-range query
-- [ ] 2.2 Add cursor-based pull-sync (last 10 + omitted count) and user-prompt injection payload builder
-- [ ] 2.3 Implement a permanent secretary session resolver (principal_id → canonical session_id)
+- [x] 2.1 Add a secretary memory store (SQLite) with append + time-range query
+- [x] 2.2 Add cursor-based pull-sync (last 10 + omitted count) and user-prompt injection payload builder
+- [x] 2.3 Implement a permanent secretary session resolver (principal_id → canonical session_id)
 - [ ] 2.4 Add SU/SW channel prompt assembly and enforce tool scopes (SU read-only; SW dispatch-only)
 - [ ] 2.5 Apply fixed 80k context compression to SU/SW channels (reuse existing compression implementation)
 
 ## 3. Tests (TDD)
-- [ ] 3.1 Memory: append + query by time window
-- [ ] 3.2 Pull-sync: 0/3/23 unsynced cases (last 10 + omitted count + cursor update)
-- [ ] 3.3 Permanent session: restart/reload returns same secretary session_id
-- [ ] 3.4 Compression: over-80k triggers summary; under threshold does not; failure degrades safely
+- [x] 3.1 Memory: append + query by time window
+- [x] 3.2 Pull-sync: 0/3/23 unsynced cases (last 10 + omitted count + cursor update)
+- [x] 3.3 Permanent session: restart/reload returns same secretary session_id
+- [x] 3.4 Compression: over-80k triggers summary; under threshold does not; failure degrades safely
 
 ## 4. Frontend (best-effort)
-- [ ] 4.1 Secretary route uses the permanent secretary conversation (no session switching UX)
+- [x] 4.1 Secretary route uses the permanent secretary conversation (no session switching UX)
 - [ ] 4.2 Ensure secretary mode does not surface worker noise by default; advanced details remain discoverable
