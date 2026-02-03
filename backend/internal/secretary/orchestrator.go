@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -976,6 +977,14 @@ func looksLikeProgressQuery(text string) bool {
 		"做到哪",
 		"做完了吗",
 		"完成了吗",
+		"已完成的那个",
+		"已完成的是",
+		"已完成的是什么",
+		"完成的那个",
+		"完成的是",
+		"完成的是什么",
+		"哪个完成",
+		"哪一个完成",
 		"跑完了吗",
 		"还在跑吗",
 		"还在运行吗",
@@ -989,6 +998,9 @@ func looksLikeProgressQuery(text string) bool {
 		}
 	}
 	if strings.HasSuffix(t, "了吗") || strings.HasSuffix(t, "了没") {
+		return true
+	}
+	if strings.Contains(t, "已完成") && (strings.Contains(t, "什么") || strings.Contains(t, "哪个") || strings.Contains(t, "哪一个") || strings.ContainsAny(t, "？?")) {
 		return true
 	}
 	return false
@@ -1191,6 +1203,11 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 	succeeded := 0
 	needsAttention := 0
 
+	var runningTasks []taskqueue.Task
+	var queuedTasks []taskqueue.Task
+	var succeededTasks []taskqueue.Task
+	var needsAttentionTasks []taskqueue.Task
+
 	if o.Tasks != nil {
 		tasks, _ := o.Tasks.ListTasks(userID, normalizedWorkspace)
 		relevant := tasks
@@ -1236,6 +1253,10 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 			}
 		}
 
+		sort.Slice(relevant, func(i, j int) bool {
+			return relevant[i].UpdatedAt.After(relevant[j].UpdatedAt)
+		})
+
 		for _, t := range relevant {
 			a := t.LatestAttempt()
 			if a == nil {
@@ -1244,12 +1265,16 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 			switch a.Status {
 			case taskqueue.AttemptQueued:
 				queued++
+				queuedTasks = append(queuedTasks, t)
 			case taskqueue.AttemptRunning:
 				running++
+				runningTasks = append(runningTasks, t)
 			case taskqueue.AttemptSucceeded:
 				succeeded++
+				succeededTasks = append(succeededTasks, t)
 			case taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
 				needsAttention++
+				needsAttentionTasks = append(needsAttentionTasks, t)
 			default:
 				// ignore
 			}
@@ -1306,43 +1331,157 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 
 	statusLine := fmt.Sprintf("我查了下：运行 %d，排队 %d，已完成 %d，需要处理 %d。", running, queued, succeeded, needsAttention)
 
-	var details []string
-	if shouldScan {
-		if stats.FilesTotal > 0 && stats.CharsTotal > 0 {
-			details = append(details, fmt.Sprintf("一共有 %d 个文件，累计约 %s。", stats.FilesTotal, formatApproxChineseChars(stats.CharsTotal)))
-		} else if stats.FilesTotal > 0 {
-			details = append(details, fmt.Sprintf("一共有 %d 个文件。", stats.FilesTotal))
+	trimWithEllipsis := func(s string, maxLen int) string {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return ""
 		}
-		if stats.Truncated {
-			details = append(details, "（统计已截断）")
+		runes := []rune(s)
+		if len(runes) <= maxLen {
+			return s
 		}
+		return string(runes[:maxLen]) + "…"
+	}
+	shortID := func(id string) string {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return ""
+		}
+		if len(id) <= 8 {
+			return id
+		}
+		return id[:8]
+	}
+	taskLabel := func(t taskqueue.Task) string {
+		title := strings.TrimSpace(t.Title)
+		if title == "" {
+			title = deriveTaskTitle(t.Prompt)
+		}
+		id := shortID(t.ID)
+		if id == "" {
+			return title
+		}
+		return fmt.Sprintf("%s（追踪号 %s）", title, id)
+	}
+	artifactsLabel := func(a *taskqueue.Attempt) string {
+		if a == nil {
+			return ""
+		}
+		parts := make([]string, 0, 4)
+		if strings.TrimSpace(a.FindingsPath) != "" {
+			parts = append(parts, "findings")
+		}
+		if strings.TrimSpace(a.DiffPatchPath) != "" {
+			parts = append(parts, "diff")
+		}
+		if strings.TrimSpace(a.TraceLogPath) != "" {
+			parts = append(parts, "trace")
+		}
+		if strings.TrimSpace(a.TestReportPath) != "" {
+			parts = append(parts, "test")
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		return strings.Join(parts, "/")
 	}
 
 	// Always provide at least one actionable hint.
-	switch {
-	case running > 0 || queued > 0:
-		details = append(details, "我会继续盯着，有更新再告诉你。")
-	case needsAttention > 0:
-		details = append(details, "你也可以点「查看 Trace」看看卡在哪一步。")
-	case succeeded > 0:
-		details = append(details, "你也可以点「查看 Trace」查看产出细节。")
-	default:
-		details = append(details, "如果你要我跟踪某个任务的进度，把任务标题或任务 ID 发我就行。")
-	}
-
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(statusLine))
-	if len(details) > 0 {
+
+	appendList := func(title string, tasks []taskqueue.Task, lineFn func(taskqueue.Task) string) {
+		if len(tasks) == 0 {
+			return
+		}
 		b.WriteString("\n")
-		for _, d := range details {
-			d = strings.TrimSpace(d)
-			if d == "" {
+		b.WriteString(title)
+		b.WriteString("\n")
+
+		limit := 3
+		if len(tasks) < limit {
+			limit = len(tasks)
+		}
+		for i := 0; i < limit; i++ {
+			line := strings.TrimSpace(lineFn(tasks[i]))
+			if line == "" {
 				continue
 			}
-			b.WriteString("- ")
-			b.WriteString(d)
-			b.WriteString("\n")
+			b.WriteString(fmt.Sprintf("%d) %s\n", i+1, line))
 		}
+		if extra := len(tasks) - limit; extra > 0 {
+			b.WriteString(fmt.Sprintf("（还有 %d 个未展开）\n", extra))
+		}
+	}
+
+	appendList("正在进行：", runningTasks, func(t taskqueue.Task) string {
+		a := t.LatestAttempt()
+		line := taskLabel(t)
+		if a != nil && a.StartedAt != nil {
+			line = line + "，已运行 " + time.Since(*a.StartedAt).Truncate(time.Second).String()
+		}
+		return line
+	})
+	appendList("排队中：", queuedTasks, func(t taskqueue.Task) string {
+		return taskLabel(t)
+	})
+	appendList("已完成：", succeededTasks, func(t taskqueue.Task) string {
+		a := t.LatestAttempt()
+		line := taskLabel(t)
+		if a == nil {
+			return line
+		}
+		if summary := trimWithEllipsis(a.Summary, 60); summary != "" {
+			line = line + " — " + summary
+		}
+		if arts := artifactsLabel(a); arts != "" {
+			line = line + "（产出：" + arts + "）"
+		}
+		return line
+	})
+	appendList("需要处理：", needsAttentionTasks, func(t taskqueue.Task) string {
+		a := t.LatestAttempt()
+		line := taskLabel(t)
+		if a == nil {
+			return line
+		}
+		msg := strings.TrimSpace(a.Error)
+		if msg == "" && a.Observer != nil {
+			msg = strings.TrimSpace(a.Observer.Reason)
+		}
+		if msg != "" {
+			line = line + " — " + trimWithEllipsis(msg, 80)
+		}
+		return line
+	})
+
+	if shouldScan && (stats.FilesTotal > 0 || stats.CharsTotal > 0) {
+		b.WriteString("\n")
+		if stats.FilesTotal > 0 && stats.CharsTotal > 0 {
+			b.WriteString(fmt.Sprintf("目录里一共有 %d 个文件，累计约 %s。", stats.FilesTotal, formatApproxChineseChars(stats.CharsTotal)))
+		} else if stats.FilesTotal > 0 {
+			b.WriteString(fmt.Sprintf("目录里一共有 %d 个文件。", stats.FilesTotal))
+		}
+		if stats.Truncated {
+			b.WriteString("（统计已截断）")
+		}
+	}
+
+	b.WriteString("\n")
+
+	switch {
+	case running > 0 || queued > 0:
+		b.WriteString("我会继续盯着，有更新再告诉你。")
+	case needsAttention > 0:
+		b.WriteString("你也可以点「查看 Trace」看看卡在哪一步，然后把报错贴给我，我帮你继续处理。")
+	case succeeded > 0:
+		b.WriteString("你也可以点「查看 Trace」或打开 findings/diff 看产出细节。")
+	default:
+		b.WriteString("如果你要我跟踪某个条目的进度，把标题或追踪号发我就行。")
+	}
+
+	if strings.TrimSpace(b.String()) != "" {
+		b.WriteString("\n")
 	}
 
 	return strings.TrimSpace(b.String()), nil, nil
