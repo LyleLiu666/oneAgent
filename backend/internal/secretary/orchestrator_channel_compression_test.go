@@ -81,8 +81,11 @@ func TestOrchestrator_CompressSU_DoesNotTouchSW(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load su messages: %v", err)
 	}
-	if len(suMsgs) < 1 || !strings.HasPrefix(strings.TrimSpace(suMsgs[0].Content), sessioncompress.DefaultSummaryPrefix) {
-		t.Fatalf("expected SU session to be compressed with prefix %q", sessioncompress.DefaultSummaryPrefix)
+	if len(suMsgs) != 7 {
+		t.Fatalf("expected SU to append-only add 2 messages, got %d", len(suMsgs))
+	}
+	if strings.HasPrefix(strings.TrimSpace(suMsgs[0].Content), sessioncompress.DefaultSummaryPrefix) {
+		t.Fatalf("expected SU session to remain append-only (no rewrite/compression)")
 	}
 
 	_, swMsgs, err := store.GetSessionWithMessages(swSessionID, "local")
@@ -151,7 +154,20 @@ func TestOrchestrator_CompressSW_DoesNotTouchSU(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load sw messages: %v", err)
 	}
-	if len(swMsgs) < 1 || !strings.HasPrefix(strings.TrimSpace(swMsgs[0].Content), sessioncompress.DefaultSummaryPrefix) {
-		t.Fatalf("expected SW session to be compressed with prefix %q", sessioncompress.DefaultSummaryPrefix)
+	if len(swMsgs) != 8 {
+		t.Fatalf("expected SW to append a summary + triage input + decision, got %d messages", len(swMsgs))
+	}
+	if strings.HasPrefix(strings.TrimSpace(swMsgs[0].Content), sessioncompress.DefaultSummaryPrefix) {
+		t.Fatalf("expected SW to remain append-only (no rewrite/compression)")
+	}
+	hasSummary := false
+	for _, msg := range swMsgs {
+		if msg.Role == model.MessageRoleAssistant && msg.Type == model.MessageTypeText && strings.HasPrefix(strings.TrimSpace(msg.Content), sessioncompress.DefaultSummaryPrefix) {
+			hasSummary = true
+			break
+		}
+	}
+	if !hasSummary {
+		t.Fatalf("expected SW to append a compression summary message")
 	}
 }

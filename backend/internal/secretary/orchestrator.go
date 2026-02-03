@@ -70,7 +70,12 @@ func buildTextLLMHistory(dbMessages []model.ChatMessage) []llm.ChatMessage {
 		if strings.TrimSpace(msg.Content) == "" {
 			continue
 		}
-		out = append(out, llm.ChatMessage{Role: msg.Role, Content: msg.Content})
+		content := msg.Content
+		if msg.Role == model.MessageRoleAssistant && strings.HasPrefix(strings.TrimSpace(content), sessioncompress.DefaultSummaryPrefix) {
+			out = append(out, llm.BuildSessionSummaryMessage(content))
+			continue
+		}
+		out = append(out, llm.ChatMessage{Role: msg.Role, Content: content})
 	}
 	return out
 }
@@ -99,7 +104,7 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 		return InboxAppendResult{}, err
 	}
 
-	session, msgs, err := o.Sessions.GetSessionWithMessages(sessionID, userID)
+	session, _, err := o.Sessions.GetSessionWithMessages(sessionID, userID)
 	if err != nil {
 		return InboxAppendResult{}, err
 	}
@@ -123,41 +128,9 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 		session.Metadata = meta
 	}
 
-	// Best-effort: compress the SU session before appending a new message so the
-	// triage cursor can advance safely even when IDs are rewritten.
-	if o.ResolveModel != nil && o.Sessions != nil {
-		modelID := ""
-		if v, ok := session.Metadata["model_id"].(string); ok {
-			modelID = strings.TrimSpace(v)
-		}
-		if client, _, err := o.ResolveModel(ctx, userID, modelID); err == nil && client != nil {
-			llmMessages := make([]llm.ChatMessage, 0, 2+len(msgs))
-			llmMessages = append(llmMessages, llm.BuildSystemMessage("ONEAGENT_SECRETARY_SU_CONTEXT"))
-			llmMessages = append(llmMessages, buildTextLLMHistory(msgs)...)
-			llmMessages = append(llmMessages, llm.BuildUserMessage(content))
-
-			compressed, _, err := sessioncompress.CompressSessionIfNeeded(ctx, o.Sessions, sessionID, msgs, llmMessages, client, sessioncompress.DefaultOptions())
-			if err == nil && compressed {
-				// Reload after rewrite.
-				session, msgs, err = o.Sessions.GetSessionWithMessages(sessionID, userID)
-				if err != nil {
-					return InboxAppendResult{}, err
-				}
-
-				// Advance triage cursor to the end so we don't re-dispatch old work after compression.
-				endID := uint(0)
-				if len(msgs) > 0 {
-					endID = msgs[len(msgs)-1].ID
-				}
-				st, _ := decodeState(session.Metadata)
-				st.CursorMessageID = endID
-				st.TriageRuns = nil
-				meta := upsertState(session.Metadata, st)
-				_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
-				session.Metadata = meta
-			}
-		}
-	}
+	// NOTE: Secretary SU session is treated as an append-only log. Avoid rewriting
+	// message history here (e.g., compression that renumbers IDs) to preserve
+	// traceability and maximize provider KV-cache effectiveness.
 
 	userMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
 		Role:    model.MessageRoleUser,
@@ -688,25 +661,78 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	if swSessionID != "" {
 		_, _ = o.Sessions.GetOrCreateSession(swSessionID, userID, secretaryModuleSW, "Secretary(Worker)")
 		_, swMsgs, _ := o.Sessions.GetSessionWithMessages(swSessionID, userID)
-		requestMsgs = append(requestMsgs, buildTextLLMHistory(swMsgs)...)
 
-		// Apply fixed 80k compression per SW channel (best-effort).
+		lastSummaryIdx := -1
+		lastSummaryContent := ""
+		for i := len(swMsgs) - 1; i >= 0; i-- {
+			msg := swMsgs[i]
+			if msg.Type != model.MessageTypeText || msg.Role != model.MessageRoleAssistant {
+				continue
+			}
+			if strings.HasPrefix(strings.TrimSpace(msg.Content), sessioncompress.DefaultSummaryPrefix) {
+				lastSummaryIdx = i
+				lastSummaryContent = msg.Content
+				break
+			}
+		}
+
+		// Prefer a stable summary + tail for KV-cache. Keep SW stored messages append-only:
+		// never rewrite or renumber IDs.
+		if lastSummaryIdx >= 0 {
+			requestMsgs = append(requestMsgs, llm.BuildSessionSummaryMessage(lastSummaryContent))
+			if lastSummaryIdx+1 < len(swMsgs) {
+				requestMsgs = append(requestMsgs, buildTextLLMHistory(swMsgs[lastSummaryIdx+1:])...)
+			}
+		} else {
+			requestMsgs = append(requestMsgs, buildTextLLMHistory(swMsgs)...)
+		}
+
+		// Soft compression for the SW prompt (no ReplaceMessages). If the prompt is too large,
+		// append a new stable summary message and rebuild the prompt as:
+		// system + summary + current user prompt.
 		cOpts := sessioncompress.DefaultOptions()
 		cOpts.SummaryPrefix = sessioncompress.DefaultSummaryPrefix
 		llmMessages := append(append([]llm.ChatMessage{}, requestMsgs...), llm.BuildUserMessage(user))
-		compressed, compressedMsgs, compErr := sessioncompress.CompressSessionIfNeeded(ctx, o.Sessions, swSessionID, swMsgs, llmMessages, client, cOpts)
-		if compErr != nil {
-			fallback := sessioncompress.BuildFallbackMessages(swMsgs, llmMessages, compErr, cOpts)
-			if len(fallback) > 0 {
-				// Preserve system + tail, but re-append the user prompt once below.
-				requestMsgs = fallback[:len(fallback)-1]
+		if sessioncompress.ApproximateContextRunes(llmMessages) > cOpts.MaxContextRunes {
+			base := swMsgs
+			if lastSummaryIdx >= 0 && lastSummaryIdx < len(swMsgs) {
+				base = swMsgs[lastSummaryIdx:]
 			}
-		} else if compressed {
-			requestMsgs = compressedMsgs[:len(compressedMsgs)-1]
-		}
-	}
+			toSummarize, _ := sessioncompress.SplitForCompression(base, 0)
+			if len(toSummarize) > 0 {
+				input := sessioncompress.FormatForSummaryInput(toSummarize, cOpts)
+				summary, sumErr := sessioncompress.BuildCompressionSummary(ctx, client, input)
+				if sumErr == nil {
+					summary = strings.TrimSpace(summary)
+				}
+				if summary == "" {
+					summary = "流水账:\n- （摘要生成为空）\n\nFindings:\n- （摘要生成为空）"
+				}
 
-	requestMsgs = append(requestMsgs, llm.BuildUserMessage(user))
+				summaryHeader := fmt.Sprintf("%s已压缩 %d 条历史消息\n\n", cOpts.SummaryPrefix, len(toSummarize))
+				summaryContent := summaryHeader + summary
+
+				// Best-effort: persist the SW summary as an append-only internal message.
+				_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
+					Role:    model.MessageRoleAssistant,
+					Type:    model.MessageTypeText,
+					Content: summaryContent,
+				})
+
+				requestMsgs = []llm.ChatMessage{
+					llm.BuildSystemMessage(sys),
+					llm.BuildSessionSummaryMessage(summaryContent),
+					llm.BuildUserMessage(user),
+				}
+			} else {
+				requestMsgs = sessioncompress.BuildFallbackMessages(swMsgs, llmMessages, errors.New("SW prompt too large"), cOpts)
+			}
+		} else {
+			requestMsgs = llmMessages
+		}
+	} else {
+		requestMsgs = append(requestMsgs, llm.BuildUserMessage(user))
+	}
 
 	out, err := client.ChatCompletion(ctx, requestMsgs, &llm.ChatCompletionOptions{
 		Temperature: &temp,

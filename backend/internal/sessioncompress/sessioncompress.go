@@ -122,7 +122,8 @@ func SplitForCompression(dbMessages []model.ChatMessage, keepTextMessages int) (
 	return toSummarize, toKeep
 }
 
-func formatForSummaryInput(dbMessages []model.ChatMessage, opts Options) string {
+func FormatForSummaryInput(dbMessages []model.ChatMessage, opts Options) string {
+	opts = normalizeOptions(opts)
 	var b strings.Builder
 	for _, msg := range dbMessages {
 		role := strings.TrimSpace(msg.Role)
@@ -155,7 +156,7 @@ func formatForSummaryInput(dbMessages []model.ChatMessage, opts Options) string 
 	return out
 }
 
-func buildCompressionSummary(ctx context.Context, client llm.Client, input string) (string, error) {
+func BuildCompressionSummary(ctx context.Context, client llm.Client, input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", nil
@@ -212,8 +213,8 @@ func CompressSessionIfNeeded(
 		return false, llmMessages, nil
 	}
 
-	input := formatForSummaryInput(toSummarize, opts)
-	summary, err := buildCompressionSummary(ctx, client, input)
+	input := FormatForSummaryInput(toSummarize, opts)
+	summary, err := BuildCompressionSummary(ctx, client, input)
 	if err != nil {
 		return false, llmMessages, err
 	}
