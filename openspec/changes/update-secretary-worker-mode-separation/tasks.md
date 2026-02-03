@@ -25,6 +25,6 @@
 - [x] 4.5 Re-run `openspec validate update-secretary-worker-mode-separation --strict --no-interactive`
 
 ## 5. Reliability Implementation (after approval)
-- [ ] 5.1 Implement Outcome Observer self-heal retry for invalid XML/JSON output (tests first)
+- [x] 5.1 Implement Outcome Observer self-heal retry for invalid XML/JSON output (tests first)
 - [ ] 5.2 Ensure tool-loop feeds provider/tool errors back to LLM for retry (worker + secretary)
 - [ ] 5.3 Ensure secretary uses restricted tool permissions (read-only filesystem) and can delegate to worker tasks when needed
