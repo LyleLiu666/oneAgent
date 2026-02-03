@@ -534,16 +534,13 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 		if call == nil {
 			continue
 		}
-		if builder, ok := toolArgs[idx]; ok {
-			call.Function.Arguments = normalizeToolArguments(builder.String())
-		} else {
-			call.Function.Arguments = normalizeToolArguments(call.Function.Arguments)
+			if builder, ok := toolArgs[idx]; ok {
+				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+			} else {
+				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+			}
+			finalCalls = append(finalCalls, *call)
 		}
-		if strings.TrimSpace(call.Function.Arguments) == "" {
-			call.Function.Arguments = "{}"
-		}
-		finalCalls = append(finalCalls, *call)
-	}
 
 	return ChatCompletionResult{
 		Content:   fullContent.String(),

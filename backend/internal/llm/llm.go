@@ -764,14 +764,11 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			}
 		}
 
-		finalCalls := make([]ToolCall, 0, len(parsed.ToolCalls))
-		for _, call := range parsed.ToolCalls {
-			call.Function.Arguments = normalizeToolArguments(call.Function.Arguments)
-			if strings.TrimSpace(call.Function.Arguments) == "" {
-				call.Function.Arguments = "{}"
+			finalCalls := make([]ToolCall, 0, len(parsed.ToolCalls))
+			for _, call := range parsed.ToolCalls {
+				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+				finalCalls = append(finalCalls, call)
 			}
-			finalCalls = append(finalCalls, call)
-		}
 
 		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 			opts.Trace.OnComplete(ctx, parsed.Content, nil)
@@ -943,22 +940,19 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 	}
 	sort.Ints(indices)
 
-	finalCalls := make([]ToolCall, 0, len(indices))
-	for _, idx := range indices {
-		call := toolCalls[idx]
-		if call == nil {
-			continue
+		finalCalls := make([]ToolCall, 0, len(indices))
+		for _, idx := range indices {
+			call := toolCalls[idx]
+			if call == nil {
+				continue
+			}
+			if builder, ok := toolArgs[idx]; ok {
+				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+			} else {
+				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+			}
+			finalCalls = append(finalCalls, *call)
 		}
-		if builder, ok := toolArgs[idx]; ok {
-			call.Function.Arguments = normalizeToolArguments(builder.String())
-		} else {
-			call.Function.Arguments = normalizeToolArguments(call.Function.Arguments)
-		}
-		if strings.TrimSpace(call.Function.Arguments) == "" {
-			call.Function.Arguments = "{}"
-		}
-		finalCalls = append(finalCalls, *call)
-	}
 
 	return ChatCompletionResult{
 		Content:      fullContent.String(),

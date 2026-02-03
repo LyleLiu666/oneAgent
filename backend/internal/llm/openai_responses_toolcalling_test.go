@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -105,6 +106,68 @@ func TestOpenAIResponsesClient_ChatCompletionWithTools_ParsesFunctionCall(t *tes
 	}
 	if instr, ok := parsed["instructions"].(string); !ok || instr == "" {
 		t.Fatalf("expected instructions to be set from system message, got %#v", parsed["instructions"])
+	}
+}
+
+func TestOpenAIResponsesClient_ChatCompletionWithTools_SanitizesInvalidToolArguments(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"ls\",\"arguments\":\"{\\\"path\\\":\\\".\\\"\"}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	opts := &ChatCompletionOptions{
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "ls",
+				Parameters: map[string]any{
+					"type": "object",
+				},
+			},
+		}},
+	}
+
+	result, err := client.ChatCompletionWithTools(
+		context.Background(),
+		[]ChatMessage{{Role: "system", Content: "sys"}, {Role: "user", Content: "hi"}},
+		opts,
+	)
+	if err != nil {
+		t.Fatalf("ChatCompletionWithTools: %v", err)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+
+	args := result.ToolCalls[0].Function.Arguments
+	if strings.TrimSpace(args) == "" {
+		t.Fatalf("expected tool arguments to be non-empty")
+	}
+	if !json.Valid([]byte(args)) {
+		t.Fatalf("expected tool arguments to be valid JSON, got %q", args)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(args), &parsed); err != nil {
+		t.Fatalf("expected tool arguments to be JSON object, got %q: %v", args, err)
+	}
+	if _, ok := parsed["_raw"]; !ok {
+		t.Fatalf("expected sanitized tool arguments to include _raw, got %q", args)
 	}
 }
 

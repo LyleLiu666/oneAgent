@@ -113,13 +113,16 @@ func buildLLMHistoryFromMessages(messages []model.ChatMessage, toolProtocol stri
 				toolCalls = payload.ToolCalls
 			}
 
-			llmMsg := llm.ChatMessage{Role: msg.Role, Content: content}
-			if protocol == "json" && len(toolCalls) > 0 {
-				llmMsg.ToolCalls = toolCalls
-				for _, call := range toolCalls {
-					if id := strings.TrimSpace(call.ID); id != "" {
-						seenToolCallIDs[id] = struct{}{}
+				llmMsg := llm.ChatMessage{Role: msg.Role, Content: content}
+				if protocol == "json" && len(toolCalls) > 0 {
+					for i := range toolCalls {
+						toolCalls[i].Function.Arguments = llm.SanitizeToolArgumentsJSON(toolCalls[i].Function.Arguments)
 					}
+					llmMsg.ToolCalls = toolCalls
+					for _, call := range toolCalls {
+						if id := strings.TrimSpace(call.ID); id != "" {
+							seenToolCallIDs[id] = struct{}{}
+						}
 				}
 			}
 			out = append(out, llmMsg)
