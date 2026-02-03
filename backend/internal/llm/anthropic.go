@@ -534,13 +534,13 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 		if call == nil {
 			continue
 		}
-			if builder, ok := toolArgs[idx]; ok {
-				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
-			} else {
-				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
-			}
-			finalCalls = append(finalCalls, *call)
+		if builder, ok := toolArgs[idx]; ok {
+			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+		} else {
+			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
 		}
+		finalCalls = append(finalCalls, *call)
+	}
 
 	return ChatCompletionResult{
 		Content:   fullContent.String(),
@@ -611,7 +611,7 @@ func buildAnthropicPayload(messages []ChatMessage, enableCache bool) ([]anthropi
 				block.CacheControl = &anthropicCacheControl{Type: "ephemeral"}
 			}
 			converted = append(converted, anthropicMessage{
-				Role: "user",
+				Role:    "user",
 				Content: []anthropicContent{block},
 			})
 		default:

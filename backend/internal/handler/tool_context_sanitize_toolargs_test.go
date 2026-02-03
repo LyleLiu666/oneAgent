@@ -55,4 +55,3 @@ func TestBuildLLMHistoryFromMessages_SanitizesInvalidToolCallArguments(t *testin
 		t.Fatalf("expected sanitized arguments to include _raw, got %q", args)
 	}
 }
-

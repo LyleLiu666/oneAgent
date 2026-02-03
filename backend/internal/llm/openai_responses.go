@@ -613,13 +613,13 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 		if call == nil {
 			continue
 		}
-			if builder, ok := toolArgsByID[callID]; ok && builder != nil {
-				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
-			} else {
-				call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
-			}
-			finalCalls = append(finalCalls, *call)
+		if builder, ok := toolArgsByID[callID]; ok && builder != nil {
+			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+		} else {
+			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
 		}
+		finalCalls = append(finalCalls, *call)
+	}
 
 	return ChatCompletionResult{
 		Content:   fullContent.String(),
