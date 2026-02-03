@@ -799,6 +799,53 @@ func TestTaskRunner_Start_MarksRunningAsInterrupted(t *testing.T) {
 	}
 }
 
+func TestTaskRunner_OnAttemptFinished_IsCalled(t *testing.T) {
+	workspace := t.TempDir()
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	task, err := store.CreateTask("u1", workspace, "t", "p", "", Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	done := make(chan AttemptStatus, 1)
+
+	runner := &TaskRunner{
+		Store: store,
+		ExecuteAttempt: func(ctx context.Context, task Task, attempt Attempt, resumedFrom *Attempt) (AttemptResult, error) {
+			return AttemptResult{}, errors.New("boom")
+		},
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{Pass: true}, nil
+		},
+		OnAttemptFinished: func(ctx context.Context, task Task, attempt Attempt) {
+			done <- attempt.Status
+		},
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	if err := runner.Enqueue(task.ID); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	waitForStatus(t, store, task.ID, AttemptFailed, 2*time.Second)
+
+	select {
+	case st := <-done:
+		if st != AttemptFailed {
+			t.Fatalf("expected callback status %q, got %q", AttemptFailed, st)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for OnAttemptFinished callback")
+	}
+}
+
 func waitForStatus(t *testing.T, store *Store, taskID string, want AttemptStatus, timeout time.Duration) {
 	t.Helper()
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/checkpoint"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/projectcfg"
 	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
@@ -566,6 +567,61 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		Store:          rt.Tasks,
 		ExecuteAttempt: exec,
 		DecideOutcome:  decideOutcome,
+		OnAttemptFinished: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) {
+			if rt == nil || rt.Memory == nil {
+				return
+			}
+			userID := strings.TrimSpace(task.UserID)
+			if userID == "" {
+				userID = "local"
+			}
+
+			title := strings.TrimSpace(task.Title)
+			if title == "" {
+				title = "Task"
+			}
+
+			lines := []string{
+				fmt.Sprintf("task=%s", strings.TrimSpace(task.ID)),
+				fmt.Sprintf("attempt=%s", strings.TrimSpace(attempt.ID)),
+				fmt.Sprintf("status=%s", strings.TrimSpace(string(attempt.Status))),
+			}
+			if strings.TrimSpace(attempt.Summary) != "" {
+				lines = append(lines, "summary: "+strings.TrimSpace(attempt.Summary))
+			}
+			if strings.TrimSpace(attempt.Error) != "" {
+				lines = append(lines, "error: "+strings.TrimSpace(attempt.Error))
+			}
+
+			// Deliverables: only store paths (local-first).
+			if strings.TrimSpace(attempt.FindingsPath) != "" {
+				lines = append(lines, "findings_path: "+strings.TrimSpace(attempt.FindingsPath))
+			}
+			if strings.TrimSpace(attempt.TraceLogPath) != "" {
+				lines = append(lines, "trace_log_path: "+strings.TrimSpace(attempt.TraceLogPath))
+			}
+			if strings.TrimSpace(attempt.TestReportPath) != "" {
+				lines = append(lines, "test_report_path: "+strings.TrimSpace(attempt.TestReportPath))
+			}
+			if strings.TrimSpace(attempt.DiffPatchPath) != "" {
+				lines = append(lines, "diff_patch_path: "+strings.TrimSpace(attempt.DiffPatchPath))
+			}
+			if strings.TrimSpace(attempt.ChangedFilesPath) != "" {
+				lines = append(lines, "changed_files_path: "+strings.TrimSpace(attempt.ChangedFilesPath))
+			}
+			if strings.TrimSpace(attempt.ReviewCommentsPath) != "" {
+				lines = append(lines, "review_comments_path: "+strings.TrimSpace(attempt.ReviewCommentsPath))
+			}
+
+			_, _ = rt.Memory.AppendEntry(ctx, memorydb.Entry{
+				PrincipalID: userID,
+				Writer:      "SW",
+				Type:        "findings",
+				Workspace:   task.Workspace,
+				Title:       fmt.Sprintf("%s (%s)", title, strings.TrimSpace(string(attempt.Status))),
+				Content:     strings.Join(lines, "\n"),
+			})
+		},
 	}
 	return rt.TaskRunner.Start()
 }

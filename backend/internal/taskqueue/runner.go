@@ -49,6 +49,10 @@ type TaskRunner struct {
 
 	ExecuteAttempt ExecuteAttemptFunc
 
+	// OnAttemptFinished is a best-effort hook invoked after an attempt transitions to a terminal status.
+	// It MUST NOT panic; panics are recovered by the runner.
+	OnAttemptFinished func(ctx context.Context, task Task, attempt Attempt)
+
 	started atomic.Bool
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -619,6 +623,13 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 			"error":  finalError,
 		},
 	})
+
+	if r.OnAttemptFinished != nil {
+		func() {
+			defer func() { _ = recover() }()
+			r.OnAttemptFinished(context.Background(), saved, ranAttempt)
+		}()
+	}
 
 	if observerFailed {
 		latest := saved.LatestAttempt()
