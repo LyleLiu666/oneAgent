@@ -161,3 +161,41 @@ func TestParseObserverDecision_FallbackMarkdown_PassFalse(t *testing.T) {
 		t.Fatalf("expected next_steps to be parsed, got %+v", got)
 	}
 }
+
+func TestParseObserverDecision_AcceptsXML(t *testing.T) {
+	raw := `
+some preface
+<observer_decision>
+  <pass>false</pass>
+  <reason>missing evidence</reason>
+  <evidence>
+    <item>FINDINGS.md: missing</item>
+    <item>trace.jsonl: empty</item>
+  </evidence>
+  <next_steps>run tests</next_steps>
+  <questions_for_user>
+    <item>Which branch should we target?</item>
+  </questions_for_user>
+</observer_decision>
+`
+
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+	if strings.TrimSpace(got.Reason) != "missing evidence" {
+		t.Fatalf("expected reason to be parsed, got %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) != "run tests" {
+		t.Fatalf("expected next_steps to be parsed, got %+v", got)
+	}
+	if len(got.Evidence) != 2 {
+		t.Fatalf("expected evidence items, got %+v", got.Evidence)
+	}
+	if len(got.QuestionsForUser) != 1 {
+		t.Fatalf("expected questions_for_user, got %+v", got.QuestionsForUser)
+	}
+}

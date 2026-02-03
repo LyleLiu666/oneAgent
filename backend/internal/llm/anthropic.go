@@ -289,6 +289,14 @@ func (c *AnthropicClient) ChatCompletionStream(ctx context.Context, messages []C
 		}
 	}
 
+	if strings.TrimSpace(fullContent.String()) == "" {
+		err := fmt.Errorf("empty completion stream")
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, "", err)
+		}
+		return err
+	}
+
 	if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
 		opts.Trace.OnComplete(ctx, fullContent.String(), nil)
 	}

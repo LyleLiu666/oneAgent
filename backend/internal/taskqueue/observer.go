@@ -3,6 +3,7 @@ package taskqueue
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
@@ -67,7 +68,7 @@ func (o *OutcomeObserver) Decide(ctx context.Context, in ObserveInput) (Observer
 	traceTail, traceMeta := readFileTail(in.TraceLogPath, traceTailMax)
 	testReportText, testReportMeta := readFileHead(in.TestReportPath, findingsMax)
 
-	system := strings.TrimSpace(`
+system := strings.TrimSpace(`
 You are an Outcome Observer for an autonomous coding agent.
 
 Goal: Decide if the attempt satisfies the user's original expectations.
@@ -81,12 +82,19 @@ Rules:
 - You SHOULD answer reasonable "follow-up questions" by choosing a path based on evidence, instead of asking the user.
 
 Output:
-Return ONLY a JSON object with keys:
-- pass: boolean
-- reason: string (actionable; what is missing or what is done)
-- evidence: array of strings (file paths / short excerpts)
-- next_steps: string (when pass=false, provide an executable remediation plan for the next attempt)
-- questions_for_user: array of strings (optional; ONLY if user preference/external info is truly required)
+Return ONLY an XML block:
+
+<observer_decision>
+  <pass>true</pass>
+  <reason>...</reason>
+  <evidence>
+    <item>...</item>
+  </evidence>
+  <next_steps>...</next_steps>
+  <questions_for_user>
+    <item>...</item>
+  </questions_for_user>
+</observer_decision>
 `)
 
 	var user strings.Builder
@@ -175,11 +183,17 @@ func parseObserverDecision(out string) (ObserverDecision, error) {
 		}
 	}
 
+	if xmlBlock := extractFirstXMLBlock(raw, "observer_decision"); xmlBlock != "" {
+		if parsed, ok := parseObserverDecisionFromXML(xmlBlock); ok {
+			return parsed, nil
+		}
+	}
+
 	if fallback, ok := parseObserverDecisionFromText(raw); ok {
 		return fallback, nil
 	}
 
-	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected JSON): %q", truncateString(raw, 300))
+	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected XML or JSON): %q", truncateString(raw, 300))
 }
 
 func extractFirstJSONObject(raw string) string {
@@ -226,6 +240,77 @@ func extractFirstJSONObject(raw string) string {
 	}
 
 	return ""
+}
+
+func extractFirstXMLBlock(raw string, tag string) string {
+	raw = strings.TrimSpace(raw)
+	tag = strings.TrimSpace(tag)
+	if raw == "" || tag == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`(?is)<` + regexp.QuoteMeta(tag) + `\b[^>]*>.*?</` + regexp.QuoteMeta(tag) + `>`)
+	return strings.TrimSpace(re.FindString(raw))
+}
+
+type observerDecisionXML struct {
+	Pass            string   `xml:"pass"`
+	Reason          string   `xml:"reason"`
+	Evidence        []string `xml:"evidence>item"`
+	NextSteps       string   `xml:"next_steps"`
+	QuestionsForUser []string `xml:"questions_for_user>item"`
+}
+
+func parseObserverDecisionFromXML(raw string) (ObserverDecision, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ObserverDecision{}, false
+	}
+
+	var x observerDecisionXML
+	if err := xml.Unmarshal([]byte(raw), &x); err != nil {
+		return ObserverDecision{}, false
+	}
+
+	passText := strings.TrimSpace(x.Pass)
+	if passText == "" {
+		return ObserverDecision{}, false
+	}
+
+	pass := false
+	switch strings.ToLower(passText) {
+	case "true", "1", "yes", "y", "是":
+		pass = true
+	case "false", "0", "no", "n", "否":
+		pass = false
+	default:
+		return ObserverDecision{}, false
+	}
+
+	evidence := make([]string, 0, len(x.Evidence))
+	for _, e := range x.Evidence {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		evidence = append(evidence, e)
+	}
+
+	qs := make([]string, 0, len(x.QuestionsForUser))
+	for _, q := range x.QuestionsForUser {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			continue
+		}
+		qs = append(qs, q)
+	}
+
+	return ObserverDecision{
+		Pass:             pass,
+		Reason:           strings.TrimSpace(x.Reason),
+		Evidence:         evidence,
+		NextSteps:        strings.TrimSpace(x.NextSteps),
+		QuestionsForUser: qs,
+	}, true
 }
 
 var reObserverPass = regexp.MustCompile(`(?im)\bpass\b\s*[:：]\s*(true|false)\b`)

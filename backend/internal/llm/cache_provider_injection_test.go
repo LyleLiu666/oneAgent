@@ -196,6 +196,7 @@ func TestProviderInjection_Claude_SetsPromptCachingHeader(t *testing.T) {
 		}
 		gotHeader = r.Header.Get("anthropic-beta")
 		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	t.Cleanup(mock.Close)

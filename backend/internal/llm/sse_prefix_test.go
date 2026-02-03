@@ -76,3 +76,79 @@ func TestAnthropicClient_ParsesSSEDataWithoutSpace(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_EmptySSEContent_ReturnsError(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	err := client.ChatCompletionStream(context.Background(), []ChatMessage{
+		BuildSystemMessage("sys"),
+		BuildUserMessage("hi"),
+	}, nil, func(string) error { return nil })
+	if err == nil {
+		t.Fatalf("expected error for empty SSE completion")
+	}
+}
+
+func TestAnthropicClient_EmptySSEContent_ReturnsError(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewAnthropicClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "claude-test",
+	})
+
+	err := client.ChatCompletionStream(context.Background(), []ChatMessage{
+		BuildUserMessage("hi"),
+	}, nil, func(string) error { return nil })
+	if err == nil {
+		t.Fatalf("expected error for empty SSE completion")
+	}
+}
+
+func TestOpenAIResponsesClient_EmptySSEContent_ReturnsError(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	err := client.ChatCompletionStream(context.Background(), []ChatMessage{
+		BuildSystemMessage("sys"),
+		BuildUserMessage("hi"),
+	}, nil, func(string) error { return nil })
+	if err == nil {
+		t.Fatalf("expected error for empty SSE completion")
+	}
+}
