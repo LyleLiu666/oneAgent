@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import ChatBox from '@/components/ChatBox.vue'
+import SecretaryChatBox from '@/components/SecretaryChatBox.vue'
 </script>
 
 <template>
   <div class="h-screen">
-    <ChatBox initial-mode="secretary" />
+    <SecretaryChatBox initial-mode="secretary" />
   </div>
 </template>
-

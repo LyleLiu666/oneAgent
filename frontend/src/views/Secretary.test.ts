@@ -9,7 +9,7 @@ vi.mock('@/api/client', () => ({
   streamChat: vi.fn(),
   appendSecretaryInboxMessage: vi.fn(),
   secretaryTriage: vi.fn(),
-  getSecretaryState: vi.fn(async () => ({ cursor_message_id: 0, triage_runs: [] })),
+  getSecretaryState: vi.fn(async () => ({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
   getSessions: vi.fn(async () => []),
   getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
@@ -45,7 +45,7 @@ const stubLocalStorage = () => {
   return store
 }
 
-it('renders ChatBox in secretary mode for /secretary', async () => {
+it('renders SecretaryChatBox in secretary mode for /secretary', async () => {
   stubLocalStorage()
 
   const pinia = createPinia()
@@ -58,9 +58,9 @@ it('renders ChatBox in secretary mode for /secretary', async () => {
     },
   })
 
-  const chatBox = wrapper.findComponent({ name: 'ChatBox' })
-  expect(chatBox.exists()).toBe(true)
-  expect((chatBox.props() as any).initialMode).toBe('secretary')
+  const secretaryChatBox = wrapper.findComponent({ name: 'SecretaryChatBox' })
+  expect(secretaryChatBox.exists()).toBe(true)
+  expect((secretaryChatBox.props() as any).initialMode).toBe('secretary')
 
   wrapper.unmount()
 })
@@ -71,8 +71,8 @@ it('hides low-frequency UI in secretary mode and keeps full mode discoverable', 
   const pinia = createPinia()
   setActivePinia(pinia)
 
-  const { default: ChatBox } = await import('@/components/ChatBox.vue')
-  const wrapper = shallowMount(ChatBox, {
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
     props: {
       initialMode: 'secretary',
     },
@@ -106,6 +106,18 @@ it('shows in-flight tool call progress in secretary mode', async () => {
   const pinia = createPinia()
   setActivePinia(pinia)
 
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: {
+      initialMode: 'secretary',
+    },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+
   const chatStore = useChatStore()
   chatStore.setMessages([
     {
@@ -127,16 +139,6 @@ it('shows in-flight tool call progress in secretary mode', async () => {
       },
     },
   ])
-
-  const { default: ChatBox } = await import('@/components/ChatBox.vue')
-  const wrapper = shallowMount(ChatBox, {
-    props: {
-      initialMode: 'secretary',
-    },
-    global: {
-      plugins: [pinia],
-    },
-  })
 
   await flushPromises()
 
