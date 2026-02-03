@@ -662,12 +662,12 @@ func parseSecretaryTriagePlanTags(text string) (triagePlan, bool) {
 		return triagePlan{}, false
 	}
 
-	stopTags := []string{"intent", "summary_message", "tasks", "questions", "task", "item"}
-
-	intent, _ := agent.ExtractTagValue(block, "intent", stopTags)
-	summary, _ := agent.ExtractTagValue(block, "summary_message", stopTags)
-	tasksRaw, _ := agent.ExtractTagValue(block, "tasks", stopTags)
-	questionsRaw, _ := agent.ExtractTagValue(block, "questions", stopTags)
+	// NOTE: For container tags (tasks/questions), avoid using nested tag names as stop-tags.
+	// Otherwise missing closing tags (common in model output) could truncate the inner payload.
+	intent, _ := agent.ExtractTagValue(block, "intent", []string{"summary_message", "tasks", "questions"})
+	summary, _ := agent.ExtractTagValue(block, "summary_message", []string{"tasks", "questions"})
+	tasksRaw, _ := agent.ExtractTagValue(block, "tasks", []string{"questions"})
+	questionsRaw, _ := agent.ExtractTagValue(block, "questions", nil)
 
 	plan := triagePlan{
 		Intent:         strings.TrimSpace(intent),
