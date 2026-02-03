@@ -15,7 +15,7 @@
 
 ## 3. Validation
 - [x] 3.1 Backend: `cd backend && go test ./... -count=1`
-- [ ] 3.2 Frontend: `cd frontend && npm test -- --run`
+- [x] 3.2 Frontend: `cd frontend && npm test -- --run`
 - [ ] 3.3 Manual smoke (local):
   - [ ] /secretary: 连续消息 → triage → 有明确下一步
   - [ ] 进度询问（“任务完成得怎么样/有几个任务在进行”）不会再反问 workspace/任务是哪一个
