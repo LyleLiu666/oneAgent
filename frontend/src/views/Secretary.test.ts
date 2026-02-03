@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
+import * as apiClient from '@/api/client'
 
 vi.mock('@/api/client', () => ({
   streamChat: vi.fn(),
@@ -105,6 +106,68 @@ it('hides low-frequency UI in secretary mode and keeps full mode discoverable', 
   expect(wrapper.find('task-queue-panel-stub').exists()).toBe(true)
 
   wrapper.unmount()
+})
+
+it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
+  vi.useFakeTimers()
+
+  const flush = async () => {
+    const p = flushPromises()
+    vi.advanceTimersByTime(0)
+    await p
+  }
+
+  stubLocalStorage()
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+    session_id: 's1',
+    message_id: 1,
+    ack_message_id: 2,
+    ack_text: '好的，我先看一下。',
+  })
+
+  ;(apiClient.secretaryTriage as any).mockResolvedValueOnce({
+    session_id: 's1',
+    summary_message: '我这边卡在一个点，需要你确认。',
+    summary_message_id: 10,
+    cursor_message_id: 1,
+    created_task_ids: [],
+    questions: ['用哪个目录来做？'],
+    workspaces_created: [],
+  })
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: {
+      initialMode: 'secretary',
+    },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flush()
+
+  await wrapper.get('textarea').setValue('帮我修一下测试')
+  await wrapper.get('[data-testid="chat-send"]').trigger('click')
+  await flush()
+
+  vi.advanceTimersByTime(900)
+  await flush()
+
+  expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
+  expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
+  expect(wrapper.text()).toContain('用哪个目录来做？')
+
+  await wrapper.get('[data-testid="secretary-pending-questions-modal-close"]').trigger('click')
+  await flush()
+  expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+
+  wrapper.unmount()
+  vi.useRealTimers()
 })
 
 it('shows in-flight tool call progress in secretary mode', async () => {

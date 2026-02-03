@@ -381,10 +381,7 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	questions := dispatch.Questions
 	workspacesCreated := dispatch.WorkspacesCreated
 
-	summary := strings.TrimSpace(plan.SummaryMessage)
-	if summary == "" {
-		summary = buildFallbackSummary(len(createdTaskIDs), len(questions))
-	}
+	summary := buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
 
 	summaryMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
 		Role:    model.MessageRoleAssistant,
@@ -489,17 +486,17 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 
 		case "session":
 			if sessionWorkspace == "" {
-				questions = append(questions, fmt.Sprintf("这项任务需要一个代码仓库 workspace：%s。请指定/选择 workspace 后我再派工。", title))
+				questions = append(questions, fmt.Sprintf("要继续「%s」，我需要你告诉我在哪个项目目录里做（发我仓库根目录路径即可）。", title))
 				continue
 			}
 			workspace = sessionWorkspace
 
 		case "ask":
-			questions = append(questions, fmt.Sprintf("这项任务需要你确认 workspace：%s。请告诉我用哪个目录来执行。", title))
+			questions = append(questions, fmt.Sprintf("「%s」需要你指定要操作的项目目录。你把目录路径发我就行。", title))
 			continue
 
 		default:
-			questions = append(questions, fmt.Sprintf("无法确定 workspace（strategy=%s）：%s。请告诉我用哪个目录来执行。", strategy, title))
+			questions = append(questions, fmt.Sprintf("「%s」我暂时判断不出要用哪个项目目录。你发我一个目录路径（仓库根目录）我就继续。", title))
 			continue
 		}
 
@@ -817,17 +814,64 @@ func messageIDs(msgs []model.ChatMessage) []uint {
 	return ids
 }
 
-func buildFallbackSummary(taskCount, questionCount int) string {
-	switch {
-	case taskCount > 0 && questionCount > 0:
-		return fmt.Sprintf("我已先安排 %d 个后台 worker 开始执行，同时有 %d 个问题需要你确认。", taskCount, questionCount)
-	case taskCount > 0:
-		return fmt.Sprintf("我已安排 %d 个后台 worker 开始执行。", taskCount)
-	case questionCount > 0:
-		return fmt.Sprintf("我理解了需求，但有 %d 个问题需要你确认后才能派工。", questionCount)
-	default:
-		return "收到，我正在整理下一步安排。"
+func buildTriageSummary(planSummary string, createdTaskCount int, questions []string) string {
+	summary := strings.TrimSpace(planSummary)
+
+	normalizedQuestions := make([]string, 0, len(questions))
+	seen := make(map[string]struct{}, len(questions))
+	for _, q := range questions {
+		q = strings.TrimSpace(q)
+		if q == "" {
+			continue
+		}
+		// Keep the user-facing summary low-noise.
+		if len([]rune(q)) > 240 {
+			q = truncateString(q, 240) + "…"
+		}
+		if _, ok := seen[q]; ok {
+			continue
+		}
+		seen[q] = struct{}{}
+		normalizedQuestions = append(normalizedQuestions, q)
 	}
+
+	if summary == "" {
+		switch {
+		case createdTaskCount > 0 && len(normalizedQuestions) > 0:
+			summary = "我先把不依赖你决定的部分开始推进了。接下来需要你拍板："
+		case createdTaskCount > 0:
+			summary = "我先开始推进了，进展我会随时告诉你。"
+		case len(normalizedQuestions) > 0:
+			summary = "继续之前我需要你拍板："
+		default:
+			summary = "收到，我正在整理下一步。"
+		}
+	}
+
+	if len(normalizedQuestions) == 0 {
+		return strings.TrimSpace(summary)
+	}
+
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(summary))
+	b.WriteString("\n")
+
+	// Only append questions that are not already included in the summary.
+	qIndex := 0
+	for _, q := range normalizedQuestions {
+		if strings.Contains(summary, q) {
+			continue
+		}
+		qIndex++
+		b.WriteString(fmt.Sprintf("%d) %s\n", qIndex, q))
+	}
+
+	if qIndex == 0 {
+		return strings.TrimSpace(b.String())
+	}
+
+	b.WriteString("你直接回复编号/答案就行，我继续推进。")
+	return strings.TrimSpace(b.String())
 }
 
 func (o *Orchestrator) workspacePoolRoot() (string, error) {
@@ -1303,6 +1347,17 @@ ONEAGENT_SECRETARY_TRIAGE
   ],
   "questions": ["需要用户确认的问题（可为空）"]
 }
+
+summary_message 写作要求（非常重要）：
+- 这是“用户会看到的一段话”，要像真人秘书在说话：自然、具体、可执行
+- 不要使用内部术语：不要出现 worker/task/派工/workspace/后台 等词
+- 不要只说“有 N 个问题/需要确认后才能继续”这种空话；如果需要确认，一定要把要确认的点写清楚
+- 至少给出下一步：要么你将继续推进什么；要么用户现在只需要回复什么（最好能“回复 1/2/3”）
+- 即使 tasks/questions 都为空，也要输出一条不空的 summary_message（例如“我先把需求梳理一下，马上回来”）
+
+questions 写作要求：
+- 每条都要能让用户直接回答（最好附 2~3 个选项或所需信息格式）
+- 尽量用“项目目录/仓库根目录/路径”等用户听得懂的说法，不要说 workspace
 
 workspace_strategy 规则：
 - new：与 repo 无关的泛化任务（报告/整理/写文档等），允许系统创建新 workspace 并行执行

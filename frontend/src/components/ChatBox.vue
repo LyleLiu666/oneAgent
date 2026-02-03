@@ -93,6 +93,8 @@ const secretaryRecoverySubmitting = ref(false)
 const secretaryTriageSubmitting = ref(false)
 const secretaryTriageQueued = ref(false)
 let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
+const secretaryPendingQuestions = ref<string[]>([])
+const secretaryPendingQuestionsModalOpen = ref(false)
 
 type SecretaryRecoveryItem = {
   taskId: string
@@ -114,6 +116,15 @@ const secretaryRecoveryIntroSent = ref(false)
 const secretaryRecoveryAwaitingReply = ref(false)
 const secretaryRecoveryTotal = ref(0)
 const secretaryRecoveryHandled = ref(0)
+
+const normalizeSecretaryQuestions = (raw: any): string[] => {
+  const list = Array.isArray(raw) ? raw : []
+  return list.map((q) => String(q ?? '').trim()).filter(Boolean)
+}
+
+const closeSecretaryPendingQuestionsModal = () => {
+  secretaryPendingQuestionsModalOpen.value = false
+}
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
   if (!msg.isStreaming) return undefined
@@ -711,12 +722,17 @@ const loadSessionMessages = async (
         const st: any = await getSecretaryState(sessionId)
         const cursor = Number((st as any)?.cursor_message_id)
         secretaryCursorMessageId.value = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
+        const runs = Array.isArray((st as any)?.triage_runs) ? ((st as any).triage_runs as any[]) : []
+        const lastRun = runs.length > 0 ? runs[runs.length - 1] : null
+        secretaryPendingQuestions.value = normalizeSecretaryQuestions((lastRun as any)?.questions)
       } catch (error) {
         secretaryCursorMessageId.value = 0
+        secretaryPendingQuestions.value = []
         console.warn('Failed to load secretary state:', error)
       }
     } else {
       secretaryCursorMessageId.value = 0
+      secretaryPendingQuestions.value = []
     }
   } catch (error) {
     console.error('Failed to load session:', error)
@@ -750,6 +766,8 @@ const startNewSession = () => {
   sessionPolicyResolvedAt.value = ''
   workspaceOnboardingDismissed.value = false
   secretaryCursorMessageId.value = 0
+  secretaryPendingQuestions.value = []
+  secretaryPendingQuestionsModalOpen.value = false
   secretaryTriageSubmitting.value = false
   secretaryTriageQueued.value = false
   if (secretaryTriageTimer) {
@@ -1472,6 +1490,9 @@ const runSecretaryTriage = async () => {
     }
 
     upsertServerTextMessage(res?.summary_message_id, 'assistant', res?.summary_message)
+    const nextQuestions = normalizeSecretaryQuestions(res?.questions)
+    secretaryPendingQuestions.value = nextQuestions
+    if (nextQuestions.length > 0) secretaryPendingQuestionsModalOpen.value = true
     loadSessions()
   } catch (error) {
     console.error('Failed to triage secretary inbox:', error)
@@ -2132,6 +2153,22 @@ onMounted(async () => {
           <div class="flex items-center gap-2 flex-wrap justify-end">
             <SecretaryStatusHints v-if="isSecretaryMode" />
             <button
+              v-if="isSecretaryMode && secretaryPendingQuestions.length > 0"
+              type="button"
+              data-testid="secretary-pending-questions"
+              class="inline-flex items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs text-amber-200 hover:bg-amber-500/15 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+              title="有事项需要你确认"
+              @click="secretaryPendingQuestionsModalOpen = true"
+            >
+              <span class="tracking-wide">待确认</span>
+              <span
+                data-testid="secretary-pending-questions-count"
+                class="inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500/20 px-1.5 py-0.5 text-[11px] text-amber-100"
+              >
+                {{ secretaryPendingQuestions.length }}
+              </span>
+            </button>
+            <button
               type="button"
               data-testid="chat-toggle-mode"
               class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
@@ -2546,13 +2583,49 @@ onMounted(async () => {
         </div>
       </div>
 	  </div>
-	</div>
+	  </div>
 
-  <div
-    v-if="taskHandoffSuggestOpen"
-    data-testid="chat-handoff-suggest"
-    class="fixed inset-0 z-50 flex items-center justify-center p-4"
-  >
+    <div
+      v-if="secretaryPendingQuestionsModalOpen"
+      data-testid="secretary-pending-questions-modal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div class="absolute inset-0 bg-black/70" @click="closeSecretaryPendingQuestionsModal"></div>
+      <div class="relative w-full max-w-2xl rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
+        <div class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-surface-100 truncate">需要你确认</div>
+            <div class="text-xs text-surface-400 mt-0.5">确认后我就能继续往下推进。</div>
+          </div>
+          <button
+            type="button"
+            data-testid="secretary-pending-questions-modal-close"
+            class="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-700/50 text-surface-300 hover:bg-surface-600/50 transition-colors"
+            @click="closeSecretaryPendingQuestionsModal"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="p-5 space-y-4">
+          <div v-if="sessionWorkspace" class="text-xs text-surface-400">
+            当前会话已绑定项目目录：<span class="font-mono break-all">{{ sessionWorkspace }}</span>
+          </div>
+          <ol class="space-y-2 text-sm text-surface-100 list-decimal list-inside">
+            <li v-for="q in secretaryPendingQuestions" :key="q" class="whitespace-pre-wrap break-words">
+              {{ q }}
+            </li>
+          </ol>
+          <div class="text-xs text-surface-400">你直接回复编号/答案就行。</div>
+        </div>
+      </div>
+    </div>
+
+	  <div
+	    v-if="taskHandoffSuggestOpen"
+	    data-testid="chat-handoff-suggest"
+	    class="fixed inset-0 z-50 flex items-center justify-center p-4"
+	  >
     <div class="absolute inset-0 bg-black/70" @click="closeTaskHandoffSuggest"></div>
     <div class="relative w-full max-w-lg rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
       <div class="px-5 py-4 bg-surface-800/50">
