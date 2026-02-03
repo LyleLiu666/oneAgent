@@ -4,13 +4,20 @@ import { expect, it, vi } from 'vitest'
 import { shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
+import { useSecretaryChatStore } from '@/stores/secretaryChat'
 import * as apiClient from '@/api/client'
+
+const routerPush = vi.fn()
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush }),
+}))
 
 vi.mock('@/api/client', () => ({
   streamChat: vi.fn(),
   appendSecretaryInboxMessage: vi.fn(),
   secretaryTriage: vi.fn(),
   getSecretaryState: vi.fn(async () => ({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })),
+  getSecretarySession: vi.fn(async () => ({ id: 's1', messages: [], metadata: {} })),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
   getSessions: vi.fn(async () => []),
   getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
@@ -71,6 +78,7 @@ it('hides low-frequency UI in secretary mode and keeps full mode discoverable', 
 
   const pinia = createPinia()
   setActivePinia(pinia)
+  routerPush.mockReset()
 
   const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
   const wrapper = shallowMount(SecretaryChatBox, {
@@ -101,9 +109,10 @@ it('hides low-frequency UI in secretary mode and keeps full mode discoverable', 
   await toggle.trigger('click')
   await flushPromises()
 
-  expect(wrapper.get('[data-testid="chat-toggle-mode"]').text()).toContain('进入秘书模式')
-  expect(wrapper.find('[data-testid="chat-workspace-choose"]').exists()).toBe(true)
-  expect(wrapper.find('task-queue-panel-stub').exists()).toBe(true)
+  const { useUIStore } = await import('@/stores/ui')
+  const ui = useUIStore()
+  expect(ui.mode).toBe('full')
+  expect(routerPush).toHaveBeenCalledWith('/chat')
 
   wrapper.unmount()
 })
@@ -155,10 +164,17 @@ it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
   await wrapper.get('[data-testid="chat-send"]').trigger('click')
   await flush()
 
+  const appendArgs = (apiClient.appendSecretaryInboxMessage as any).mock.calls[0]?.[0]
+  expect(appendArgs).toBeTruthy()
+  expect(appendArgs).not.toHaveProperty('session_id')
+
   vi.advanceTimersByTime(900)
   await flush()
 
   expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
+  const triageArgs = (apiClient.secretaryTriage as any).mock.calls[0]?.[0]
+  expect(triageArgs).toBeTruthy()
+  expect(triageArgs).not.toHaveProperty('session_id')
   expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
   expect(wrapper.text()).toContain('用哪个目录来做？')
 
@@ -188,7 +204,7 @@ it('shows in-flight tool call progress in secretary mode', async () => {
 
   await flushPromises()
 
-  const chatStore = useChatStore()
+  const chatStore = useSecretaryChatStore()
   chatStore.setMessages([
     {
       id: 1,
@@ -242,4 +258,54 @@ it('shows in-flight tool call progress in secretary mode', async () => {
   expect(wrapper.find('[data-testid=\"chat-secretary-tool-progress\"]').exists()).toBe(false)
 
   wrapper.unmount()
+})
+
+it('does not override assistant chat session when chatting with secretary', async () => {
+  vi.useFakeTimers()
+
+  const flush = async () => {
+    const p = flushPromises()
+    vi.advanceTimersByTime(0)
+    await p
+  }
+
+  stubLocalStorage()
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const assistantStore = useChatStore()
+  assistantStore.setCurrentSession('a1')
+
+  const secretaryStore = useSecretaryChatStore()
+  secretaryStore.setCurrentSession('s1')
+
+  ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+    session_id: 's1',
+    message_id: 1,
+    ack_message_id: 0,
+    ack_text: '',
+  })
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: {
+      initialMode: 'secretary',
+    },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flush()
+
+  await wrapper.get('textarea').setValue('你好')
+  await wrapper.get('[data-testid="chat-send"]').trigger('click')
+  await flush()
+
+  expect(assistantStore.currentSessionId).toBe('a1')
+  expect(secretaryStore.currentSessionId).toBe('s1')
+
+  wrapper.unmount()
+  vi.useRealTimers()
 })

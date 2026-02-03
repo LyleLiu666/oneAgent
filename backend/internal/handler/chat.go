@@ -213,6 +213,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
 		return
 	}
+	if strings.TrimSpace(session.Module) != ChatModule {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError(ChatModule, session.Module))
+		return
+	}
 
 	workspaceFromReq := strings.TrimSpace(req.Workspace)
 	workspaceSet := workspaceFromReq != ""
@@ -1150,12 +1154,17 @@ func (h *ChatHandler) AttachSessionStream(c *gin.Context) {
 	}
 
 	// Authorization/ownership check (best-effort).
-	if _, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID); err != nil {
+	session, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+	if strings.TrimSpace(session.Module) != ChatModule {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError(ChatModule, session.Module))
 		return
 	}
 
@@ -1243,12 +1252,17 @@ func (h *ChatHandler) StopSessionStream(c *gin.Context) {
 	}
 
 	// Authorization/ownership check (best-effort).
-	if _, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID); err != nil {
+	session, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+	if strings.TrimSpace(session.Module) != ChatModule {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError(ChatModule, session.Module))
 		return
 	}
 
@@ -1301,6 +1315,10 @@ func (h *ChatHandler) GetSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
 		return
 	}
+	if strings.TrimSpace(session.Module) != ChatModule {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError(ChatModule, session.Module))
+		return
+	}
 	session.Messages = msgs
 	c.JSON(http.StatusOK, session)
 }
@@ -1315,12 +1333,17 @@ func (h *ChatHandler) DeleteSession(c *gin.Context) {
 		return
 	}
 
-	if _, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID); err != nil {
+	session, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+	if strings.TrimSpace(session.Module) != ChatModule {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError(ChatModule, session.Module))
 		return
 	}
 
@@ -1345,6 +1368,20 @@ func (h *ChatHandler) TruncateSession(c *gin.Context) {
 
 	if h.rt == nil || h.rt.Sessions == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	session, _, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+	if strings.TrimSpace(session.Module) != ChatModule {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError(ChatModule, session.Module))
 		return
 	}
 

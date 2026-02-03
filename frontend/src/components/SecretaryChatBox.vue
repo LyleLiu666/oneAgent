@@ -2,8 +2,10 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { Send, Square, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, Cpu, Folder } from 'lucide-vue-next'
 import { marked } from 'marked'
-import { useChatStore, type ChatMessage } from '@/stores/chat'
+import { type ChatMessage } from '@/stores/chat'
+import { useSecretaryChatStore } from '@/stores/secretaryChat'
 import { useUIStore } from '@/stores/ui'
+import { useRouter } from 'vue-router'
 import {
   streamChat,
   attachChatStream,
@@ -20,6 +22,7 @@ import {
   appendSecretaryInboxMessage,
   secretaryTriage,
   getSecretaryState,
+  getSecretarySession,
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
@@ -31,8 +34,14 @@ import TaskQueuePanel from './TaskQueuePanel.vue'
 import SecretaryStatusHints from './SecretaryStatusHints.vue'
 import SecretaryTaskDeliverables from './SecretaryTaskDeliverables.vue'
 
-const chatStore = useChatStore()
+const chatStore = useSecretaryChatStore()
 const uiStore = useUIStore()
+let router: ReturnType<typeof useRouter> | undefined
+try {
+  router = useRouter()
+} catch {
+  router = undefined
+}
 
 type ChatUIMode = 'full' | 'secretary'
 
@@ -355,7 +364,13 @@ const toolSummary = computed(() => {
 })
 
 const toggleChatUIMode = () => {
-  uiStore.toggleMode()
+  if (uiStore.mode === 'secretary') {
+    uiStore.setMode('full')
+    void router?.push('/chat')
+    return
+  }
+  uiStore.setMode('secretary')
+  void router?.push('/secretary')
 }
 
 const closeTaskHandoffSuggest = () => {
@@ -437,6 +452,27 @@ const scrollToBottom = (smooth = true) => {
 const loadSessions = async () => {
   sessionsLoading.value = true
   try {
+    if (isSecretaryMode.value) {
+      const raw: any = await getSecretarySession()
+      const id = String(raw?.id || '').trim()
+      if (!id) {
+        chatStore.setSessions([])
+        return
+      }
+      chatStore.setSessions([
+        {
+          id,
+          title: String(raw?.title || 'Secretary'),
+          createdAt: new Date(raw?.created_at ?? raw?.createdAt ?? Date.now()),
+          updatedAt: new Date(raw?.updated_at ?? raw?.updatedAt ?? Date.now()),
+        },
+      ])
+      if (id !== chatStore.currentSessionId) {
+        chatStore.setCurrentSession(id)
+      }
+      return
+    }
+
     const raw = await getSessions()
     const mapped = (Array.isArray(raw) ? raw : []).map((s: any) => ({
       id: String(s.id),
@@ -576,11 +612,15 @@ const loadSessionMessages = async (
   showLoading = true,
   fallbackAssistantTrace?: string
 ) => {
-  if (!sessionId) return
+  if (!sessionId && !isSecretaryMode.value) return
   if (showLoading) loadingHistory.value = true
   try {
-    const raw: any = await getSession(sessionId)
+    const raw: any = isSecretaryMode.value ? await getSecretarySession() : await getSession(sessionId)
     console.log('[ChatBox] loaded session raw:', raw)
+    const resolvedSessionId = String((raw as any)?.id || sessionId || '').trim()
+    if (resolvedSessionId && resolvedSessionId !== chatStore.currentSessionId) {
+      chatStore.setCurrentSession(resolvedSessionId)
+    }
     const sessionModelId = raw?.metadata?.model_id
     if (sessionModelId) {
       selectedModelId.value = String(sessionModelId)
@@ -686,7 +726,6 @@ const loadSessionMessages = async (
         }
       })
 
-    chatStore.setCurrentSession(sessionId)
     const withSystemPrompt: ChatMessage[] =
       typeof sessionSystemPrompt === 'string' && sessionSystemPrompt.trim()
         ? [
@@ -720,7 +759,7 @@ const loadSessionMessages = async (
 
     if (isSecretaryMode.value) {
       try {
-        const st: any = await getSecretaryState(sessionId)
+        const st: any = await getSecretaryState()
         const cursor = Number((st as any)?.cursor_message_id)
         secretaryCursorMessageId.value = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
         const runs = Array.isArray((st as any)?.triage_runs) ? ((st as any).triage_runs as any[]) : []
@@ -1472,8 +1511,6 @@ const scheduleSecretaryTriage = () => {
 }
 
 const runSecretaryTriage = async () => {
-  const sessionId = String(chatStore.currentSessionId || '').trim()
-
   if (secretaryTriageSubmitting.value) {
     secretaryTriageQueued.value = true
     return
@@ -1484,8 +1521,6 @@ const runSecretaryTriage = async () => {
     const payload: any = {
       cursor_message_id: Number(secretaryCursorMessageId.value || 0),
     }
-    if (sessionId) payload.session_id = sessionId
-
     const res: any = await secretaryTriage(payload)
 
     const serverSessionId = String(res?.session_id || '').trim()
@@ -1528,8 +1563,6 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   if (loadingHistory.value) return
   if (secretaryInboxSubmitting.value) return
 
-  const sessionId = String(chatStore.currentSessionId || '').trim()
-
   // Optimistically render user message so repeated submissions are less likely.
   const optimisticMessageId = Date.now()
   chatStore.addMessage({
@@ -1549,8 +1582,6 @@ const sendSecretaryMessage = async (rawMessage: string) => {
       // Best-effort: bind workspace if the session already has one.
       workspace: String(sessionWorkspace.value || '').trim() || undefined,
     }
-    if (sessionId) payload.session_id = sessionId
-
     const res: any = await appendSecretaryInboxMessage(payload)
 
     const serverSessionId = String(res?.session_id || '').trim()

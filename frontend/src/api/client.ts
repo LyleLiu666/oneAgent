@@ -316,7 +316,6 @@ export interface SecretaryInboxAppendResponse {
 }
 
 export async function appendSecretaryInboxMessage(payload: {
-  session_id?: string;
   content: string;
   workspace?: string;
 }): Promise<SecretaryInboxAppendResponse> {
@@ -334,7 +333,6 @@ export interface SecretaryTriageResponse {
 }
 
 export async function secretaryTriage(payload: {
-  session_id?: string;
   cursor_message_id?: number;
 }): Promise<SecretaryTriageResponse> {
   return api("/api/secretary/triage", { method: "POST", body: payload });
@@ -355,12 +353,12 @@ export interface SecretaryStateResponse {
   }>;
 }
 
-export async function getSecretaryState(sessionId?: string): Promise<SecretaryStateResponse> {
-  const id = String(sessionId || "").trim();
-  if (!id) {
-    return api(`/api/secretary/state`);
-  }
-  return api(`/api/secretary/state?session_id=${encodeURIComponent(id)}`);
+export async function getSecretaryState(): Promise<SecretaryStateResponse> {
+  return api(`/api/secretary/state`);
+}
+
+export async function getSecretarySession() {
+  return api("/api/secretary/session");
 }
 
 export async function approveToolApproval(approvalId: string, reason: string = "") {

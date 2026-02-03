@@ -13,6 +13,7 @@ vi.mock('@/api/client', () => ({
     appendSecretaryInboxMessage: vi.fn(),
     secretaryTriage: vi.fn(),
     getSecretaryState: vi.fn(async () => ({ cursor_message_id: 0, triage_runs: [] })),
+    getSecretarySession: vi.fn(async () => ({ id: 's1', messages: [], metadata: {} })),
     getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
     getLedgerStatusToday: vi.fn(async () => ({
         day_key: '2026-02-01',
@@ -91,6 +92,7 @@ it('keeps session header above messages (for tool popover)', async () => {
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
     const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
         global: {
             plugins: [pinia],
         },
@@ -118,6 +120,7 @@ it('allows messages pane to scroll (min-h-0)', async () => {
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
     const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
         global: {
             plugins: [pinia],
         },
@@ -197,6 +200,7 @@ it('renders streaming token count while waiting for content', async () => {
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
     const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
         global: {
             plugins: [pinia],
         },
@@ -277,6 +281,7 @@ it('shows a stop button while streaming and calls stop endpoint', async () => {
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
     const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
         global: {
             plugins: [pinia],
         },
@@ -337,6 +342,7 @@ it('attaches to in-flight stream on reload when last message is user', async () 
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
     const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
         global: {
             plugins: [pinia],
         },

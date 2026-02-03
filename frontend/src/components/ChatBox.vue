@@ -4,6 +4,7 @@ import { Send, Square, RotateCcw, Loader2, ChevronDown, Copy, Check, Sparkles, C
 import { marked } from 'marked'
 import { useChatStore, type ChatMessage } from '@/stores/chat'
 import { useUIStore } from '@/stores/ui'
+import { useRouter } from 'vue-router'
 import {
   streamChat,
   attachChatStream,
@@ -20,6 +21,7 @@ import {
   appendSecretaryInboxMessage,
   secretaryTriage,
   getSecretaryState,
+  getSecretarySession,
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
@@ -33,6 +35,12 @@ import SecretaryTaskDeliverables from './SecretaryTaskDeliverables.vue'
 
 const chatStore = useChatStore()
 const uiStore = useUIStore()
+let router: ReturnType<typeof useRouter> | undefined
+try {
+  router = useRouter()
+} catch {
+  router = undefined
+}
 
 type ChatUIMode = 'full' | 'secretary'
 
@@ -354,7 +362,13 @@ const toolSummary = computed(() => {
 })
 
 const toggleChatUIMode = () => {
-  uiStore.toggleMode()
+  if (uiStore.mode === 'secretary') {
+    uiStore.setMode('full')
+    void router?.push('/chat')
+    return
+  }
+  uiStore.setMode('secretary')
+  void router?.push('/secretary')
 }
 
 const closeTaskHandoffSuggest = () => {
@@ -575,11 +589,15 @@ const loadSessionMessages = async (
   showLoading = true,
   fallbackAssistantTrace?: string
 ) => {
-  if (!sessionId) return
+  if (!sessionId && !isSecretaryMode.value) return
   if (showLoading) loadingHistory.value = true
   try {
-    const raw: any = await getSession(sessionId)
+    const raw: any = isSecretaryMode.value ? await getSecretarySession() : await getSession(sessionId)
     console.log('[ChatBox] loaded session raw:', raw)
+    const resolvedSessionId = String((raw as any)?.id || sessionId || '').trim()
+    if (resolvedSessionId && resolvedSessionId !== chatStore.currentSessionId) {
+      chatStore.setCurrentSession(resolvedSessionId)
+    }
     const sessionModelId = raw?.metadata?.model_id
     if (sessionModelId) {
       selectedModelId.value = String(sessionModelId)
@@ -685,7 +703,6 @@ const loadSessionMessages = async (
         }
       })
 
-    chatStore.setCurrentSession(sessionId)
     const withSystemPrompt: ChatMessage[] =
       typeof sessionSystemPrompt === 'string' && sessionSystemPrompt.trim()
         ? [
@@ -719,7 +736,7 @@ const loadSessionMessages = async (
 
     if (isSecretaryMode.value) {
       try {
-        const st: any = await getSecretaryState(sessionId)
+        const st: any = await getSecretaryState()
         const cursor = Number((st as any)?.cursor_message_id)
         secretaryCursorMessageId.value = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
         const runs = Array.isArray((st as any)?.triage_runs) ? ((st as any).triage_runs as any[]) : []
@@ -1469,9 +1486,6 @@ const scheduleSecretaryTriage = () => {
 }
 
 const runSecretaryTriage = async () => {
-  const sessionId = String(chatStore.currentSessionId || '').trim()
-  if (!sessionId) return
-
   if (secretaryTriageSubmitting.value) {
     secretaryTriageQueued.value = true
     return
@@ -1480,7 +1494,6 @@ const runSecretaryTriage = async () => {
   secretaryTriageSubmitting.value = true
   try {
     const res: any = await secretaryTriage({
-      session_id: sessionId,
       cursor_message_id: Number(secretaryCursorMessageId.value || 0),
     })
 
@@ -1519,8 +1532,6 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   if (loadingHistory.value) return
   if (secretaryInboxSubmitting.value) return
 
-  const ensuredSessionId = ensureSessionId()
-
   // Optimistically render user message so repeated submissions are less likely.
   const optimisticMessageId = Date.now()
   chatStore.addMessage({
@@ -1536,7 +1547,6 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   secretaryInboxSubmitting.value = true
   try {
     const res: any = await appendSecretaryInboxMessage({
-      session_id: ensuredSessionId,
       content: message,
       // Best-effort: bind workspace if the session already has one.
       workspace: String(sessionWorkspace.value || '').trim() || undefined,
@@ -2083,34 +2093,34 @@ onMounted(async () => {
   await loadModels()
   await loadSessions()
   const persistedId = chatStore.currentSessionId
-	  if (persistedId) {
-	    const exists = chatStore.sessions.some((s) => s.id === persistedId)
-	    if (exists) {
-	      await loadSessionMessages(persistedId)
-	      await attachIfNeeded(persistedId)
-	    } else {
-	      // Avoid requesting a non-existent session on boot.
-	      chatStore.clearMessages()
-	    }
-	  }
+  if (persistedId) {
+    const exists = chatStore.sessions.some((s) => s.id === persistedId)
+    if (exists) {
+      await loadSessionMessages(persistedId)
+      await attachIfNeeded(persistedId)
+    } else {
+      // Avoid requesting a non-existent session on boot.
+      chatStore.clearMessages()
+    }
+  }
 
   applyWorkspaceDefaultsForNewSession()
 })
 
-	onUnmounted(() => {
-	  try {
-	    activeStreamAbort.value?.abort()
-	  } catch {
-	    // ignore
-	  } finally {
-	    activeStreamAbort.value = null
-	  }
-	  if (secretaryTriageTimer) {
-	    clearTimeout(secretaryTriageTimer)
-	    secretaryTriageTimer = undefined
-	  }
-	  document.removeEventListener('click', handleDocumentClick)
-	})
+onUnmounted(() => {
+  try {
+    activeStreamAbort.value?.abort()
+  } catch {
+    // ignore
+  } finally {
+    activeStreamAbort.value = null
+  }
+  if (secretaryTriageTimer) {
+    clearTimeout(secretaryTriageTimer)
+    secretaryTriageTimer = undefined
+  }
+  document.removeEventListener('click', handleDocumentClick)
+})
 </script>
 
 <template>

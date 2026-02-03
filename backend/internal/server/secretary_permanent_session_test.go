@@ -49,8 +49,17 @@ func TestServer_SecretaryState_NoSessionID_BootstrapsCanonicalSession(t *testing
 		t.Fatalf("expected cursor=0 for new session, got %+v", st)
 	}
 
-	// The canonical session should now exist in the session store.
-	_ = mustGet(t, srv.URL, rt.AuthToken, "/api/sessions/"+st.SessionID)
+	// The canonical session should now exist and be readable via secretary API.
+	body2 := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
+	var sess struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body2, &sess); err != nil {
+		t.Fatalf("unmarshal secretary session: %v", err)
+	}
+	if sess.ID != st.SessionID {
+		t.Fatalf("expected secretary session id=%q, got %+v", st.SessionID, sess)
+	}
 }
 
 func TestServer_SecretaryInboxMessage_NoAck_AndCanonicalSessionStable(t *testing.T) {

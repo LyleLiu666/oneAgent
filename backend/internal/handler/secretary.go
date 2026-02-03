@@ -74,14 +74,13 @@ func (h *SecretaryHandler) AppendInboxMessage(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 
 	// Secretary session is a canonical permanent session per principal (best-effort).
-	if strings.TrimSpace(req.SessionID) == "" {
-		if sid, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID); err == nil {
-			req.SessionID = sid
-		} else {
-			RespondError(c, http.StatusInternalServerError, err)
-			return
-		}
+	// Ignore any client-provided session_id to avoid cross-module session pollution.
+	sid, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
 	}
+	req.SessionID = sid
 
 	res, err := h.orch.AppendInboxMessage(c.Request.Context(), userID, req.SessionID, req.Content, req.Workspace)
 	if err != nil {
@@ -116,14 +115,12 @@ func (h *SecretaryHandler) Triage(c *gin.Context) {
 
 	userID := middleware.GetUserID(c)
 
-	if strings.TrimSpace(req.SessionID) == "" {
-		if sid, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID); err == nil {
-			req.SessionID = sid
-		} else {
-			RespondError(c, http.StatusInternalServerError, err)
-			return
-		}
+	sid, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
 	}
+	req.SessionID = sid
 
 	res, err := h.orch.Triage(c.Request.Context(), userID, req.SessionID, req.CursorMessageID)
 	if err != nil {
@@ -154,14 +151,11 @@ func (h *SecretaryHandler) GetState(c *gin.Context) {
 
 	userID := middleware.GetUserID(c)
 
-	sessionID := strings.TrimSpace(c.Query("session_id"))
-	if sessionID == "" {
-		if sid, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID); err == nil {
-			sessionID = sid
-		} else {
-			RespondError(c, http.StatusInternalServerError, err)
-			return
-		}
+	// Always use canonical secretary session; ignore any client-provided session_id.
+	sessionID, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
 	}
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
@@ -191,4 +185,45 @@ func (h *SecretaryHandler) GetState(c *gin.Context) {
 		"cursor_message_id": st.CursorMessageID,
 		"triage_runs":       st.TriageRuns,
 	})
+}
+
+func (h *SecretaryHandler) GetSession(c *gin.Context) {
+	if h == nil || h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	sessionID, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		return
+	}
+
+	// Best-effort: canonical secretary session should always exist for bootstrap.
+	if _, err := h.rt.Sessions.GetOrCreateSession(sessionID, userID, "secretary", "Secretary"); err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	session, msgs, err := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load session"})
+		return
+	}
+	if strings.TrimSpace(session.Module) != "secretary" {
+		RespondError(c, http.StatusConflict, sessionModuleMismatchError("secretary", session.Module))
+		return
+	}
+
+	session.Messages = msgs
+	c.JSON(http.StatusOK, session)
 }

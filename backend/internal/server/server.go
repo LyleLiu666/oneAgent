@@ -75,6 +75,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/secretary/inbox/messages", secretaryHandler.AppendInboxMessage)
 		api.POST("/secretary/triage", secretaryHandler.Triage)
 		api.GET("/secretary/state", secretaryHandler.GetState)
+		api.GET("/secretary/session", secretaryHandler.GetSession)
 
 		// Task queue.
 		api.POST("/tasks", handler.CreateTask)

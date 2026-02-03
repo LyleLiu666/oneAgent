@@ -182,7 +182,7 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 
 	// Verify messages are persisted and no quick-ack assistant message is inserted.
-	sessionBody := mustGet(t, srv.URL, rt.AuthToken, "/api/sessions/"+r1.SessionID)
+	sessionBody := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
 	var sess struct {
 		ID       string `json:"id"`
 		Messages []struct {
@@ -195,6 +195,9 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 	if err := json.Unmarshal(sessionBody, &sess); err != nil {
 		t.Fatalf("unmarshal session: %v", err)
+	}
+	if sess.ID != r1.SessionID {
+		t.Fatalf("expected secretary session id=%q, got %+v", r1.SessionID, sess)
 	}
 	userCount := 0
 	assistantCount := 0
@@ -260,8 +263,9 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 
 	// Summary message should be appended once.
-	body2 := mustGet(t, srv.URL, rt.AuthToken, "/api/sessions/"+r1.SessionID)
+	body2 := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
 	var sess2 struct {
+		ID       string `json:"id"`
 		Messages []struct {
 			ID      uint   `json:"id"`
 			Role    string `json:"role"`
@@ -271,6 +275,9 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 	if err := json.Unmarshal(body2, &sess2); err != nil {
 		t.Fatalf("unmarshal session2: %v", err)
+	}
+	if sess2.ID != r1.SessionID {
+		t.Fatalf("expected secretary session id=%q, got %+v", r1.SessionID, sess2)
 	}
 	summaryCount := 0
 	for _, m := range sess2.Messages {
@@ -283,7 +290,7 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 
 	// State endpoint should restore cursor and evidence.
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/secretary/state?session_id="+r1.SessionID, nil)
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/secretary/state", nil)
 	if err != nil {
 		t.Fatalf("new state request: %v", err)
 	}

@@ -1,14 +1,39 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { initAuth } from "@/composables/useAuth";
+import { useUIStore } from "@/stores/ui";
 
 const routes = [
   {
     path: "/",
     name: "Home",
+    redirect: () => {
+      const raw = localStorage.getItem("oneagent-ui-mode");
+      const normalize = (value: any) => String(value ?? "").trim().toLowerCase();
+
+      if (raw == null) return "/secretary";
+      const direct = normalize(raw);
+      if (direct === "full") return "/chat";
+      if (direct === "secretary") return "/secretary";
+
+      try {
+        const parsed = JSON.parse(raw) as any;
+        const nested = normalize(parsed?.mode);
+        if (nested === "full") return "/chat";
+        if (nested === "secretary") return "/secretary";
+      } catch {
+        // ignore
+      }
+
+      return "/secretary";
+    },
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/chat",
+    name: "Chat",
     component: () => import("@/views/Home.vue"),
     meta: { requiresAuth: true },
-    alias: "/chat",
   },
   {
     path: "/secretary",
@@ -92,6 +117,7 @@ const router = createRouter({
 // Navigation guard for authentication
 router.beforeEach(async (to) => {
   const authStore = useAuthStore();
+  const uiStore = useUIStore();
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     await initAuth();
@@ -105,6 +131,14 @@ router.beforeEach(async (to) => {
   if (to.name === "Login" && authStore.isAuthenticated) {
     // Redirect to home if already authenticated
     return { name: "Home" };
+  }
+
+  // Keep route <-> ui_mode consistent for chat surfaces.
+  if (to.path === "/chat" && uiStore.mode !== "full") {
+    uiStore.setMode("full");
+  }
+  if (to.path === "/secretary" && uiStore.mode !== "secretary") {
+    uiStore.setMode("secretary");
   }
 });
 
