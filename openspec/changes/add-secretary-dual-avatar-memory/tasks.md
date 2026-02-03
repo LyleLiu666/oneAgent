@@ -9,6 +9,7 @@
 - [x] 2.1 Add a secretary memory store (SQLite) with append + time-range query
 - [x] 2.2 Add cursor-based pull-sync (last 10 + omitted count) and user-prompt injection payload builder
 - [x] 2.3 Implement a permanent secretary session resolver (principal_id → canonical session_id)
+- [x] 2.3.1 Record task attempt outcomes into Memory as SW (best-effort)
 - [ ] 2.4 Add SU/SW channel prompt assembly and enforce tool scopes (SU read-only; SW dispatch-only)
 - [ ] 2.5 Apply fixed 80k context compression to SU/SW channels (reuse existing compression implementation)
 
