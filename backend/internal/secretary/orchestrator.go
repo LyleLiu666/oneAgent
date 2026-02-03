@@ -20,6 +20,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/model"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
+	"github.com/liu_y/oneAgent/backend/internal/sessioncompress"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 )
@@ -39,9 +40,39 @@ type Orchestrator struct {
 	muBySession sync.Map // map[string]*sync.Mutex (best-effort triage mutex)
 }
 
+const (
+	secretaryModuleSU = "secretary"
+	secretaryModuleSW = "secretary_sw"
+)
+
 func (o *Orchestrator) lock(sessionID string) *sync.Mutex {
 	val, _ := o.muBySession.LoadOrStore(sessionID, &sync.Mutex{})
 	return val.(*sync.Mutex)
+}
+
+func deriveSWSessionID(suSessionID string) string {
+	suSessionID = strings.TrimSpace(suSessionID)
+	if suSessionID == "" {
+		return ""
+	}
+	return suSessionID + "-sw"
+}
+
+func buildTextLLMHistory(dbMessages []model.ChatMessage) []llm.ChatMessage {
+	out := make([]llm.ChatMessage, 0, len(dbMessages))
+	for _, msg := range dbMessages {
+		if msg.Type != model.MessageTypeText {
+			continue
+		}
+		if msg.Role != model.MessageRoleUser && msg.Role != model.MessageRoleAssistant {
+			continue
+		}
+		if strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
+		out = append(out, llm.ChatMessage{Role: msg.Role, Content: msg.Content})
+	}
+	return out
 }
 
 func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID, content, workspace string) (InboxAppendResult, error) {
@@ -64,11 +95,11 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 	}
 
 	title := truncateString(content, 100)
-	if _, err := o.Sessions.GetOrCreateSession(sessionID, userID, "assistant", title); err != nil {
+	if _, err := o.Sessions.GetOrCreateSession(sessionID, userID, secretaryModuleSU, title); err != nil {
 		return InboxAppendResult{}, err
 	}
 
-	session, _, err := o.Sessions.GetSessionWithMessages(sessionID, userID)
+	session, msgs, err := o.Sessions.GetSessionWithMessages(sessionID, userID)
 	if err != nil {
 		return InboxAppendResult{}, err
 	}
@@ -90,6 +121,42 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 		meta["workspace"] = normalized
 		_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
 		session.Metadata = meta
+	}
+
+	// Best-effort: compress the SU session before appending a new message so the
+	// triage cursor can advance safely even when IDs are rewritten.
+	if o.ResolveModel != nil && o.Sessions != nil {
+		modelID := ""
+		if v, ok := session.Metadata["model_id"].(string); ok {
+			modelID = strings.TrimSpace(v)
+		}
+		if client, _, err := o.ResolveModel(ctx, userID, modelID); err == nil && client != nil {
+			llmMessages := make([]llm.ChatMessage, 0, 2+len(msgs))
+			llmMessages = append(llmMessages, llm.BuildSystemMessage("ONEAGENT_SECRETARY_SU_CONTEXT"))
+			llmMessages = append(llmMessages, buildTextLLMHistory(msgs)...)
+			llmMessages = append(llmMessages, llm.BuildUserMessage(content))
+
+			compressed, _, err := sessioncompress.CompressSessionIfNeeded(ctx, o.Sessions, sessionID, msgs, llmMessages, client, sessioncompress.DefaultOptions())
+			if err == nil && compressed {
+				// Reload after rewrite.
+				session, msgs, err = o.Sessions.GetSessionWithMessages(sessionID, userID)
+				if err != nil {
+					return InboxAppendResult{}, err
+				}
+
+				// Advance triage cursor to the end so we don't re-dispatch old work after compression.
+				endID := uint(0)
+				if len(msgs) > 0 {
+					endID = msgs[len(msgs)-1].ID
+				}
+				st, _ := decodeState(session.Metadata)
+				st.CursorMessageID = endID
+				st.TriageRuns = nil
+				meta := upsertState(session.Metadata, st)
+				_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
+				session.Metadata = meta
+			}
+		}
 	}
 
 	userMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
@@ -287,7 +354,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		}, nil
 	}
 
-	plan, resolvedModelID, err := o.generateTriagePlan(ctx, userID, session.Metadata, newUserMsgs)
+	// SW: dispatch planning + worker coordination (best-effort).
+	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, session.Metadata, newUserMsgs)
 	if err != nil {
 		return TriageResult{}, err
 	}
@@ -305,59 +373,13 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		}
 	}
 
-	createdTaskIDs := make([]string, 0, len(plan.Tasks))
-	questions := append([]string{}, plan.Questions...)
-	workspacesCreated := make([]string, 0, 2)
-
-	for _, task := range plan.Tasks {
-		title := strings.TrimSpace(task.Title)
-		prompt := strings.TrimSpace(task.Prompt)
-		if prompt == "" {
-			continue
-		}
-		if title == "" {
-			title = deriveTaskTitle(prompt)
-		}
-
-		strategy := strings.ToLower(strings.TrimSpace(task.WorkspaceStrategy))
-		workspace := ""
-
-		switch strategy {
-		case "new":
-			ws, err := o.createWorkspace(ctx, sessionID)
-			if err != nil {
-				return TriageResult{}, err
-			}
-			workspacesCreated = append(workspacesCreated, ws)
-			workspace = ws
-
-		case "session":
-			if sessionWorkspace == "" {
-				questions = append(questions, fmt.Sprintf("这项任务需要一个代码仓库 workspace：%s。请指定/选择 workspace 后我再派工。", title))
-				continue
-			}
-			workspace = sessionWorkspace
-
-		case "ask":
-			questions = append(questions, fmt.Sprintf("这项任务需要你确认 workspace：%s。请告诉我用哪个目录来执行。", title))
-			continue
-
-		default:
-			questions = append(questions, fmt.Sprintf("无法确定 workspace（strategy=%s）：%s。请告诉我用哪个目录来执行。", strategy, title))
-			continue
-		}
-
-		limits := taskqueue.ResolveLimits(taskqueue.Limits{})
-		created, err := o.Tasks.CreateTask(userID, workspace, title, prompt, "", limits)
-		if err != nil {
-			return TriageResult{}, err
-		}
-		createdTaskIDs = append(createdTaskIDs, created.ID)
-
-		if err := o.Runner.Enqueue(created.ID); err != nil {
-			return TriageResult{}, err
-		}
+	dispatch, err := o.dispatchPlanAsSW(ctx, userID, sessionID, sessionWorkspace, plan)
+	if err != nil {
+		return TriageResult{}, err
 	}
+	createdTaskIDs := dispatch.CreatedTaskIDs
+	questions := dispatch.Questions
+	workspacesCreated := dispatch.WorkspacesCreated
 
 	summary := strings.TrimSpace(plan.SummaryMessage)
 	if summary == "" {
@@ -407,6 +429,131 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		SummaryMessage:    summary,
 		SummaryMessageID:  summaryMsg.ID,
 		CursorMessageID:   state.CursorMessageID,
+		CreatedTaskIDs:    createdTaskIDs,
+		Questions:         questions,
+		WorkspacesCreated: workspacesCreated,
+	}, nil
+}
+
+type dispatchResult struct {
+	CreatedTaskIDs    []string
+	Questions         []string
+	WorkspacesCreated []string
+}
+
+// dispatchPlanAsSW performs side effects: workspace creation + task creation/enqueue.
+// SU is user-facing and should stay read-mostly; SW owns dispatch (best-effort).
+func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, sessionWorkspace string, plan triagePlan) (dispatchResult, error) {
+	if o == nil {
+		return dispatchResult{}, errors.New("orchestrator is nil")
+	}
+	if o.Tasks == nil || o.Runner == nil {
+		return dispatchResult{}, errors.New("task queue not initialized")
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "local"
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return dispatchResult{}, errors.New("sessionID is required")
+	}
+	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
+
+	createdTaskIDs := make([]string, 0, len(plan.Tasks))
+	questions := append([]string{}, plan.Questions...)
+	workspacesCreated := make([]string, 0, 2)
+
+	for _, task := range plan.Tasks {
+		title := strings.TrimSpace(task.Title)
+		prompt := strings.TrimSpace(task.Prompt)
+		if prompt == "" {
+			continue
+		}
+		if title == "" {
+			title = deriveTaskTitle(prompt)
+		}
+
+		strategy := strings.ToLower(strings.TrimSpace(task.WorkspaceStrategy))
+		workspace := ""
+
+		switch strategy {
+		case "new":
+			ws, err := o.createWorkspace(ctx, sessionID)
+			if err != nil {
+				return dispatchResult{}, err
+			}
+			workspacesCreated = append(workspacesCreated, ws)
+			workspace = ws
+
+		case "session":
+			if sessionWorkspace == "" {
+				questions = append(questions, fmt.Sprintf("这项任务需要一个代码仓库 workspace：%s。请指定/选择 workspace 后我再派工。", title))
+				continue
+			}
+			workspace = sessionWorkspace
+
+		case "ask":
+			questions = append(questions, fmt.Sprintf("这项任务需要你确认 workspace：%s。请告诉我用哪个目录来执行。", title))
+			continue
+
+		default:
+			questions = append(questions, fmt.Sprintf("无法确定 workspace（strategy=%s）：%s。请告诉我用哪个目录来执行。", strategy, title))
+			continue
+		}
+
+		limits := taskqueue.ResolveLimits(taskqueue.Limits{})
+		created, err := o.Tasks.CreateTask(userID, workspace, title, prompt, "", limits)
+		if err != nil {
+			return dispatchResult{}, err
+		}
+		createdTaskIDs = append(createdTaskIDs, created.ID)
+
+		if err := o.Runner.Enqueue(created.ID); err != nil {
+			return dispatchResult{}, err
+		}
+	}
+
+	// Best-effort: record SW dispatch worklog for SU sync later.
+	if o.Memory != nil && (len(createdTaskIDs) > 0 || len(questions) > 0 || len(workspacesCreated) > 0) {
+		var b strings.Builder
+		if len(createdTaskIDs) > 0 {
+			b.WriteString("created_task_ids:\n")
+			for _, id := range createdTaskIDs {
+				b.WriteString("- " + strings.TrimSpace(id) + "\n")
+			}
+		}
+		if len(workspacesCreated) > 0 {
+			b.WriteString("workspaces_created:\n")
+			for _, ws := range workspacesCreated {
+				b.WriteString("- " + strings.TrimSpace(ws) + "\n")
+			}
+		}
+		if len(questions) > 0 {
+			b.WriteString("questions:\n")
+			for _, q := range questions {
+				q = strings.TrimSpace(q)
+				if q == "" {
+					continue
+				}
+				b.WriteString("- " + q + "\n")
+			}
+		}
+		content := strings.TrimSpace(b.String())
+		if content != "" {
+			_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
+				PrincipalID: userID,
+				Writer:      "SW",
+				Type:        "worklog",
+				Workspace:   sessionWorkspace,
+				Title:       "triage_dispatch",
+				Content:     content,
+			})
+		}
+	}
+
+	return dispatchResult{
 		CreatedTaskIDs:    createdTaskIDs,
 		Questions:         questions,
 		WorkspacesCreated: workspacesCreated,
@@ -485,9 +632,12 @@ func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, meta
 	return ack, resolvedID, nil
 }
 
-func (o *Orchestrator) generateTriagePlan(ctx context.Context, userID string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
+func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
 	if o.ResolveModel == nil {
 		return triagePlan{}, "", errors.New("ResolveModel is required")
+	}
+	if o.Sessions == nil {
+		return triagePlan{}, "", errors.New("sessions store not initialized")
 	}
 	modelID := ""
 	if v, ok := metadata["model_id"].(string); ok {
@@ -496,6 +646,9 @@ func (o *Orchestrator) generateTriagePlan(ctx context.Context, userID string, me
 	client, resolvedID, err := o.ResolveModel(ctx, userID, modelID)
 	if err != nil {
 		return triagePlan{}, "", err
+	}
+	if client == nil {
+		return triagePlan{}, "", errors.New("resolved model client is nil")
 	}
 
 	var b strings.Builder
@@ -507,15 +660,39 @@ func (o *Orchestrator) generateTriagePlan(ctx context.Context, userID string, me
 		return triagePlan{}, "", errors.New("no messages to triage")
 	}
 
-	sys := strings.TrimSpace(secretaryTriageSystemPrompt)
+	sys := strings.TrimSpace(secretaryDispatchSystemPromptSW)
 	user := "以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input + "\n\n请按 schema 输出 JSON。"
+	// SW: before dispatching, pull-sync the latest SU entries (best-effort).
+	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SW", "SU")); injected != "" {
+		user = injected + "\n\n" + user
+	}
 
 	temp := 0.2
 	maxTokens := 1500
 	requestMsgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
-	if injected := o.buildMemorySyncPrompt(ctx, userID, "SU", "SW"); strings.TrimSpace(injected) != "" {
-		requestMsgs = append(requestMsgs, llm.BuildUserMessage(injected))
+
+	swSessionID := deriveSWSessionID(sessionID)
+	if swSessionID != "" {
+		_, _ = o.Sessions.GetOrCreateSession(swSessionID, userID, secretaryModuleSW, "Secretary(Worker)")
+		_, swMsgs, _ := o.Sessions.GetSessionWithMessages(swSessionID, userID)
+		requestMsgs = append(requestMsgs, buildTextLLMHistory(swMsgs)...)
+
+		// Apply fixed 80k compression per SW channel (best-effort).
+		cOpts := sessioncompress.DefaultOptions()
+		cOpts.SummaryPrefix = sessioncompress.DefaultSummaryPrefix
+		llmMessages := append(append([]llm.ChatMessage{}, requestMsgs...), llm.BuildUserMessage(user))
+		compressed, compressedMsgs, compErr := sessioncompress.CompressSessionIfNeeded(ctx, o.Sessions, swSessionID, swMsgs, llmMessages, client, cOpts)
+		if compErr != nil {
+			fallback := sessioncompress.BuildFallbackMessages(swMsgs, llmMessages, compErr, cOpts)
+			if len(fallback) > 0 {
+				// Preserve system + tail, but re-append the user prompt once below.
+				requestMsgs = fallback[:len(fallback)-1]
+			}
+		} else if compressed {
+			requestMsgs = compressedMsgs[:len(compressedMsgs)-1]
+		}
 	}
+
 	requestMsgs = append(requestMsgs, llm.BuildUserMessage(user))
 
 	out, err := client.ChatCompletion(ctx, requestMsgs, &llm.ChatCompletionOptions{
@@ -545,6 +722,20 @@ func (o *Orchestrator) generateTriagePlan(ctx context.Context, userID string, me
 	}
 	for i := range plan.Questions {
 		plan.Questions[i] = strings.TrimSpace(plan.Questions[i])
+	}
+
+	// Best-effort: record SW decision into the SW session (not user-facing).
+	if swSessionID := deriveSWSessionID(sessionID); swSessionID != "" {
+		_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
+			Role:    model.MessageRoleUser,
+			Type:    model.MessageTypeText,
+			Content: strings.TrimSpace("triage_input:\n" + input),
+		})
+		_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
+			Role:    model.MessageRoleAssistant,
+			Type:    model.MessageTypeText,
+			Content: jsonText,
+		})
 	}
 
 	return plan, resolvedID, nil
@@ -1093,9 +1284,12 @@ ONEAGENT_SECRETARY_ACK
 - 尽量点出/复述 1 个关键信息，避免固定模板
 `
 
-const secretaryTriageSystemPrompt = `
+const secretaryDispatchSystemPromptSW = `
 ONEAGENT_SECRETARY_TRIAGE
-你是用户的秘书（中层管理者），负责把多条消息归并为少量任务并派发后台 worker。
+你是用户的秘书（SW：Secretary(Worker)，中层管理者），负责把多条消息归并为少量任务并派发后台 worker。
+约束：
+- 你不直接和用户对话（SU 负责对话）；你只产出派工计划（summary_message/tasks/questions）。
+- 你不执行工具，不写/改文件；只做“派工/排队/需要用户确认的问题”的决策。
 
 请严格只输出 JSON（不要代码块，不要额外解释），schema：
 {

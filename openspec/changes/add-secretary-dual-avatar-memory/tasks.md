@@ -10,8 +10,8 @@
 - [x] 2.2 Add cursor-based pull-sync (last 10 + omitted count) and user-prompt injection payload builder
 - [x] 2.3 Implement a permanent secretary session resolver (principal_id → canonical session_id)
 - [x] 2.3.1 Record task attempt outcomes into Memory as SW (best-effort)
-- [ ] 2.4 Add SU/SW channel prompt assembly and enforce tool scopes (SU read-only; SW dispatch-only)
-- [ ] 2.5 Apply fixed 80k context compression to SU/SW channels (reuse existing compression implementation)
+- [x] 2.4 Add SU/SW channel prompt assembly and enforce tool scopes (SU read-only; SW dispatch-only)
+- [x] 2.5 Apply fixed 80k context compression to SU/SW channels (reuse existing compression implementation)
 
 ## 3. Tests (TDD)
 - [x] 3.1 Memory: append + query by time window
@@ -21,4 +21,4 @@
 
 ## 4. Frontend (best-effort)
 - [x] 4.1 Secretary route uses the permanent secretary conversation (no session switching UX)
-- [ ] 4.2 Ensure secretary mode does not surface worker noise by default; advanced details remain discoverable
+- [x] 4.2 Ensure secretary mode does not surface worker noise by default; advanced details remain discoverable

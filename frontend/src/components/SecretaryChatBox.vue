@@ -93,6 +93,7 @@ const secretaryRecoverySubmitting = ref(false)
 const secretaryTriageSubmitting = ref(false)
 const secretaryTriageQueued = ref(false)
 let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
+const secretaryTaskPanelVisible = ref(false)
 
 type SecretaryRecoveryItem = {
   taskId: string
@@ -2158,6 +2159,16 @@ onUnmounted(() => {
           <div class="flex items-center gap-2 flex-wrap justify-end">
             <SecretaryStatusHints v-if="isSecretaryMode" />
             <button
+              v-if="isSecretaryMode"
+              type="button"
+              data-testid="secretary-toggle-task-panel"
+              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+              :title="secretaryTaskPanelVisible ? '隐藏任务面板' : '显示任务面板（交付/排障）'"
+              @click="secretaryTaskPanelVisible = !secretaryTaskPanelVisible"
+            >
+              {{ secretaryTaskPanelVisible ? '隐藏任务面板' : '查看任务面板' }}
+            </button>
+            <button
               type="button"
               data-testid="chat-toggle-mode"
               class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
@@ -2280,14 +2291,15 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <SecretaryTaskDeliverables
-        v-if="isSecretaryMode"
-        :workspace="workspacePath"
-        @task-completed="onTaskCompleted"
-        @recovery-snapshot="onRecoverySnapshot"
-        @task-needs-attention="onTaskNeedsAttention"
-        @recovery-action="onRecoveryAction"
-      />
+      <div v-if="isSecretaryMode" data-testid="secretary-task-panel" v-show="secretaryTaskPanelVisible">
+        <SecretaryTaskDeliverables
+          :workspace="workspacePath"
+          @task-completed="onTaskCompleted"
+          @recovery-snapshot="onRecoverySnapshot"
+          @task-needs-attention="onTaskNeedsAttention"
+          @recovery-action="onRecoveryAction"
+        />
+      </div>
 
       <TaskQueuePanel v-if="!isSecretaryMode" :workspace="workspacePath" :model-id="selectedModelId" />
 

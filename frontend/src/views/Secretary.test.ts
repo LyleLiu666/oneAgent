@@ -87,6 +87,13 @@ it('hides low-frequency UI in secretary mode and keeps full mode discoverable', 
   expect(wrapper.find('task-queue-panel-stub').exists()).toBe(false)
   expect(wrapper.find('[data-testid="chat-workspace-choose"]').exists()).toBe(false)
 
+  const taskPanel = wrapper.get('[data-testid="secretary-task-panel"]')
+  expect(String(taskPanel.attributes('style') || '')).toContain('display: none')
+  const taskPanelToggle = wrapper.get('[data-testid="secretary-toggle-task-panel"]')
+  await taskPanelToggle.trigger('click')
+  await flushPromises()
+  expect(String(wrapper.get('[data-testid="secretary-task-panel"]').attributes('style') || '')).not.toContain('display: none')
+
   const toggle = wrapper.get('[data-testid="chat-toggle-mode"]')
   expect(toggle.text()).toContain('进入完整模式')
 

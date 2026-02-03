@@ -36,10 +36,10 @@ func NewSecretaryHandler(rt *runtime.Runtime) *SecretaryHandler {
 	}
 
 	h.orch = &secretary.Orchestrator{
-		Sessions: rt.Sessions,
-		Tasks:    rt.Tasks,
-		Runner:   rt.TaskRunner,
-		Memory:   rt.Memory,
+		Sessions:                 rt.Sessions,
+		Tasks:                    rt.Tasks,
+		Runner:                   rt.TaskRunner,
+		Memory:                   rt.Memory,
 		DefaultWorkspacePoolRoot: defaultPoolRoot,
 		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
 			resolved, err := chat.resolveModel(ctx, userID, modelID)
@@ -90,16 +90,16 @@ func (h *SecretaryHandler) AppendInboxMessage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"session_id":      res.SessionID,
-		"message_id":      res.MessageID,
-		"ack_message_id":  res.AckMessageID,
-		"ack_text":        res.AckText,
+		"session_id":     res.SessionID,
+		"message_id":     res.MessageID,
+		"ack_message_id": res.AckMessageID,
+		"ack_text":       res.AckText,
 	})
 }
 
 type triageRequest struct {
-	SessionID        string `json:"session_id,omitempty"`
-	CursorMessageID  *uint  `json:"cursor_message_id,omitempty"`
+	SessionID       string `json:"session_id,omitempty"`
+	CursorMessageID *uint  `json:"cursor_message_id,omitempty"`
 }
 
 func (h *SecretaryHandler) Triage(c *gin.Context) {
@@ -136,13 +136,13 @@ func (h *SecretaryHandler) Triage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"session_id":          req.SessionID,
-		"summary_message":     res.SummaryMessage,
-		"summary_message_id":  res.SummaryMessageID,
-		"cursor_message_id":   res.CursorMessageID,
-		"created_task_ids":    res.CreatedTaskIDs,
-		"questions":           res.Questions,
-		"workspaces_created":  res.WorkspacesCreated,
+		"session_id":         req.SessionID,
+		"summary_message":    res.SummaryMessage,
+		"summary_message_id": res.SummaryMessageID,
+		"cursor_message_id":  res.CursorMessageID,
+		"created_task_ids":   res.CreatedTaskIDs,
+		"questions":          res.Questions,
+		"workspaces_created": res.WorkspacesCreated,
 	})
 }
 
@@ -173,7 +173,7 @@ func (h *SecretaryHandler) GetState(c *gin.Context) {
 		if errors.Is(err, os.ErrNotExist) {
 			// Best-effort: secretary session is "permanent". If it doesn't exist yet, create it so
 			// clients can bootstrap without inventing a session id.
-			if _, createErr := h.rt.Sessions.GetOrCreateSession(sessionID, userID, "assistant", "Secretary"); createErr != nil {
+			if _, createErr := h.rt.Sessions.GetOrCreateSession(sessionID, userID, "secretary", "Secretary"); createErr != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 				return
 			}
@@ -187,8 +187,8 @@ func (h *SecretaryHandler) GetState(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"session_id":       sessionID,
+		"session_id":        sessionID,
 		"cursor_message_id": st.CursorMessageID,
-		"triage_runs":      st.TriageRuns,
+		"triage_runs":       st.TriageRuns,
 	})
 }
