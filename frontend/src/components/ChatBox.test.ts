@@ -448,8 +448,8 @@ it('sends messages via secretary inbox API in secretary mode', async () => {
     ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
         session_id: 's1',
         message_id: 1,
-        ack_message_id: 2,
-        ack_text: '已记下：跑测试。',
+        ack_message_id: 0,
+        ack_text: '',
     })
 
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
@@ -497,8 +497,8 @@ it('surfaces pending triage questions in a modal (secretary mode)', async () => 
         ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
             session_id: 's1',
             message_id: 1,
-            ack_message_id: 2,
-            ack_text: '好的，我先看一下。',
+            ack_message_id: 0,
+            ack_text: '',
         })
 
         ;(apiClient.secretaryTriage as any).mockResolvedValueOnce({
@@ -569,9 +569,9 @@ it('allows multiple sends in secretary mode and debounces triage', async () => {
         setActivePinia(pinia)
 
         ;(apiClient.appendSecretaryInboxMessage as any)
-            .mockResolvedValueOnce({ session_id: 's1', message_id: 1, ack_message_id: 2, ack_text: 'ack1' })
-            .mockResolvedValueOnce({ session_id: 's1', message_id: 3, ack_message_id: 4, ack_text: 'ack2' })
-            .mockResolvedValueOnce({ session_id: 's1', message_id: 5, ack_message_id: 6, ack_text: 'ack3' })
+            .mockResolvedValueOnce({ session_id: 's1', message_id: 1, ack_message_id: 0, ack_text: '' })
+            .mockResolvedValueOnce({ session_id: 's1', message_id: 3, ack_message_id: 0, ack_text: '' })
+            .mockResolvedValueOnce({ session_id: 's1', message_id: 5, ack_message_id: 0, ack_text: '' })
 
         let resolveFirstTriage: (value: any) => void
         const firstTriage = new Promise((resolve) => {
@@ -736,13 +736,13 @@ it('optimistically renders secretary message and prevents resubmission while pen
     resolveAppend?.({
         session_id: 's1',
         message_id: 101,
-        ack_message_id: 102,
-        ack_text: '收到，我来处理。',
+        ack_message_id: 0,
+        ack_text: '',
     })
     await flushPromises()
 
     expect(chat.messages.some((m: any) => Number(m.id) === 101 && Number(m.serverId) === 101)).toBe(true)
-    expect(chat.messages.some((m: any) => Number(m.id) === 102 && m.role === 'assistant' && String(m.content).includes('收到'))).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
 })
 
 it('queues recovery items and resumes them one-by-one via chat reply (secretary mode)', async () => {

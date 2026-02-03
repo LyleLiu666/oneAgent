@@ -125,8 +125,8 @@ it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
   ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
     session_id: 's1',
     message_id: 1,
-    ack_message_id: 2,
-    ack_text: '好的，我先看一下。',
+    ack_message_id: 0,
+    ack_text: '',
   })
 
   ;(apiClient.secretaryTriage as any).mockResolvedValueOnce({

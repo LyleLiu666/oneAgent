@@ -141,39 +141,6 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 		return InboxAppendResult{}, err
 	}
 
-	ackText, resolvedModelID, err := o.generateQuickAck(ctx, userID, session.Metadata, content)
-	if err != nil || strings.TrimSpace(ackText) == "" {
-		// Quick ack is best-effort. Persist a deterministic fallback so the UI
-		// stays responsive even when the LLM returns no content or the provider
-		// doesn't stream SSE.
-		ackText = fallbackQuickAckText(content)
-		resolvedModelID = ""
-	}
-
-	// Persist resolved model id for consistent behavior across refreshes (best-effort).
-	if resolvedModelID != "" {
-		meta := session.Metadata
-		if meta == nil {
-			meta = model.JSONB{}
-		}
-		if _, ok := meta["model_id"]; !ok {
-			meta["model_id"] = resolvedModelID
-			_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
-			session.Metadata = meta
-		}
-	}
-
-	parentID := userMsg.ID
-	ackMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
-		Role:     model.MessageRoleAssistant,
-		Type:     model.MessageTypeText,
-		Content:  ackText,
-		ParentID: &parentID,
-	})
-	if err != nil {
-		return InboxAppendResult{}, err
-	}
-
 	// Best-effort: record a user-facing worklog entry so SW (or future agents) can sync it.
 	if o.Memory != nil {
 		_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
@@ -189,8 +156,8 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 	return InboxAppendResult{
 		SessionID:    sessionID,
 		MessageID:    userMsg.ID,
-		AckMessageID: ackMsg.ID,
-		AckText:      ackText,
+		AckMessageID: 0,
+		AckText:      "",
 	}, nil
 }
 
@@ -1199,16 +1166,25 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 	}
 
 	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		q := "我还不知道你在用哪个 workspace。请先指定/选择一个目录，我才能查看进度。"
-		return q, []string{q}, nil
+	normalizedWorkspace := ""
+	if workspace != "" {
+		normalized, err := scope.NormalizeWorkspaceRoot(workspace)
+		if err != nil {
+			return "", nil, err
+		}
+		normalizedWorkspace = normalized
 	}
 
-	normalized, err := scope.NormalizeWorkspaceRoot(workspace)
-	if err != nil {
-		return "", nil, err
+	created := make(map[string]bool)
+	for _, run := range st.TriageRuns {
+		for _, id := range run.CreatedTaskIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			created[id] = true
+		}
 	}
-	workspace = normalized
 
 	running := 0
 	queued := 0
@@ -1216,20 +1192,9 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 	needsAttention := 0
 
 	if o.Tasks != nil {
-		tasks, _ := o.Tasks.ListTasks(userID, workspace)
-
-		created := make(map[string]bool)
-		for _, run := range st.TriageRuns {
-			for _, id := range run.CreatedTaskIDs {
-				id = strings.TrimSpace(id)
-				if id == "" {
-					continue
-				}
-				created[id] = true
-			}
-		}
-
+		tasks, _ := o.Tasks.ListTasks(userID, normalizedWorkspace)
 		relevant := tasks
+		filteredByCreated := false
 		if len(created) > 0 {
 			tmp := make([]taskqueue.Task, 0, len(tasks))
 			for _, t := range tasks {
@@ -1239,6 +1204,35 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 			}
 			if len(tmp) > 0 {
 				relevant = tmp
+				filteredByCreated = true
+			}
+		}
+
+		// If the session has no workspace bound, keep the summary low-noise by only
+		// counting likely-active tasks: queued/running/needs-attention, plus recently
+		// finished ones. This avoids reporting the user's entire task history.
+		if normalizedWorkspace == "" && !filteredByCreated {
+			cutoff := time.Now().Add(-24 * time.Hour)
+			active := make([]taskqueue.Task, 0, len(relevant))
+			for _, t := range relevant {
+				a := t.LatestAttempt()
+				if a == nil {
+					continue
+				}
+				switch a.Status {
+				case taskqueue.AttemptQueued, taskqueue.AttemptRunning,
+					taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
+					active = append(active, t)
+				case taskqueue.AttemptSucceeded:
+					if t.UpdatedAt.After(cutoff) {
+						active = append(active, t)
+					}
+				default:
+					// ignore
+				}
+			}
+			if len(active) > 0 {
+				relevant = active
 			}
 		}
 
@@ -1260,11 +1254,32 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 				// ignore
 			}
 		}
+
+		// If we don't have a workspace from session metadata, try to infer a single
+		// workspace from the relevant tasks so we can provide safe file/word stats.
+		if normalizedWorkspace == "" {
+			uniq := make(map[string]struct{}, 2)
+			for _, t := range relevant {
+				ws := strings.TrimSpace(t.Workspace)
+				if ws == "" {
+					continue
+				}
+				uniq[ws] = struct{}{}
+				if len(uniq) > 1 {
+					break
+				}
+			}
+			if len(uniq) == 1 {
+				for ws := range uniq {
+					normalizedWorkspace = ws
+				}
+			}
+		}
 	}
 
 	// Only scan files for ephemeral workspaces to avoid accidentally reading huge repos.
 	shouldScan := false
-	wsPath := workspace
+	wsPath := normalizedWorkspace
 	if real, err := filepath.EvalSymlinks(wsPath); err == nil && strings.TrimSpace(real) != "" {
 		wsPath = real
 	}
@@ -1284,22 +1299,12 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 
 	stats := workspaceTextStats{}
 	if shouldScan {
-		if got, err := collectWorkspaceTextStats(workspace); err == nil {
+		if got, err := collectWorkspaceTextStats(normalizedWorkspace); err == nil {
 			stats = got
 		}
 	}
 
-	statusLine := ""
-	switch {
-	case running > 0 || queued > 0:
-		statusLine = "我看了下，还在运行中。"
-	case needsAttention > 0:
-		statusLine = "我看了下，有任务卡住了，需要你确认。"
-	case succeeded > 0:
-		statusLine = "我看了下，已经跑完了。"
-	default:
-		statusLine = "我看了下，暂时没看到在跑的任务。"
-	}
+	statusLine := fmt.Sprintf("我查了下：运行 %d，排队 %d，已完成 %d，需要处理 %d。", running, queued, succeeded, needsAttention)
 
 	var details []string
 	if shouldScan {
@@ -1313,16 +1318,34 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 		}
 	}
 
-	if len(details) == 0 {
-		// Always provide at least one actionable hint.
-		if running > 0 || queued > 0 {
-			details = append(details, "我会继续盯着，有更新再告诉你。")
-		} else {
-			details = append(details, "如需我统计字数/文件，请把任务放在系统创建的 workspace 里。")
+	// Always provide at least one actionable hint.
+	switch {
+	case running > 0 || queued > 0:
+		details = append(details, "我会继续盯着，有更新再告诉你。")
+	case needsAttention > 0:
+		details = append(details, "你也可以点「查看 Trace」看看卡在哪一步。")
+	case succeeded > 0:
+		details = append(details, "你也可以点「查看 Trace」查看产出细节。")
+	default:
+		details = append(details, "如果你要我跟踪某个任务的进度，把任务标题或任务 ID 发我就行。")
+	}
+
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(statusLine))
+	if len(details) > 0 {
+		b.WriteString("\n")
+		for _, d := range details {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			b.WriteString("- ")
+			b.WriteString(d)
+			b.WriteString("\n")
 		}
 	}
 
-	return strings.TrimSpace(statusLine + strings.Join(details, "")), nil, nil
+	return strings.TrimSpace(b.String()), nil, nil
 }
 
 func fallbackQuickAckText(userContent string) string {

@@ -1,16 +1,12 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
-	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
 )
 
@@ -57,7 +53,7 @@ func TestServer_SecretaryState_NoSessionID_BootstrapsCanonicalSession(t *testing
 	_ = mustGet(t, srv.URL, rt.AuthToken, "/api/sessions/"+st.SessionID)
 }
 
-func TestServer_SecretaryInboxMessage_MemorySyncInjected_AndCursorAdvances(t *testing.T) {
+func TestServer_SecretaryInboxMessage_NoAck_AndCanonicalSessionStable(t *testing.T) {
 	home := t.TempDir()
 	cfg := &config.Config{
 		Profile:          "local",
@@ -74,91 +70,6 @@ func TestServer_SecretaryInboxMessage_MemorySyncInjected_AndCursorAdvances(t *te
 	}
 	t.Cleanup(func() { _ = rt.Close() })
 
-	ctx := context.Background()
-	if rt.Memory == nil {
-		t.Fatalf("expected memory db")
-	}
-	if _, err := rt.Memory.AppendEntry(ctx, memorydb.Entry{
-		PrincipalID: "local",
-		Writer:      "SW",
-		Type:        "worklog",
-		Title:       "worker_note",
-		Content:     "from worker",
-	}); err != nil {
-		t.Fatalf("append SW entry: %v", err)
-	}
-
-	var mu sync.Mutex
-	var sawFailure string
-	ackCalls := 0
-
-	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-
-		var req struct {
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-
-		system := ""
-		userMsgs := make([]string, 0, 4)
-		for _, m := range req.Messages {
-			if m.Role == "system" && system == "" {
-				system = m.Content
-			}
-			if m.Role == "user" {
-				userMsgs = append(userMsgs, m.Content)
-			}
-		}
-
-		content := "ok"
-		if strings.Contains(system, "ONEAGENT_SECRETARY_ACK") {
-			ackCalls++
-			hasSync := false
-			for _, um := range userMsgs {
-				if strings.Contains(um, "[MEMORY_SYNC from=SW") {
-					hasSync = true
-					break
-				}
-			}
-
-			mu.Lock()
-			if ackCalls == 1 && !hasSync && sawFailure == "" {
-				sawFailure = "expected first ack request to include memory sync prompt"
-			}
-			if ackCalls >= 2 && hasSync && sawFailure == "" {
-				sawFailure = "expected subsequent ack requests to omit memory sync after cursor advances"
-			}
-			mu.Unlock()
-
-			content = "收到"
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-
-		chunk := map[string]any{
-			"id": "cmpl-test",
-			"choices": []any{
-				map[string]any{
-					"delta": map[string]any{"content": content},
-				},
-			},
-		}
-		data, _ := json.Marshal(chunk)
-		_, _ = w.Write([]byte("data: "))
-		_, _ = w.Write(data)
-		_, _ = w.Write([]byte("\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	t.Cleanup(mock.Close)
-
 	router, err := NewRouter(rt)
 	if err != nil {
 		t.Fatalf("new router: %v", err)
@@ -166,26 +77,10 @@ func TestServer_SecretaryInboxMessage_MemorySyncInjected_AndCursorAdvances(t *te
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
-	// Configure mock model for secretary ack.
-	var providerResp createProviderResp
-	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
-		"name":          "mock",
-		"provider_type": "openai",
-		"base_url":      mock.URL,
-		"api_key":       "sk-test",
-	}, &providerResp)
-
-	var modelResp createModelResp
-	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
-		"provider_id": providerResp.ID,
-		"name":        "mock-model",
-		"model":       "gpt-test",
-		"is_default":  true,
-	}, &modelResp)
-
 	var r1 struct {
 		SessionID string `json:"session_id"`
 		AckText   string `json:"ack_text"`
+		AckID     uint   `json:"ack_message_id"`
 	}
 	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
 		"content": "你好",
@@ -193,13 +88,14 @@ func TestServer_SecretaryInboxMessage_MemorySyncInjected_AndCursorAdvances(t *te
 	if strings.TrimSpace(r1.SessionID) == "" {
 		t.Fatalf("expected session id")
 	}
-	if strings.TrimSpace(r1.AckText) != "收到" {
-		t.Fatalf("expected ack text %q, got %q", "收到", r1.AckText)
+	if strings.TrimSpace(r1.AckText) != "" || r1.AckID != 0 {
+		t.Fatalf("expected empty ack, got ack_message_id=%d ack_text=%q", r1.AckID, r1.AckText)
 	}
 
 	var r2 struct {
 		SessionID string `json:"session_id"`
 		AckText   string `json:"ack_text"`
+		AckID     uint   `json:"ack_message_id"`
 	}
 	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
 		"content": "再来一次",
@@ -207,17 +103,7 @@ func TestServer_SecretaryInboxMessage_MemorySyncInjected_AndCursorAdvances(t *te
 	if r2.SessionID != r1.SessionID {
 		t.Fatalf("expected canonical session id to be stable, got %q then %q", r1.SessionID, r2.SessionID)
 	}
-	if strings.TrimSpace(r2.AckText) != "收到" {
-		t.Fatalf("expected ack text %q, got %q", "收到", r2.AckText)
-	}
-
-	if ackCalls < 2 {
-		t.Fatalf("expected at least 2 ack calls, got %d", ackCalls)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if sawFailure != "" {
-		t.Fatalf("%s", sawFailure)
+	if strings.TrimSpace(r2.AckText) != "" || r2.AckID != 0 {
+		t.Fatalf("expected empty ack, got ack_message_id=%d ack_text=%q", r2.AckID, r2.AckText)
 	}
 }
-
