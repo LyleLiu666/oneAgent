@@ -18,6 +18,7 @@ func TestLooksLikeProgressQuery_IncludesFollowUpQuestions(t *testing.T) {
 		{in: "已完成的那个是什么", want: true},
 		{in: "完成的那个是什么？", want: true},
 		{in: "哪个完成了", want: true},
+		{in: "给我几个任务", want: false},
 		{in: "帮我写十万字小说", want: false},
 	}
 

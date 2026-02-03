@@ -967,10 +967,22 @@ func looksLikeProgressQuery(text string) bool {
 	if t == "" {
 		return false
 	}
+
+	// Count-style progress queries, e.g. "现在有几个任务在进行".
+	if strings.Contains(t, "任务") && (strings.Contains(t, "几个") || strings.Contains(t, "多少")) {
+		if strings.Contains(t, "在进行") ||
+			strings.Contains(t, "进行中") ||
+			strings.Contains(t, "在运行") ||
+			strings.Contains(t, "运行中") ||
+			strings.Contains(t, "在跑") ||
+			strings.Contains(t, "排队") ||
+			strings.Contains(t, "队列") {
+			return true
+		}
+	}
+
 	// Only treat clear progress/status questions as progress queries.
 	keywords := []string{
-		"几个任务",
-		"有几个任务",
 		"写了多少",
 		"写到哪",
 		"写好了吗",
