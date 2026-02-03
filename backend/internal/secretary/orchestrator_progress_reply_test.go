@@ -15,6 +15,7 @@ func TestLooksLikeProgressQuery_IncludesFollowUpQuestions(t *testing.T) {
 	}{
 		{in: "在运行了吗", want: true},
 		{in: "现在有几个任务在进行", want: true},
+		{in: "任务完成得怎么样", want: true},
 		{in: "已完成的那个是什么", want: true},
 		{in: "完成的那个是什么？", want: true},
 		{in: "哪个完成了", want: true},

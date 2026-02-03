@@ -981,6 +981,11 @@ func looksLikeProgressQuery(text string) bool {
 		}
 	}
 
+	// "任务完成得怎么样/如何/怎样" are progress queries.
+	if strings.Contains(t, "完成") && (strings.Contains(t, "怎么样") || strings.Contains(t, "如何") || strings.Contains(t, "怎样") || strings.Contains(t, "咋样")) {
+		return true
+	}
+
 	// Only treat clear progress/status questions as progress queries.
 	keywords := []string{
 		"写了多少",
