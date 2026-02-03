@@ -854,7 +854,7 @@ func buildTriageSummary(planSummary string, createdTaskCount int, questions []st
 		case len(normalizedQuestions) > 0:
 			summary = "继续之前我需要你拍板："
 		default:
-			summary = "收到，我正在整理下一步。"
+			summary = "我在整理下一步。"
 		}
 	}
 
@@ -880,7 +880,7 @@ func buildTriageSummary(planSummary string, createdTaskCount int, questions []st
 		return strings.TrimSpace(b.String())
 	}
 
-	b.WriteString("你直接回复编号/答案就行，我继续推进。")
+	b.WriteString("你直接回复编号/答案，我就往下安排。")
 	return strings.TrimSpace(b.String())
 }
 
@@ -969,6 +969,8 @@ func looksLikeProgressQuery(text string) bool {
 	}
 	// Only treat clear progress/status questions as progress queries.
 	keywords := []string{
+		"几个任务",
+		"有几个任务",
 		"写了多少",
 		"写到哪",
 		"写好了吗",
