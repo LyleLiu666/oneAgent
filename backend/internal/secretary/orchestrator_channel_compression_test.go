@@ -132,7 +132,7 @@ func TestOrchestrator_CompressSW_DoesNotTouchSU(t *testing.T) {
 	_, _ = store.AppendMessage(swSessionID, model.ChatMessage{Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: big})
 	_, _ = store.AppendMessage(swSessionID, model.ChatMessage{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: big})
 
-	plan, _, err := o.generateDispatchPlan(context.Background(), "local", suSessionID, "", model.JSONB{}, []model.ChatMessage{
+	plan, _, err := o.generateDispatchPlan(context.Background(), "local", suSessionID, "", "", model.JSONB{}, []model.ChatMessage{
 		{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "do it"},
 	})
 	if err != nil {

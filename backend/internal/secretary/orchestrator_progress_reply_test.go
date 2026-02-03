@@ -1,32 +1,111 @@
 package secretary
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/llm"
+	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 )
 
-func TestLooksLikeProgressQuery_IncludesFollowUpQuestions(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{in: "在运行了吗", want: true},
-		{in: "现在有几个任务在进行", want: true},
-		{in: "任务完成得怎么样", want: true},
-		{in: "已完成的那个是什么", want: true},
-		{in: "完成的那个是什么？", want: true},
-		{in: "哪个完成了", want: true},
-		{in: "给我几个任务", want: false},
-		{in: "帮我写十万字小说", want: false},
+type promptAssertingClient struct {
+	wantSubstrings []string
+	called         bool
+}
+
+func (c *promptAssertingClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	_ = ctx
+	_ = opts
+	for _, m := range messages {
+		if m.Role != model.MessageRoleUser {
+			continue
+		}
+		if !strings.Contains(m.Content, "session_workspace_root:") {
+			continue
+		}
+		for _, want := range c.wantSubstrings {
+			if want == "" {
+				continue
+			}
+			if !strings.Contains(m.Content, want) {
+				return "", fmt.Errorf("expected SW prompt to include %q, got %q", want, m.Content)
+			}
+		}
+		c.called = true
+		return `{"summary_message":"ok","tasks":[],"questions":[]}`, nil
+	}
+	return "", errors.New("missing SW user prompt")
+}
+
+func (c *promptAssertingClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, cb llm.StreamCallback) error {
+	return errors.New("not implemented")
+}
+
+func TestTriage_ProgressQuestion_UsesSWPlanAndIncludesTaskSnapshot(t *testing.T) {
+	sessions, err := sessionstore.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new sessionstore: %v", err)
+	}
+	tasks, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
 	}
 
-	for _, tc := range cases {
-		if got := looksLikeProgressQuery(tc.in); got != tc.want {
-			t.Fatalf("looksLikeProgressQuery(%q)=%v, want %v", tc.in, got, tc.want)
-		}
+	ws := t.TempDir()
+	running, err := tasks.CreateTask("local", ws, "写武侠小说", "prompt", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := tasks.UpdateTask(running.ID, func(tk *taskqueue.Task) error {
+		a := tk.LatestAttempt()
+		a.Status = taskqueue.AttemptRunning
+		a.StartedAt = &now
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	client := &promptAssertingClient{
+		wantSubstrings: []string{
+			"现在有几个任务在进行",
+			"我查了下：运行",
+			"写武侠小说",
+		},
+	}
+
+	o := &Orchestrator{
+		Sessions: sessions,
+		Tasks:    tasks,
+		Runner:   &taskqueue.TaskRunner{},
+		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
+			return client, "mock", nil
+		},
+	}
+
+	res, err := o.AppendInboxMessage(context.Background(), "local", "session-1", "现在有几个任务在进行", ws)
+	if err != nil {
+		t.Fatalf("AppendInboxMessage: %v", err)
+	}
+	if res.MessageID == 0 {
+		t.Fatalf("expected message id to be set")
+	}
+
+	triaged, err := o.Triage(context.Background(), "local", "session-1", nil)
+	if err != nil {
+		t.Fatalf("Triage: %v", err)
+	}
+	if strings.TrimSpace(triaged.SummaryMessage) != "ok" {
+		t.Fatalf("expected triage summary ok, got %q", triaged.SummaryMessage)
+	}
+	if !client.called {
+		t.Fatalf("expected SW client to be called")
 	}
 }
 

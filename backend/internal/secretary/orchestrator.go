@@ -239,65 +239,67 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		}
 	}
 
-	// If the user is asking progress/status, answer directly instead of dispatching workers.
-	if len(newUserMsgs) == 1 && looksLikeProgressQuery(newUserMsgs[0].Content) {
-		summary, questions, err := o.buildProgressReply(userID, sessionWorkspace, state)
-		if err != nil {
-			return TriageResult{}, err
-		}
-
-		summaryMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
-			Role:    model.MessageRoleAssistant,
-			Type:    model.MessageTypeText,
-			Content: summary,
-		})
-		if err != nil {
-			return TriageResult{}, err
-		}
-
-		state.CursorMessageID = toID
-		state.TriageRuns = append(state.TriageRuns, TriageRun{
-			FromCursor:        cursor,
-			ToMessageID:       toID,
-			InputMessageIDs:   messageIDs(newUserMsgs),
-			SummaryMessageID:  summaryMsg.ID,
-			SummaryMessage:    summary,
-			CreatedTaskIDs:    []string{},
-			Questions:         append([]string{}, questions...),
-			WorkspacesCreated: []string{},
-			CreatedAt:         time.Now().UTC(),
-		})
-		if len(state.TriageRuns) > 20 {
-			state.TriageRuns = state.TriageRuns[len(state.TriageRuns)-20:]
-		}
-
-		meta := upsertState(session.Metadata, state)
-		_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
-
-		if o.Memory != nil {
-			_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
-				PrincipalID: userID,
-				Writer:      "SU",
-				Type:        "findings",
-				Workspace:   sessionWorkspace,
-				Title:       "progress_reply",
-				Content:     summary,
-			})
-		}
-
-		return TriageResult{
-			SummaryMessage:    summary,
-			SummaryMessageID:  summaryMsg.ID,
-			CursorMessageID:   state.CursorMessageID,
-			CreatedTaskIDs:    []string{},
-			Questions:         questions,
-			WorkspacesCreated: []string{},
-		}, nil
+	progressSnapshot := ""
+	if snap, _, snapErr := o.buildProgressReply(userID, sessionWorkspace, state); snapErr == nil {
+		progressSnapshot = strings.TrimSpace(snap)
 	}
 
 	// SW: dispatch planning + worker coordination (best-effort).
-	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs)
+	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
 	if err != nil {
+		// Best-effort fallback: some deployments/tests may not have an LLM configured for secretary triage.
+		// If the user is asking a question and we have a non-empty progress snapshot, answer with the snapshot
+		// instead of failing hard.
+		if len(newUserMsgs) == 1 && looksLikeQuestion(newUserMsgs[0].Content) && progressSnapshotHasWork(progressSnapshot) {
+			summaryMsg, persistErr := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
+				Role:    model.MessageRoleAssistant,
+				Type:    model.MessageTypeText,
+				Content: progressSnapshot,
+			})
+			if persistErr != nil {
+				return TriageResult{}, persistErr
+			}
+
+			state.CursorMessageID = toID
+			state.TriageRuns = append(state.TriageRuns, TriageRun{
+				FromCursor:        cursor,
+				ToMessageID:       toID,
+				InputMessageIDs:   messageIDs(newUserMsgs),
+				SummaryMessageID:  summaryMsg.ID,
+				SummaryMessage:    progressSnapshot,
+				CreatedTaskIDs:    []string{},
+				Questions:         []string{},
+				WorkspacesCreated: []string{},
+				CreatedAt:         time.Now().UTC(),
+			})
+			if len(state.TriageRuns) > 20 {
+				state.TriageRuns = state.TriageRuns[len(state.TriageRuns)-20:]
+			}
+
+			meta := upsertState(session.Metadata, state)
+			_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
+
+			if o.Memory != nil {
+				_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
+					PrincipalID: userID,
+					Writer:      "SU",
+					Type:        "findings",
+					Workspace:   sessionWorkspace,
+					Title:       "progress_reply_fallback",
+					Content:     progressSnapshot,
+				})
+			}
+
+			return TriageResult{
+				SummaryMessage:    progressSnapshot,
+				SummaryMessageID:  summaryMsg.ID,
+				CursorMessageID:   state.CursorMessageID,
+				CreatedTaskIDs:    []string{},
+				Questions:         []string{},
+				WorkspacesCreated: []string{},
+			}, nil
+		}
+
 		return TriageResult{}, err
 	}
 
@@ -581,7 +583,7 @@ func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, meta
 	return ack, resolvedID, nil
 }
 
-func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID, sessionWorkspace string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
+func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID, sessionWorkspace, progressSnapshot string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
 	if o.ResolveModel == nil {
 		return triagePlan{}, "", errors.New("ResolveModel is required")
 	}
@@ -615,7 +617,11 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	if sessionWorkspace != "" {
 		workspaceHint = sessionWorkspace
 	}
-	user := "Context:\n- session_workspace_root: " + workspaceHint + "\n\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input + "\n\n请按 schema 输出 JSON。"
+	user := "Context:\n- session_workspace_root: " + workspaceHint + "\n"
+	if strings.TrimSpace(progressSnapshot) != "" {
+		user += "\n当前可用的任务看板快照（best-effort，仅供参考；用它来回答进度/已完成/卡住等问题）：\n" + strings.TrimSpace(progressSnapshot) + "\n"
+	}
+	user += "\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input + "\n\n请按 schema 输出 JSON。"
 	// SW: before dispatching, pull-sync the latest SU entries (best-effort).
 	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SW", "SU")); injected != "" {
 		user = injected + "\n\n" + user
@@ -962,67 +968,16 @@ func truncateString(s string, maxLen int) string {
 	return string(runes[:maxLen])
 }
 
-func looksLikeProgressQuery(text string) bool {
-	t := strings.TrimSpace(text)
-	if t == "" {
+func progressSnapshotHasWork(snapshot string) bool {
+	snapshot = strings.TrimSpace(snapshot)
+	if snapshot == "" {
 		return false
 	}
 
-	// Count-style progress queries, e.g. "现在有几个任务在进行".
-	if strings.Contains(t, "任务") && (strings.Contains(t, "几个") || strings.Contains(t, "多少")) {
-		if strings.Contains(t, "在进行") ||
-			strings.Contains(t, "进行中") ||
-			strings.Contains(t, "在运行") ||
-			strings.Contains(t, "运行中") ||
-			strings.Contains(t, "在跑") ||
-			strings.Contains(t, "排队") ||
-			strings.Contains(t, "队列") {
-			return true
-		}
-	}
-
-	// "任务完成得怎么样/如何/怎样" are progress queries.
-	if strings.Contains(t, "完成") && (strings.Contains(t, "怎么样") || strings.Contains(t, "如何") || strings.Contains(t, "怎样") || strings.Contains(t, "咋样")) {
-		return true
-	}
-
-	// Only treat clear progress/status questions as progress queries.
-	keywords := []string{
-		"写了多少",
-		"写到哪",
-		"写好了吗",
-		"写完了吗",
-		"进度",
-		"做到哪",
-		"做完了吗",
-		"完成了吗",
-		"已完成的那个",
-		"已完成的是",
-		"已完成的是什么",
-		"完成的那个",
-		"完成的是",
-		"完成的是什么",
-		"哪个完成",
-		"哪一个完成",
-		"跑完了吗",
-		"还在跑吗",
-		"还在运行吗",
-		"现在怎么样",
-		"进展如何",
-		"有结果吗",
-	}
-	for _, kw := range keywords {
-		if kw != "" && strings.Contains(t, kw) {
-			return true
-		}
-	}
-	if strings.HasSuffix(t, "了吗") || strings.HasSuffix(t, "了没") {
-		return true
-	}
-	if strings.Contains(t, "已完成") && (strings.Contains(t, "什么") || strings.Contains(t, "哪个") || strings.Contains(t, "哪一个") || strings.ContainsAny(t, "？?")) {
-		return true
-	}
-	return false
+	// The summary starts with "我查了下：运行 X，排队 Y，已完成 Z，需要处理 W。"
+	// If all counts are 0, treat it as "no active work" (avoid answering unrelated questions with a blank board).
+	allZero := "运行 0，排队 0，已完成 0，需要处理 0"
+	return !strings.Contains(snapshot, allZero)
 }
 
 type workspaceTextStats struct {
@@ -1557,6 +1512,7 @@ ONEAGENT_SECRETARY_TRIAGE
 约束：
 - 你不直接和用户对话（SU 负责对话）；你只产出派工计划（summary_message/tasks/questions）。
 - 你不执行工具，不写/改文件；只做“派工/排队/需要用户确认的问题”的决策。
+- 你会收到一个“任务看板快照”（如果存在）。当用户在问进度/已完成/卡住/报错时，优先用该快照直接回答；不要为此新建任务或追加无意义的问题。
 
 请严格只输出 JSON（不要代码块，不要额外解释），schema：
 {

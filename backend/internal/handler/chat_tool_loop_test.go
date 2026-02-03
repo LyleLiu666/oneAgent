@@ -114,6 +114,34 @@ func TestRunToolLoop_SelfHeal_UnknownTool(t *testing.T) {
 	}
 }
 
+type scriptedToolClientWithErrors struct {
+	results      []llm.ChatCompletionResult
+	errs         []error
+	callMessages [][]llm.ChatMessage
+	index        int
+}
+
+func (c *scriptedToolClientWithErrors) ChatCompletionWithTools(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+	_ = ctx
+	_ = opts
+	c.callMessages = append(c.callMessages, append([]llm.ChatMessage(nil), messages...))
+
+	if c.index < len(c.errs) && c.errs[c.index] != nil {
+		err := c.errs[c.index]
+		c.index++
+		return llm.ChatCompletionResult{}, err
+	}
+
+	if c.index >= len(c.results) {
+		c.index++
+		return llm.ChatCompletionResult{}, nil
+	}
+
+	res := c.results[c.index]
+	c.index++
+	return res, nil
+}
+
 func TestRunToolLoop_StopsAfterMaxStepsEnvOverride(t *testing.T) {
 	t.Setenv("ONEAGENT_CHAT_TOOL_MAX_STEPS", "3")
 
@@ -301,5 +329,68 @@ func TestRunToolLoop_MapsInvalidArgumentsErrorToStructuredPayload(t *testing.T) 
 	msg, _ := decoded["message"].(string)
 	if !strings.Contains(msg, "bad args") {
 		t.Fatalf("expected message to contain %q, got %q", "bad args", msg)
+	}
+}
+
+func TestRunToolLoop_RetriesOnInvalidFunctionArgumentsAPIError(t *testing.T) {
+	defs, err := tool.Mount([]string{tool.ToolIDRunCommand})
+	if err != nil {
+		t.Fatalf("mount tools: %v", err)
+	}
+
+	client := &scriptedToolClientWithErrors{
+		errs: []error{
+			&llm.APIError{
+				StatusCode: 400,
+				Type:       "invalid_request_error",
+				Message:    "invalid params, invalid function arguments json string, tool_call_id: call_1",
+			},
+			nil,
+		},
+		results: []llm.ChatCompletionResult{
+			{},
+			{Content: "done"},
+		},
+	}
+
+	sm := NewStreamManager()
+	broadcaster := sm.GetOrCreate("session-1")
+
+	store, err := sessionstore.New(filepath.Join(t.TempDir(), "sessions"))
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	if _, err := store.GetOrCreateSession("session-1", "user-1", ChatModule, "title"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	combined, _, err := runToolLoop(
+		context.Background(),
+		client,
+		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
+		nil,
+		defs,
+		broadcaster,
+		"session-1",
+		"user-1",
+		nil,
+		"model-1",
+		false,
+		store,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected combined %q, got %q", "done", combined)
+	}
+	if client.index != 2 {
+		t.Fatalf("expected 2 llm calls, got %d", client.index)
+	}
+	if len(client.callMessages) < 2 {
+		t.Fatalf("expected retry to call llm twice, got %d", len(client.callMessages))
+	}
+	if got := client.callMessages[1]; len(got) < 2 || got[len(got)-1].Role != model.MessageRoleUser {
+		t.Fatalf("expected retry call to append a user repair message, got %+v", got)
 	}
 }

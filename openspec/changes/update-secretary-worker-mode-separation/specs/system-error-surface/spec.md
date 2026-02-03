@@ -15,3 +15,15 @@
 - **WHEN** 后端校验 session module
 - **THEN** 返回 `code=session_module_mismatch`（best-effort）
 - **AND** `hint` 提示改用秘书入口（best-effort）
+
+### Requirement: Internal agent protocol/tool errors MUST be user-safe and actionable (best-effort)
+当系统遇到“模型协议/结构化输出/工具参数”等工程类错误（例如 `invalid function arguments`、`invalid observer output (expected XML or JSON)`），系统必须 (MUST)：
+- 优先在 agent loop 内自愈重试（best-effort）
+- 若最终仍失败，返回用户安全的错误信息（不直接泄露原始 provider payload）（best-effort）
+- 同时提供可追溯指针（`request_id` 或 trace/log path），便于定位（best-effort）
+
+#### Scenario: Observer protocol error is not surfaced as "need user confirm"
+- **GIVEN** 某次 attempt 在 outcome observer 阶段发生结构化输出解析错误（best-effort）
+- **WHEN** 系统决定对外返回失败信息（达到重试上限后，best-effort）
+- **THEN** 返回用户可理解的错误（best-effort）
+- **AND** 不将其伪装成“需要用户确认才能继续”的空洞回执（best-effort）

@@ -15,6 +15,16 @@ func SanitizeToolArgumentsJSON(args string) string {
 		return "{}"
 	}
 	if json.Valid([]byte(trimmed)) {
+		// Special-case: models sometimes double-quote the entire JSON payload, which becomes a JSON string.
+		if strings.HasPrefix(trimmed, "\"") {
+			var unquoted string
+			if err := json.Unmarshal([]byte(trimmed), &unquoted); err == nil {
+				unquoted = strings.TrimSpace(unquoted)
+				if unquoted != "" && (strings.HasPrefix(unquoted, "{") || strings.HasPrefix(unquoted, "[")) && json.Valid([]byte(unquoted)) {
+					return unquoted
+				}
+			}
+		}
 		return trimmed
 	}
 

@@ -13,6 +13,17 @@
 - **THEN** 系统追加一条 `role=user,type=text` 的会话消息（best-effort）
 - **AND** 该过程不产生 `tool_call/tool_result` 类型消息（best-effort）
 
+### Requirement: Secretary triage MAY use tools but MUST be read-only to user workspace (best-effort)
+系统必须 (MUST) 允许秘书在 triage/汇报阶段使用工具来完成“查询/解释/排障/协调”（best-effort），以提升 agentic 与自愈能力；但系统必须 (MUST) 在权限层面保证：
+- 秘书默认 **不具备用户 workspace 的写权限**（不得增删改文件；fail-closed）
+- 当需求涉及写文件/改文件/删文件，或预计超出简单 tool loop 预算时，秘书应派工给 worker tasks（或引导切换到完整模式）
+
+#### Scenario: Secretary uses tools to answer a simple progress question
+- **GIVEN** 用户在秘书模式下询问“任务进度/任务状态”这类简单问题（best-effort）
+- **WHEN** 系统执行 secretary triage（best-effort）
+- **THEN** 秘书可以调用任务查询类工具获取证据（best-effort）
+- **AND** 最终汇报中包含任务 id/状态/关键产物路径等可追溯信息（best-effort）
+
 ## ADDED Requirements
 
 ### Requirement: Secretary APIs MUST be isolated from worker chat sessions (module boundary)
@@ -33,3 +44,14 @@
 - **WHEN** 客户端请求 `GET /api/secretary/state`（best-effort）
 - **THEN** 系统返回该用户 canonical secretary session id（best-effort）
 - **AND** 返回的 triage cursor/triage runs 对应该 canonical secretary session（best-effort）
+
+### Requirement: Secretary MUST ask concrete questions with context, not just counts (best-effort)
+当秘书需要用户确认才能继续推进时，系统必须 (MUST) 让秘书以“可执行”的方式提问（best-effort）：
+- 不得 (MUST NOT) 只输出“有 N 个问题需要确认/有 N 个任务”等计数式回执作为唯一信息
+- 必须 (MUST) 列出具体问题（或可点击的待确认项），并附带相关上下文/证据（例如 worker 的原话、关键日志片段、文件路径、链接）（best-effort）
+- 若存在默认选项，秘书应该 (SHOULD) 明确默认值与风险提示，并说明“你不回复我也会按默认继续”（放权与信任，best-effort）
+
+#### Scenario: Confirmation UI shows the actual pending questions
+- **GIVEN** 某个 worker task 或秘书自身决策产生待确认项（best-effort）
+- **WHEN** 秘书向用户请求确认（best-effort）
+- **THEN** 用户能在对话/弹窗中看到每条待确认项的完整内容（best-effort）

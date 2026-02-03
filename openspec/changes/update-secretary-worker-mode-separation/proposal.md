@@ -9,7 +9,10 @@
 ## What Changes
 - **概念澄清（强约束）**
   - **完整模式**：用户与 **Worker Chat（可 tool-calling 的交互式主 agent）** 对话；这是“直接做事”的会话。
-  - **秘书模式**：用户与 **Secretary（中层管理者）** 对话；秘书只做归并、解释、派工与进度汇报，不直接执行工具。
+  - **秘书模式**：用户与 **Secretary（中层管理者）** 对话；秘书以“讲清楚 + 放权/派工 + 可追溯”为第一职责。
+    - **工具使用（受限）**：秘书允许使用工具来查询/解释/排障/协调（best-effort），但默认**不具备 workspace 写权限**：不得增删改用户 workspace 内任何文件（硬约束，fail-closed）。
+    - **简单任务自处理**：若秘书判断该需求可在约 **≤5 轮 tool loop** 内完成且不涉及写文件/改文件/删文件，则秘书可以直接完成并交付结果（best-effort）。
+    - **复杂/需要写入则派工**：需要写文件/改文件/删文件，或预计超出 tool loop 预算的工作，秘书应派发给 worker tasks（或引导用户切换到完整模式与 Worker Chat 直接协作）。
   - **术语澄清**：本文的 “Worker Chat” 指交互式对话 agent；Task Queue 里的后台执行单元仍称为 “background task/worker task”，避免概念混淆。
 - **前端分离**
   - `/chat` 与 `/secretary` 两套页面/状态分离：各自维护独立的 `session_id` 与 message list，不再共用一个 `chatStore.currentSessionId`。
@@ -19,6 +22,7 @@
   - `/api/chat` 与 `/api/sessions/*` 仅允许操作 `module=assistant` 的会话；遇到其它 module 返回稳定错误码并提示正确入口。
   - `/api/secretary/*` 仅允许操作 `module=secretary` 的会话；并且必须使用该用户的 canonical secretary session（**忽略**外部传入的 `session_id`，best-effort）以避免串台。
   - 为秘书模式提供独立的“读取会话/消息”接口（避免复用 `/api/sessions/:id` 造成语义混乱）。
+  - 秘书 agent 的工具权限与 worker/worker-task 分离：默认只读（不写 workspace），并将“可用工具集合 + 权限策略 + tool protocol + 是否允许 subagent”等作为 agent 配置项（best-effort）。
 
 ## Impact
 - Affected specs:
@@ -26,9 +30,13 @@
   - `app-shell-ux`（ui_mode 与默认入口/切换行为）
   - `system-secretary-orchestration`（session 边界与 API 约束）
   - `system-error-surface`（新增错误码：session/module mismatch）
+  - `system-tool-permissions`（秘书只读权限与 fail-closed）
+  - `system-toolcalling-reliability`（工具错误自愈与协议选择的 agent 配置化）
+  - `system-task-queue`（Outcome Observer 解析鲁棒性与重试）
 - Affected code (expected):
   - Frontend routing + stores（拆分会话状态）
   - Backend handlers：`handler/chat.go`、`handler/secretary.go`、`sessionstore`（或 handler 层校验）
+  - Tool loop / tool permissions / observer（保证“先自愈后失败”，并避免把工程错误直接暴露给用户）
 
 ## Risks / Mitigations
 - **BREAKING 行为**：历史上混入两类消息的 session 可能无法“自动纠正”。

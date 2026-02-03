@@ -27,6 +27,38 @@ func (c *stubLLMClient) ChatCompletionStream(ctx context.Context, messages []llm
 	return errors.New("streaming not implemented in stub")
 }
 
+type sequenceLLMClient struct {
+	outs []string
+	errs []error
+
+	callCount int
+
+	lastMessages []llm.ChatMessage
+}
+
+func (c *sequenceLLMClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	c.callCount++
+	c.lastMessages = messages
+
+	if len(c.outs) == 0 {
+		return "", errors.New("no more outputs in sequenceLLMClient")
+	}
+
+	out := c.outs[0]
+	c.outs = c.outs[1:]
+
+	var err error
+	if len(c.errs) > 0 {
+		err = c.errs[0]
+		c.errs = c.errs[1:]
+	}
+	return out, err
+}
+
+func (c *sequenceLLMClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, callback llm.StreamCallback) error {
+	return errors.New("streaming not implemented in sequenceLLMClient")
+}
+
 func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	dir := t.TempDir()
 	findings := filepath.Join(dir, "FINDINGS.md")
@@ -197,5 +229,48 @@ some preface
 	}
 	if len(got.QuestionsForUser) != 1 {
 		t.Fatalf("expected questions_for_user, got %+v", got.QuestionsForUser)
+	}
+}
+
+func TestParseObserverDecision_RepairsMissingClosingObserverDecisionTag(t *testing.T) {
+	raw := "<observer_decision>\n<pass>false</pass>\n<reason>missing evidence</reason>\n<next_steps>run tests</next_steps>\n"
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) != "run tests" {
+		t.Fatalf("expected next_steps to be parsed, got %+v", got)
+	}
+}
+
+func TestOutcomeObserver_Decide_RetriesWhenObserverOutputInvalid(t *testing.T) {
+	client := &sequenceLLMClient{
+		outs: []string{
+			"我需要更多信息才能判断。",
+			"<observer_decision><pass>false</pass><reason>missing evidence</reason><next_steps>run tests</next_steps></observer_decision>",
+		},
+	}
+
+	obs := &OutcomeObserver{Client: client}
+	got, err := obs.Decide(context.Background(), ObserveInput{
+		TaskID:        "task-1",
+		AttemptID:     "attempt-1",
+		WorkspaceRoot: "/tmp/ws",
+		Prompt:        "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) != "run tests" {
+		t.Fatalf("expected next_steps to be parsed, got %+v", got)
+	}
+	if client.callCount != 2 {
+		t.Fatalf("expected 2 ChatCompletion calls, got %d", client.callCount)
 	}
 }

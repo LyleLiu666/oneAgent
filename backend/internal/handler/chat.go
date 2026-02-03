@@ -1569,43 +1569,46 @@ func runToolLoop(
 			err    error
 		)
 
-		if streamClient, ok := client.(toolStreamingCaller); ok {
-			var stepContent strings.Builder
-			var stepBuffer []byte
-			result, err = streamClient.ChatCompletionStreamWithTools(ctx, messages, opts, func(chunk string) error {
-				stepContent.WriteString(chunk)
-				combined.WriteString(chunk)
+		callLLM := func(callMessages []llm.ChatMessage) (llm.ChatCompletionResult, string, error) {
+			if streamClient, ok := client.(toolStreamingCaller); ok {
+				var stepContent strings.Builder
+				var stepBuffer []byte
+				result, err := streamClient.ChatCompletionStreamWithTools(ctx, callMessages, opts, func(chunk string) error {
+					stepContent.WriteString(chunk)
+					combined.WriteString(chunk)
 
-				stepBuffer = append(stepBuffer, chunk...)
-				valid, rest := splitBuffer(stepBuffer)
-				stepBuffer = rest
+					stepBuffer = append(stepBuffer, chunk...)
+					valid, rest := splitBuffer(stepBuffer)
+					stepBuffer = rest
 
-				if len(valid) > 0 {
+					if len(valid) > 0 {
+						broadcastMsg(broadcaster, streamMsg{
+							Op:      "delta",
+							ID:      stepStreamID,
+							Role:    model.MessageRoleAssistant,
+							MsgType: model.MessageTypeText,
+							Delta:   string(valid),
+						})
+					}
+					return nil
+				})
+				if err == nil && stepContent.Len() == 0 && result.Content != "" {
+					combined.WriteString(result.Content)
 					broadcastMsg(broadcaster, streamMsg{
 						Op:      "delta",
 						ID:      stepStreamID,
 						Role:    model.MessageRoleAssistant,
 						MsgType: model.MessageTypeText,
-						Delta:   string(valid),
+						Delta:   result.Content,
 					})
 				}
-				return nil
-			})
-			if err == nil && stepContent.Len() == 0 && result.Content != "" {
-				combined.WriteString(result.Content)
-				broadcastMsg(broadcaster, streamMsg{
-					Op:      "delta",
-					ID:      stepStreamID,
-					Role:    model.MessageRoleAssistant,
-					MsgType: model.MessageTypeText,
-					Delta:   result.Content,
-				})
+				if result.Content == "" {
+					result.Content = stepContent.String()
+				}
+				return result, stepContent.String(), err
 			}
-			if result.Content == "" {
-				result.Content = stepContent.String()
-			}
-		} else {
-			result, err = client.ChatCompletionWithTools(ctx, messages, opts)
+
+			result, err := client.ChatCompletionWithTools(ctx, callMessages, opts)
 			if err == nil && result.Content != "" {
 				combined.WriteString(result.Content)
 				broadcastMsg(broadcaster, streamMsg{
@@ -1616,6 +1619,23 @@ func runToolLoop(
 					Delta:   result.Content,
 				})
 			}
+			return result, result.Content, err
+		}
+
+		var visibleContent string
+		result, visibleContent, err = callLLM(messages)
+
+		// Best-effort self-heal: Some providers reject invalid tool call arguments at request time (HTTP 400).
+		// If the step produced no visible content and the error looks like a tool-call protocol issue, retry once
+		// with a stronger instruction, instead of failing the whole session.
+		if err != nil && shouldRetryToolProtocolError(err) && strings.TrimSpace(visibleContent) == "" {
+			retryMessages := append([]llm.ChatMessage(nil), messages...)
+			retryMessages = append(retryMessages, llm.ChatMessage{
+				Role:     model.MessageRoleUser,
+				Content:  buildToolProtocolRepairPrompt(err),
+				Volatile: true,
+			})
+			result, visibleContent, err = callLLM(retryMessages)
 		}
 		if err != nil {
 			if (broadcaster != nil && broadcaster.WasCanceled()) || errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -2002,6 +2022,38 @@ func runToolLoop(
 		persisted = true
 	}
 	return combined.String(), persisted, err
+}
+
+func shouldRetryToolProtocolError(err error) bool {
+	var apiErr *llm.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.StatusCode != 400 {
+		return false
+	}
+
+	msg := strings.ToLower(strings.TrimSpace(apiErr.Message))
+	if msg == "" {
+		msg = strings.ToLower(strings.TrimSpace(apiErr.Raw))
+	}
+	if msg == "" {
+		msg = strings.ToLower(err.Error())
+	}
+
+	return strings.Contains(msg, "invalid function arguments") || strings.Contains(msg, "function arguments json")
+}
+
+func buildToolProtocolRepairPrompt(err error) string {
+	return strings.TrimSpace(`
+The previous request failed due to a tool-call protocol error (invalid function arguments JSON).
+
+Please retry the last step:
+- If you need tools, ensure every tool call's function.arguments is a single JSON object (no code fences, no surrounding quotes).
+- If you don't need tools, answer directly without tool calls.
+
+Error (truncated):
+` + truncateString(err.Error(), 300))
 }
 
 func recordToolFailure(sessionID, userID string, resolved *resolvedModel, toolName, toolCallID, args string, err error) {

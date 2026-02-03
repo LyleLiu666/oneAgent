@@ -33,6 +33,13 @@ type OutcomeObserver struct {
 
 	MaxFindingsBytes  int
 	MaxTraceTailBytes int
+
+	// MaxParseRetries controls how many times the observer will retry when the
+	// model output cannot be parsed as a decision (best-effort self-heal).
+	// Total attempts = 1 + MaxParseRetries.
+	// When set to 0, it defaults to 1 (i.e., two total attempts). Negative
+	// values disable retries.
+	MaxParseRetries int
 }
 
 func (o *OutcomeObserver) Decide(ctx context.Context, in ObserveInput) (ObserverDecision, error) {
@@ -158,16 +165,56 @@ Return ONLY an XML block:
 		MaxTokens:   &maxTokens,
 	}
 
-	out, err := o.Client.ChatCompletion(ctx, messages, opts)
-	if err != nil {
-		return ObserverDecision{}, err
+	maxParseRetries := o.MaxParseRetries
+	if maxParseRetries == 0 {
+		maxParseRetries = 1
+	}
+	if maxParseRetries < 0 {
+		maxParseRetries = 0
 	}
 
-	decision, err := parseObserverDecision(out)
-	if err != nil {
-		return ObserverDecision{}, err
+	var lastErr error
+	for attempt := 0; attempt <= maxParseRetries; attempt++ {
+		out, err := o.Client.ChatCompletion(ctx, messages, opts)
+		if err != nil {
+			return ObserverDecision{}, err
+		}
+
+		decision, err := parseObserverDecision(out)
+		if err == nil {
+			return decision, nil
+		}
+		lastErr = err
+
+		if attempt >= maxParseRetries {
+			break
+		}
+
+		repair := strings.TrimSpace(`
+Your previous output was invalid and could not be parsed.
+
+Return ONLY a single XML block that matches exactly this schema (no code fences, no extra text):
+
+<observer_decision>
+  <pass>true|false</pass>
+  <reason>...</reason>
+  <evidence>
+    <item>...</item>
+  </evidence>
+  <next_steps>...</next_steps>
+  <questions_for_user>
+    <item>...</item>
+  </questions_for_user>
+</observer_decision>
+`)
+		repair += "\n\nInvalid output (truncated):\n" + truncateString(strings.TrimSpace(out), 300)
+		messages = append(messages, llm.BuildUserMessage(repair))
 	}
-	return decision, nil
+
+	if lastErr == nil {
+		lastErr = errors.New("observer decision parse failed")
+	}
+	return ObserverDecision{}, lastErr
 }
 
 func parseObserverDecision(out string) (ObserverDecision, error) {
@@ -189,11 +236,36 @@ func parseObserverDecision(out string) (ObserverDecision, error) {
 		}
 	}
 
+	if xmlBlock, ok := repairObserverDecisionXML(raw); ok {
+		if parsed, ok := parseObserverDecisionFromXML(xmlBlock); ok {
+			return parsed, nil
+		}
+	}
+
 	if fallback, ok := parseObserverDecisionFromText(raw); ok {
 		return fallback, nil
 	}
 
 	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected XML or JSON): %q", truncateString(raw, 300))
+}
+
+func repairObserverDecisionXML(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+
+	lower := strings.ToLower(raw)
+	openIdx := strings.Index(lower, "<observer_decision")
+	if openIdx < 0 {
+		return "", false
+	}
+	if strings.Contains(lower, "</observer_decision>") {
+		return "", false
+	}
+
+	candidate := strings.TrimSpace(raw[openIdx:]) + "\n</observer_decision>"
+	return candidate, true
 }
 
 func extractFirstJSONObject(raw string) string {
