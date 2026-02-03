@@ -74,7 +74,7 @@ func RunLoop(
 
 	var combined strings.Builder
 
-	maxSteps := toolcalling.ChatToolMaxSteps()
+	maxSteps := toolcalling.ChatToolMaxStepsFromContext(ctx)
 	for step := 0; step < maxSteps; step++ {
 		if onStepStart != nil {
 			onStepStart(step)

@@ -21,10 +21,14 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"github.com/liu_y/oneAgent/backend/internal/sessioncompress"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
+	"github.com/liu_y/oneAgent/backend/internal/tool"
+	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
+	"github.com/liu_y/oneAgent/backend/internal/toolxml"
 )
 
 type ResolveModelFunc func(ctx context.Context, userID, modelID string) (client llm.Client, resolvedModelID string, err error)
@@ -80,6 +84,40 @@ func buildTextLLMHistory(dbMessages []model.ChatMessage) []llm.ChatMessage {
 		out = append(out, llm.ChatMessage{Role: msg.Role, Content: content})
 	}
 	return out
+}
+
+const secretaryToolMaxSteps = 5
+
+func secretaryReadOnlyPolicy() permissions.Policy {
+	return permissions.Policy{
+		ID:            "secretary_read_only",
+		DefaultEffect: permissions.EffectDeny,
+		Rules: []permissions.Rule{
+			{ID: "allow-search", Effect: permissions.EffectAllow, ToolID: tool.ToolIDSearch},
+			{ID: "allow-skill-read", Effect: permissions.EffectAllow, ToolID: tool.ToolIDSkillRead},
+			{ID: "allow-read-file", Effect: permissions.EffectAllow, ToolID: tool.ToolIDReadFile},
+			{ID: "allow-ls", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLs},
+			{ID: "allow-glob", Effect: permissions.EffectAllow, ToolID: tool.ToolIDGlob},
+			{ID: "allow-rg", Effect: permissions.EffectAllow, ToolID: tool.ToolIDRg},
+			{ID: "allow-lsp-definition", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLSPDefinition},
+			{ID: "allow-lsp-references", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLSPReferences},
+			{ID: "allow-lsp-rename-preview", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLSPRenamePreview},
+		},
+	}
+}
+
+func secretaryDefaultToolIDs() []string {
+	return []string{
+		tool.ToolIDSearch,
+		tool.ToolIDSkillRead,
+		tool.ToolIDReadFile,
+		tool.ToolIDLs,
+		tool.ToolIDGlob,
+		tool.ToolIDRg,
+		tool.ToolIDLSPDefinition,
+		tool.ToolIDLSPReferences,
+		tool.ToolIDLSPRenamePreview,
+	}
 }
 
 func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID, content, workspace string) (InboxAppendResult, error) {
@@ -804,14 +842,16 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 
 	sys := strings.TrimSpace(secretaryDispatchSystemPromptSW)
 	factory := agent.NewFactory()
+	policySnapshot := permissions.ResolveSnapshot(userID, secretaryReadOnlyPolicy(), time.Now())
 	agentRuntime, err := factory.Build(agent.BuildRequest{
 		Spec: agent.AgentSpec{
 			ID:           "secretary-sw",
 			BaseOverride: sys,
-			ToolIDs:      nil,
-			ToolProtocol: "",
+			ToolIDs:      secretaryDefaultToolIDs(),
+			ToolProtocol: agent.ToolProtocolXML,
 		},
-		Client: client,
+		Client:         client,
+		PolicySnapshot: policySnapshot,
 	})
 	if err != nil {
 		return triagePlan{}, "", err
@@ -926,37 +966,139 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 		requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
 	}
 
-	toolSpec := buildSecretaryTriagePlanTool()
-	toolInstruction := buildSecretaryTriagePlanToolInstruction()
 	tagsInstruction := buildSecretaryTriagePlanTagsInstruction()
 
-	plan, meta, err := agent.RequestStructuredOutput[triagePlan](ctx, client, requestMsgs, &llm.ChatCompletionOptions{
-		Temperature: &temp,
-		MaxTokens:   &maxTokens,
-	}, agent.StructuredOutputSpec[triagePlan]{
-		Tool:            toolSpec,
-		ToolName:        toolSpec.Function.Name,
-		ToolInstruction: toolInstruction,
-		TagsInstruction: tagsInstruction,
-		ParseToolArgs: func(raw json.RawMessage) (triagePlan, error) {
-			var p triagePlan
-			if err := json.Unmarshal(raw, &p); err != nil {
-				return triagePlan{}, err
+	var (
+		plan triagePlan
+		meta agent.StructuredOutputMeta
+	)
+	if agentRuntime.ToolProtocol == agent.ToolProtocolXML && len(agentRuntime.ToolDefs) > 0 {
+		loopMsgs := append([]llm.ChatMessage(nil), requestMsgs...)
+		loopMsgs = append(loopMsgs, llm.BuildUserMessage(tagsInstruction))
+
+		toolCtx := toolcalling.ContextWithChatToolMaxSteps(ctx, secretaryToolMaxSteps)
+		toolCtx = tool.ContextWithPolicySnapshot(toolCtx, policySnapshot)
+		if ws := strings.TrimSpace(sessionWorkspace); ws != "" {
+			toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
+				Enabled: true,
+				Root:    ws,
+			})
+		}
+
+		observeStep := func(rec toolxml.StepRecord) {
+			swSessionID := deriveSWSessionID(sessionID)
+			if swSessionID == "" {
+				return
 			}
-			normalizeTriagePlan(&p)
-			return p, nil
-		},
-		ParseTags: func(text string) (triagePlan, bool) {
-			p, ok := parseSecretaryTriagePlanTags(text)
-			if !ok {
-				return triagePlan{}, false
+			if o == nil || o.Sessions == nil {
+				return
 			}
-			normalizeTriagePlan(&p)
-			return p, true
-		},
-	})
-	if err != nil {
-		return triagePlan{}, "", err
+
+			type toolCallEnvelope struct {
+				Protocol string        `json:"protocol"`
+				Calls    []llm.ToolCall `json:"tool_calls,omitempty"`
+			}
+			type toolResultEnvelope struct {
+				Protocol string             `json:"protocol"`
+				Results  []toolxml.ToolResult `json:"results,omitempty"`
+			}
+
+			callBody := ""
+			if len(rec.ToolCalls) > 0 {
+				if b, err := json.Marshal(toolCallEnvelope{Protocol: "xml", Calls: rec.ToolCalls}); err == nil {
+					callBody = string(b)
+				}
+			}
+			var callID *uint
+			if strings.TrimSpace(callBody) != "" {
+				if msg, err := o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
+					Role:    model.MessageRoleAssistant,
+					Type:    model.MessageTypeToolCall,
+					Content: callBody,
+				}); err == nil && msg.ID != 0 {
+					callID = &msg.ID
+				}
+			}
+
+			resultBody := ""
+			if len(rec.ToolResults) > 0 {
+				if b, err := json.Marshal(toolResultEnvelope{Protocol: "xml", Results: rec.ToolResults}); err == nil {
+					resultBody = string(b)
+				}
+			}
+			if strings.TrimSpace(resultBody) != "" {
+				toolMsg := model.ChatMessage{
+					Role:    model.MessageRoleTool,
+					Type:    model.MessageTypeToolResult,
+					Content: resultBody,
+				}
+				if callID != nil {
+					toolMsg.ParentID = callID
+				}
+				_, _ = o.Sessions.AppendMessage(swSessionID, toolMsg)
+			}
+		}
+
+		out, loopErr := toolxml.RunLoop(
+			toolCtx,
+			client,
+			loopMsgs,
+			&llm.ChatCompletionOptions{
+				Temperature: &temp,
+				MaxTokens:   &maxTokens,
+			},
+			agentRuntime.ToolDefs,
+			userID,
+			nil,
+			nil,
+			nil,
+			nil,
+			observeStep,
+			nil,
+			nil,
+		)
+		if loopErr == nil {
+			if p, ok := parseSecretaryTriagePlanTags(out); ok {
+				plan = p
+				meta = agent.StructuredOutputMeta{Mode: agent.StructuredOutputModeTags}
+			}
+		}
+	}
+
+	if strings.TrimSpace(plan.SummaryMessage) == "" {
+		toolSpec := buildSecretaryTriagePlanTool()
+		toolInstruction := buildSecretaryTriagePlanToolInstruction()
+
+		parsed, parsedMeta, err := agent.RequestStructuredOutput[triagePlan](ctx, client, requestMsgs, &llm.ChatCompletionOptions{
+			Temperature: &temp,
+			MaxTokens:   &maxTokens,
+		}, agent.StructuredOutputSpec[triagePlan]{
+			Tool:            toolSpec,
+			ToolName:        toolSpec.Function.Name,
+			ToolInstruction: toolInstruction,
+			TagsInstruction: tagsInstruction,
+			ParseToolArgs: func(raw json.RawMessage) (triagePlan, error) {
+				var p triagePlan
+				if err := json.Unmarshal(raw, &p); err != nil {
+					return triagePlan{}, err
+				}
+				normalizeTriagePlan(&p)
+				return p, nil
+			},
+			ParseTags: func(text string) (triagePlan, bool) {
+				p, ok := parseSecretaryTriagePlanTags(text)
+				if !ok {
+					return triagePlan{}, false
+				}
+				normalizeTriagePlan(&p)
+				return p, true
+			},
+		})
+		if err != nil {
+			return triagePlan{}, "", err
+		}
+		plan = parsed
+		meta = parsedMeta
 	}
 
 	// Best-effort: record SW decision into the SW session (not user-facing).
@@ -1741,7 +1883,8 @@ ONEAGENT_SECRETARY_TRIAGE
 你是用户的秘书（SW：Secretary(Worker)，中层管理者），负责把多条消息归并为少量任务并派发后台 worker。
 约束：
 - 你不直接和用户对话（SU 负责对话）；你只产出派工计划（summary_message/tasks/questions）。
-- 你不执行工具，不写/改文件；只做“派工/排队/需要用户确认的问题”的决策。
+- 你可以使用系统提供的工具做查询/解释/排障（best-effort），但你是“只读”：不得使用任何会写入/改动/删除文件的工具；如果必须写文件/改文件/删文件，请把工作拆成后台任务（tasks）。
+- 简单问题（预计 <= 5 轮工具调用、且不涉及写文件/改文件/删文件）尽量直接在 summary_message 里给出结论与下一步，不要为了“看起来在干活”而派新任务。
 - 你会收到一个“任务看板快照”（如果存在）。当用户在问进度/已完成/卡住/报错时，优先用该快照直接回答；不要为此新建任务或追加无意义的问题。
 输出：
 - 你将通过系统提供的“结构化输出通道”返回 triage plan（intent/summary_message/tasks/questions）。

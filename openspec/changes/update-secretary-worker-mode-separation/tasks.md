@@ -26,5 +26,5 @@
 
 ## 5. Reliability Implementation (after approval)
 - [x] 5.1 Implement Outcome Observer self-heal retry for invalid XML/JSON output (tests first)
-- [ ] 5.2 Ensure tool-loop feeds provider/tool errors back to LLM for retry (worker + secretary)
-- [ ] 5.3 Ensure secretary uses restricted tool permissions (read-only filesystem) and can delegate to worker tasks when needed
+- [x] 5.2 Ensure tool-loop feeds provider/tool errors back to LLM for retry (worker + secretary)
+- [x] 5.3 Ensure secretary uses restricted tool permissions (read-only filesystem) and can delegate to worker tasks when needed
