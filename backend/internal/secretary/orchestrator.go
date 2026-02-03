@@ -355,7 +355,7 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	}
 
 	// SW: dispatch planning + worker coordination (best-effort).
-	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, session.Metadata, newUserMsgs)
+	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs)
 	if err != nil {
 		return TriageResult{}, err
 	}
@@ -461,6 +461,7 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 	createdTaskIDs := make([]string, 0, len(plan.Tasks))
 	questions := append([]string{}, plan.Questions...)
 	workspacesCreated := make([]string, 0, 2)
+	skippedNeedWorkspace := make([]string, 0, 2)
 
 	for _, task := range plan.Tasks {
 		title := strings.TrimSpace(task.Title)
@@ -486,17 +487,17 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 
 		case "session":
 			if sessionWorkspace == "" {
-				questions = append(questions, fmt.Sprintf("要继续「%s」，我需要你告诉我在哪个项目目录里做（发我仓库根目录路径即可）。", title))
+				skippedNeedWorkspace = append(skippedNeedWorkspace, title)
 				continue
 			}
 			workspace = sessionWorkspace
 
 		case "ask":
-			questions = append(questions, fmt.Sprintf("「%s」需要你指定要操作的项目目录。你把目录路径发我就行。", title))
+			skippedNeedWorkspace = append(skippedNeedWorkspace, title)
 			continue
 
 		default:
-			questions = append(questions, fmt.Sprintf("「%s」我暂时判断不出要用哪个项目目录。你发我一个目录路径（仓库根目录）我就继续。", title))
+			skippedNeedWorkspace = append(skippedNeedWorkspace, title)
 			continue
 		}
 
@@ -509,6 +510,16 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 
 		if err := o.Runner.Enqueue(created.ID); err != nil {
 			return dispatchResult{}, err
+		}
+	}
+
+	// Safety fallback: if we could not dispatch some tasks due to missing workspace info,
+	// but SW didn't provide any user-facing questions, emit one minimal actionable ask.
+	if len(skippedNeedWorkspace) > 0 && len(questions) == 0 {
+		if len(skippedNeedWorkspace) == 1 && strings.TrimSpace(skippedNeedWorkspace[0]) != "" {
+			questions = append(questions, fmt.Sprintf("要继续「%s」，请把项目目录（仓库根目录）的路径发我。", strings.TrimSpace(skippedNeedWorkspace[0])))
+		} else {
+			questions = append(questions, "要继续推进，我需要你发我项目目录（仓库根目录）的路径。")
 		}
 	}
 
@@ -629,7 +640,7 @@ func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, meta
 	return ack, resolvedID, nil
 }
 
-func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
+func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID, sessionWorkspace string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
 	if o.ResolveModel == nil {
 		return triagePlan{}, "", errors.New("ResolveModel is required")
 	}
@@ -658,7 +669,12 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	}
 
 	sys := strings.TrimSpace(secretaryDispatchSystemPromptSW)
-	user := "以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input + "\n\n请按 schema 输出 JSON。"
+	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
+	workspaceHint := "(unset)"
+	if sessionWorkspace != "" {
+		workspaceHint = sessionWorkspace
+	}
+	user := "Context:\n- session_workspace_root: " + workspaceHint + "\n\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input + "\n\n请按 schema 输出 JSON。"
 	// SW: before dispatching, pull-sync the latest SU entries (best-effort).
 	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SW", "SU")); injected != "" {
 		user = injected + "\n\n" + user
@@ -1361,6 +1377,7 @@ questions 写作要求：
 
 workspace_strategy 规则：
 - new：与 repo 无关的泛化任务（报告/整理/写文档等），允许系统创建新 workspace 并行执行
-- session：需要在会话 workspace（代码仓库）内执行的任务（改代码/跑测试等）
+- session：需要在会话 workspace（代码仓库）内执行的任务（改代码/跑测试等）；仅当 session_workspace_root 已设置时使用
 - ask：无法判断 workspace 或需要用户明确指定时使用
-`
+- 如果 session_workspace_root 是 (unset)，不要输出 workspace_strategy=session；改用 ask 并在 questions 里问清楚要用哪个项目目录
+	`
