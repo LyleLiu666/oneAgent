@@ -10,8 +10,8 @@
 - [x] 2.2 Add prompt stability tests (stable prefix / volatile context / cache key)
 - [x] 2.3 Add structured output channel (tool-call first, fallback to loose tags)
 - [x] 2.4 Migrate Secretary SW planner to AgentFactory (no more “strict JSON in text”)
-- [ ] 2.5 Migrate Secretary SU report generation to AgentFactory (optional; keep message list append-only)
-- [ ] 2.6 Keep Worker Chat behavior stable; migrate only if tests prove zero regression
+- [x] 2.5 Migrate Secretary SU report generation to AgentFactory (optional; keep message list append-only)
+- [x] 2.6 Keep Worker Chat behavior stable; migrate only if tests prove zero regression
 
 ## 3. Validation
 - [x] 3.1 Backend: `cd backend && go test ./... -count=1`

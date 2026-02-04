@@ -3,6 +3,7 @@ package handler
 import (
 	"strings"
 
+	"github.com/liu_y/oneAgent/backend/internal/agent"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
@@ -15,18 +16,6 @@ import (
 // - If tools are requested but provider lacks native tools support, fallback to XML.
 func selectToolProtocol(requested string, toolDefs []tool.Definition, client llm.Client) (protocol string, fellBack bool) {
 	requested = strings.ToLower(strings.TrimSpace(requested))
-
-	if requested == "xml" {
-		return "xml", false
-	}
-
-	if len(toolDefs) == 0 {
-		return "json", false
-	}
-
-	if _, ok := client.(toolCaller); ok {
-		return "json", false
-	}
-
-	return "xml", true
+	p, fellBack := agent.SelectToolProtocol(requested, toolDefs, client)
+	return string(p), fellBack
 }

@@ -364,6 +364,13 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	workspacesCreated := dispatch.WorkspacesCreated
 
 	summary := buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
+	if len(createdTaskIDs) > 0 || len(questions) > 0 {
+		if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
+			if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
+				summary = trimmed
+			}
+		}
+	}
 
 	summaryMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
 		Role:    model.MessageRoleAssistant,
@@ -995,11 +1002,11 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 			}
 
 			type toolCallEnvelope struct {
-				Protocol string        `json:"protocol"`
+				Protocol string         `json:"protocol"`
 				Calls    []llm.ToolCall `json:"tool_calls,omitempty"`
 			}
 			type toolResultEnvelope struct {
-				Protocol string             `json:"protocol"`
+				Protocol string               `json:"protocol"`
 				Results  []toolxml.ToolResult `json:"results,omitempty"`
 			}
 
@@ -1124,6 +1131,135 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	}
 
 	return plan, resolvedID, nil
+}
+
+func (o *Orchestrator) generateSUReport(ctx context.Context, userID, sessionID, sessionWorkspace string, metadata model.JSONB, userMsgs []model.ChatMessage, plan triagePlan, dispatch dispatchResult, progressSnapshot string) (string, string, error) {
+	if o == nil {
+		return "", "", errors.New("orchestrator is nil")
+	}
+	if o.ResolveModel == nil {
+		return "", "", errors.New("ResolveModel is required")
+	}
+
+	modelID := ""
+	if v, ok := metadata["model_id"].(string); ok {
+		modelID = strings.TrimSpace(v)
+	}
+	client, resolvedID, err := o.ResolveModel(ctx, userID, modelID)
+	if err != nil {
+		return "", "", err
+	}
+	if client == nil {
+		return "", "", errors.New("resolved model client is nil")
+	}
+
+	sys := strings.TrimSpace(secretaryReportSystemPromptSU)
+	factory := agent.NewFactory()
+	agentRuntime, err := factory.Build(agent.BuildRequest{
+		Spec: agent.AgentSpec{
+			ID:           "secretary-su",
+			BaseOverride: sys,
+			ToolIDs:      nil,
+			ToolProtocol: agent.ToolProtocolNone,
+		},
+		Client: client,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	sys = agentRuntime.FullSystemPrompt()
+
+	var b strings.Builder
+	b.WriteString("【本轮输入】\n")
+	for i, m := range userMsgs {
+		line := strings.TrimSpace(m.Content)
+		if line == "" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("%d) %s\n", i+1, line))
+	}
+
+	b.WriteString("\n【SW 规划结果】\n")
+	if v := strings.TrimSpace(plan.Intent); v != "" {
+		b.WriteString("intent: " + v + "\n")
+	}
+	if v := strings.TrimSpace(plan.SummaryMessage); v != "" {
+		b.WriteString("summary_message: " + v + "\n")
+	}
+	if len(plan.Tasks) > 0 {
+		b.WriteString("tasks:\n")
+		for _, t := range plan.Tasks {
+			title := strings.TrimSpace(t.Title)
+			prompt := strings.TrimSpace(t.Prompt)
+			strategy := strings.TrimSpace(t.WorkspaceStrategy)
+			if title == "" {
+				title = deriveTaskTitle(prompt)
+			}
+			b.WriteString("- title: " + title + "\n")
+			if prompt != "" {
+				b.WriteString("  prompt: " + prompt + "\n")
+			}
+			if strategy != "" {
+				b.WriteString("  workspace_strategy: " + strategy + "\n")
+			}
+		}
+	}
+	if len(dispatch.CreatedTaskIDs) > 0 {
+		b.WriteString(fmt.Sprintf("created_task_count: %d\n", len(dispatch.CreatedTaskIDs)))
+	}
+	if len(dispatch.Questions) > 0 {
+		b.WriteString("questions:\n")
+		for i, q := range dispatch.Questions {
+			q = strings.TrimSpace(q)
+			if q == "" {
+				continue
+			}
+			b.WriteString(fmt.Sprintf("%d) %s\n", i+1, q))
+		}
+	}
+	if snap := strings.TrimSpace(progressSnapshot); snap != "" {
+		b.WriteString("\n【任务看板快照】\n")
+		b.WriteString(snap)
+		b.WriteString("\n")
+	}
+	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
+	if sessionWorkspace != "" {
+		b.WriteString("\n【会话目录（内部）】\n")
+		b.WriteString(sessionWorkspace)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n请输出你要发给用户的一段话。")
+
+	temp := 0.2
+	maxTokens := 600
+	out, err := client.ChatCompletion(ctx, []llm.ChatMessage{
+		llm.BuildSystemMessage(sys),
+		llm.BuildUserMessage(strings.TrimSpace(b.String())),
+	}, &llm.ChatCompletionOptions{
+		Temperature: &temp,
+		MaxTokens:   &maxTokens,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	text := strings.TrimSpace(out)
+	text = strings.Trim(text, "\"")
+	if text == "" {
+		return "", "", errors.New("empty SU report")
+	}
+
+	// Best-effort: record SU report into SW session for traceability, without altering the SU history.
+	if o.Sessions != nil {
+		if swSessionID := deriveSWSessionID(sessionID); swSessionID != "" {
+			_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
+				Role:    model.MessageRoleAssistant,
+				Type:    model.MessageTypeText,
+				Content: strings.TrimSpace("su_report:\n" + text),
+			})
+		}
+	}
+
+	return text, resolvedID, nil
 }
 
 func (o *Orchestrator) buildMemorySyncPrompt(ctx context.Context, principalID, channel, peerWriter string) string {
@@ -1876,6 +2012,18 @@ ONEAGENT_SECRETARY_ACK
 - 6~14 个字，语气自然（像真人助理），不要使用“已记下/已记录/收到您的…请求”等机械句式
 - 如果用户在问进度/状态/数量，优先回复“我看看/我查一下”这类短句
 - 尽量点出/复述 1 个关键信息，避免固定模板
+`
+
+const secretaryReportSystemPromptSU = `
+ONEAGENT_SECRETARY_SU_REPORT
+你是用户的秘书（SU：Secretary(User)），负责把“本轮归并/派工/进度/需要确认的点”讲清楚，并让用户知道下一步怎么做。
+约束：
+- 你要用自然中文（像真人助理），不要用机械话术
+- 不要出现内部术语：不要出现 worker/task/workspace/派工/后台/工具调用 等词
+- 如果需要用户确认：不要只说“有 N 个问题/需要确认后才能继续”，必须把要确认的点写清楚
+- 尽量给出 2~3 个可选项或明确的填写格式（例如“路径：/path/to/repo”）
+- 如果不需要用户确认：说明你将继续推进什么，并承诺“有更新就告诉你”（不要编造进度）
+- 输出一段消息即可：不要输出标题、不要代码块、不要输出 JSON
 `
 
 const secretaryDispatchSystemPromptSW = `
