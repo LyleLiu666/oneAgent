@@ -859,7 +859,7 @@ it('handles recovery focus switching and resumes via chat reply (secretary mode)
     await flushPromises()
 
     expect(apiClient.resumeTask).toHaveBeenCalledTimes(1)
-    expect(apiClient.resumeTask).toHaveBeenCalledWith('t2', { review_notes: '先处理第二个' })
+    expect(apiClient.resumeTask).toHaveBeenCalledWith('t2', { review_notes: '先处理第二个', source: 'secretary-recovery' })
     expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(0)
 
     // Remaining item can still be resumed afterwards.
@@ -868,7 +868,7 @@ it('handles recovery focus switching and resumes via chat reply (secretary mode)
     await flushPromises()
 
     expect(apiClient.resumeTask).toHaveBeenCalledTimes(2)
-    expect(apiClient.resumeTask).toHaveBeenLastCalledWith('t1', { review_notes: '再处理第一个' })
+    expect(apiClient.resumeTask).toHaveBeenLastCalledWith('t1', { review_notes: '再处理第一个', source: 'secretary-recovery' })
 
     // After the queue drains, messages go back to normal secretary sending.
     await wrapper.get('textarea').setValue('正常聊天')

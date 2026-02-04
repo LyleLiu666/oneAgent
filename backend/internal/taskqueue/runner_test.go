@@ -3,6 +3,7 @@ package taskqueue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -491,6 +492,13 @@ func TestTaskRunner_Resume_AllowsSucceeded_WithReviewNotes(t *testing.T) {
 	found := false
 	for _, ev := range evs {
 		if ev.AttemptID == updated.Attempts[1].ID && ev.Type == "attempt.queued" {
+			if src, ok := ev.Data["source"]; ok {
+				if strings.TrimSpace(fmt.Sprint(src)) != "resume" {
+					t.Fatalf("expected attempt.queued source resume, got %v", src)
+				}
+			} else {
+				t.Fatalf("expected attempt.queued event to include source")
+			}
 			if v, ok := ev.Data["review_notes"]; ok && strings.TrimSpace(v.(string)) != "" {
 				found = true
 			}
@@ -499,6 +507,83 @@ func TestTaskRunner_Resume_AllowsSucceeded_WithReviewNotes(t *testing.T) {
 	if !found {
 		t.Fatalf("expected attempt.queued event to include review_notes")
 	}
+}
+
+func TestTaskRunner_ResumeWithSource_AttemptQueuedEventContainsSource(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	// Mark initial attempt as succeeded so we can create a follow-up attempt.
+	now := Now()
+	_, err = store.UpdateTask(task.ID, func(tk *Task) error {
+		a := tk.LatestAttempt()
+		if a == nil {
+			return errors.New("missing attempt")
+		}
+		a.Status = AttemptSucceeded
+		a.StartedAt = &now
+		a.FinishedAt = &now
+		a.Summary = "ok"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	exec := &execStub{
+		t:            t,
+		artifactsDir: t.TempDir(),
+	}
+
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+		ExecuteAttempt: exec.Execute,
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	updated, err := runner.ResumeWithSource(task.ID, "notes", "secretary-recovery")
+	if err != nil {
+		t.Fatalf("ResumeWithSource: %v", err)
+	}
+	if len(updated.Attempts) != 2 {
+		t.Fatalf("expected 2 attempts after follow-up, got %d", len(updated.Attempts))
+	}
+
+	evs, err := store.ReadEvents(task.ID)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	for _, ev := range evs {
+		if ev.AttemptID != updated.Attempts[1].ID {
+			continue
+		}
+		if ev.Type != "attempt.queued" {
+			continue
+		}
+		if src, ok := ev.Data["source"]; ok {
+			if strings.TrimSpace(fmt.Sprint(src)) != "secretary-recovery" {
+				t.Fatalf("expected attempt.queued source secretary-recovery, got %v", src)
+			}
+		} else {
+			t.Fatalf("expected attempt.queued event to include source")
+		}
+		return
+	}
+	t.Fatalf("expected attempt.queued event for follow-up attempt")
 }
 
 func TestTaskRunner_BudgetExceeded_IsTerminalAndResumable(t *testing.T) {

@@ -647,7 +647,7 @@ export async function cancelTask(taskId: string): Promise<Task> {
 
 export async function resumeTask(
   taskId: string,
-  payload?: { review_notes?: string },
+  payload?: { review_notes?: string; source?: string },
 ): Promise<Task> {
   return api(`/api/tasks/${taskId}/resume`, { method: "POST", body: payload });
 }

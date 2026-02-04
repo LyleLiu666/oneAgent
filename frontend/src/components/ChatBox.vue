@@ -1799,7 +1799,7 @@ const sendRecoveryReply = async (rawMessage: string) => {
 
   secretaryRecoverySubmitting.value = true
   try {
-    await resumeTask(taskId, { review_notes: message })
+    await resumeTask(taskId, { review_notes: message, source: 'secretary-recovery' })
     const shortID = taskId.slice(0, 8)
     const title = String(item?.title || '').trim() || '任务'
     chatStore.addMessage({

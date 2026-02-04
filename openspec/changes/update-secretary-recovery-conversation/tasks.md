@@ -19,4 +19,4 @@
 
 ## 3. Backend (optional best-effort)
 - [ ] 3.1 If needed, add a lightweight server-side “secretary recovery state” to persist active binding across refresh
-- [ ] 3.2 Ensure resume events record `review_notes` source as `secretary-recovery` (best-effort)
+- [x] 3.2 Ensure resume events record `review_notes` source as `secretary-recovery` (best-effort)

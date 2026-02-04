@@ -198,7 +198,7 @@ it("surfaces failed tasks and allows resuming from secretary mode", async () => 
   await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
   await flushPromises();
   await wrapper.get('[data-testid="secretary-task-recovery-resume"]').trigger("click");
-  expect(mocks.resumeTask).toHaveBeenCalledWith("t1");
+  expect(mocks.resumeTask).toHaveBeenCalledWith("t1", { source: "secretary-recovery" });
 
   wrapper.unmount();
 });

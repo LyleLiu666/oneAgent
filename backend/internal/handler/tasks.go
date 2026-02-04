@@ -158,6 +158,7 @@ func ResumeTask(c *gin.Context) {
 
 	var req struct {
 		ReviewNotes string `json:"review_notes"`
+		Source      string `json:"source"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -179,7 +180,7 @@ func ResumeTask(c *gin.Context) {
 		return
 	}
 
-	updated, err := rt.TaskRunner.Resume(taskID, req.ReviewNotes)
+	updated, err := rt.TaskRunner.ResumeWithSource(taskID, req.ReviewNotes, req.Source)
 	if err != nil {
 		RespondError(c, http.StatusBadRequest, err)
 		return

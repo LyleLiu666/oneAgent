@@ -366,7 +366,7 @@ const onResume = async (card: RecoveryCard) => {
   recoverySubmittingTaskId.value = id
   recoveryError.value = ''
   try {
-    await resumeTask(id)
+    await resumeTask(id, { source: 'secretary-recovery' })
     emit('recovery-action', {
       action: 'resume',
       taskId: id,

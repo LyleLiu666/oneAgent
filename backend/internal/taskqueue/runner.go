@@ -255,7 +255,15 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 }
 
 func (r *TaskRunner) Resume(taskID string, reviewNotes string) (Task, error) {
-	return r.enqueueAttempt(taskID, reviewNotes, "resume", false)
+	return r.ResumeWithSource(taskID, reviewNotes, "resume")
+}
+
+func (r *TaskRunner) ResumeWithSource(taskID string, reviewNotes string, source string) (Task, error) {
+	src := strings.TrimSpace(source)
+	if src == "" {
+		src = "resume"
+	}
+	return r.enqueueAttempt(taskID, reviewNotes, src, false)
 }
 
 func truncateReviewNotes(reviewNotes string) string {
