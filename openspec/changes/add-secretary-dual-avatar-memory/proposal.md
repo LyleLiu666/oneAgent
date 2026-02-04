@@ -1,4 +1,4 @@
-# Proposal: Secretary 双分身（User/Worker）+ 共享 Memory + 永久在线话（单机）
+# Proposal: Secretary 双分身（User/Work）+ 共享 Memory + 永久在线话（单机）
 
 ## Why
 当前“秘书模式”仍偏像一个 worker：上下文容易被工具细节/失败排障污染，导致对用户的汇报显得机械、噪声高、且难以长期保持一致性（越聊越乱）。
@@ -18,7 +18,7 @@
 ## What Changes
 - 引入“秘书双分身”概念：
   - `Secretary(User)`（SU）：面向用户汇报/确认/查进度（只读）
-  - `Secretary(Worker)`（SW）：面向 worker 派工/恢复/排障（可调度 Task Queue；尽量不直达用户）
+  - `Secretary(Work)`（SW）：面向执行层派工/恢复/排障（可调度 Task Queue；尽量不直达用户）
 - 引入共享 Memory（append-only）：
   - 记录 worklog + findings + context_summary
   - 支持按时间窗查询（本地 SQLite）
@@ -42,4 +42,3 @@
 - 不做跨机/远程 memory 同步与安全出域治理（当前单机）
 - 不做加密/脱敏（按你的决定）
 - “worker 直通用户”在本设计中优先级最低，只保留折叠入口（未来再做）
-

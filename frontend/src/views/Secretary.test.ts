@@ -176,6 +176,11 @@ it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
   const triageArgs = (apiClient.secretaryTriage as any).mock.calls[0]?.[0]
   expect(triageArgs).toBeTruthy()
   expect(triageArgs).not.toHaveProperty('session_id')
+  expect(wrapper.find('[data-testid="secretary-pending-questions"]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+
+  await wrapper.get('[data-testid="secretary-pending-questions"]').trigger('click')
+  await flush()
   expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
   expect(wrapper.text()).toContain('用哪个目录来做？')
 

@@ -1557,7 +1557,7 @@ const runSecretaryTriage = async () => {
     upsertServerTextMessage(res?.summary_message_id, 'assistant', res?.summary_message)
     const nextQuestions = normalizeSecretaryQuestions(res?.questions)
     secretaryPendingQuestions.value = nextQuestions
-    if (nextQuestions.length > 0) secretaryPendingQuestionsModalOpen.value = true
+    if (nextQuestions.length === 0) secretaryPendingQuestionsModalOpen.value = false
     loadSessions()
   } catch (error) {
     console.error('Failed to triage secretary inbox:', error)
@@ -2739,14 +2739,17 @@ onUnmounted(() => {
     <div
       v-if="secretaryPendingQuestionsModalOpen"
       data-testid="secretary-pending-questions-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="待确认"
       class="fixed inset-0 z-50 flex items-center justify-center p-4"
     >
       <div class="absolute inset-0 bg-black/70" @click="closeSecretaryPendingQuestionsModal"></div>
       <div class="relative w-full max-w-2xl rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
         <div class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <div class="text-sm font-semibold text-surface-100 truncate">需要你确认</div>
-            <div class="text-xs text-surface-400 mt-0.5">确认后我就能继续往下推进。</div>
+            <div class="text-sm font-semibold text-surface-100 truncate">待确认 · 秘书</div>
+            <div class="text-xs text-surface-400 mt-0.5">这些问题也会在对话里出现；回复后我就能继续推进。</div>
           </div>
           <button
             type="button"
@@ -2767,7 +2770,7 @@ onUnmounted(() => {
               {{ q }}
             </li>
           </ol>
-          <div class="text-xs text-surface-400">你直接回复编号/答案就行。</div>
+          <div class="text-xs text-surface-400">建议直接在对话框回复编号/答案。</div>
         </div>
       </div>
     </div>

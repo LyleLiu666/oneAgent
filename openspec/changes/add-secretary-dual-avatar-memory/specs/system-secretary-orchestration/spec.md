@@ -15,7 +15,7 @@
 ### Requirement: Secretary orchestration MUST be split into SU/SW channels with distinct responsibilities (best-effort)
 系统必须 (MUST) 将秘书编排划分为两个逻辑通道（双分身；best-effort）：
 - `Secretary(User)`（SU）：面向用户对话与汇报；默认只读（best-effort）
-- `Secretary(Worker)`（SW）：面向 worker 派工/恢复/答疑；默认只 dispatch，不直接面向用户（best-effort）
+- `Secretary(Work)`（SW）：面向执行层派工/恢复/答疑；默认只 dispatch，不直接面向用户（best-effort）
 
 系统必须 (MUST) 将用户输入路由给 SU，将 worker 的事件/提问路由给 SW（best-effort）。
 
@@ -43,4 +43,3 @@
 - **THEN** 系统为 SU 注入来自 SW 的最后 10 条 entries（best-effort）
 - **AND** 系统告知“已省略 13 条较早同步”（best-effort）
 - **AND** 系统更新 SU→SW 的同步 cursor（best-effort）
-

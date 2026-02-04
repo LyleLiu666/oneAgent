@@ -555,6 +555,10 @@ it('surfaces pending triage questions in a modal (secretary mode)', async () => 
 
         expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
         expect(wrapper.find('[data-testid="secretary-pending-questions"]').exists()).toBe(true)
+        expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+
+        await wrapper.get('[data-testid="secretary-pending-questions"]').trigger('click')
+        await flush()
         expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
         expect(wrapper.text()).toContain('用哪个目录来做？')
 

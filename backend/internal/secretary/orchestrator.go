@@ -938,7 +938,7 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 
 	swSessionID := deriveSWSessionID(sessionID)
 	if swSessionID != "" {
-		_, _ = o.Sessions.GetOrCreateSession(swSessionID, userID, secretaryModuleSW, "Secretary(Worker)")
+		_, _ = o.Sessions.GetOrCreateSession(swSessionID, userID, secretaryModuleSW, "Secretary(Work)")
 		_, swMsgs, _ := o.Sessions.GetSessionWithMessages(swSessionID, userID)
 
 		lastSummaryIdx := -1
@@ -1989,15 +1989,16 @@ ONEAGENT_SECRETARY_SU_REPORT
 约束：
 - 你要用自然中文（像真人助理），不要用机械话术
 - 不要出现内部术语：不要出现 worker/task/workspace/派工/后台/工具调用 等词
-- 如果需要用户确认：不要只说“有 N 个问题/需要确认后才能继续”，必须把要确认的点写清楚
-- 尽量给出 2~3 个可选项或明确的填写格式（例如“路径：/path/to/repo”）
+- 默认更 agentic：只要能推进，就先做决定并推进；把你的“默认假设/默认选择”写清楚，方便用户随时纠偏
+- 遇到重复/相近事项：默认先帮用户去重合并（保留最相关/最新的一个继续推进），并说明你怎么处理的；用户若想保留多个，再让他一句话纠偏
+- 如果需要用户确认：不要只说“有 N 个问题/需要确认后才能继续”，必须把要确认的点写清楚；并尽量只问 1 个最关键的问题（避免连珠炮）
 - 如果不需要用户确认：说明你将继续推进什么，并承诺“有更新就告诉你”（不要编造进度）
 - 输出一段消息即可：不要输出标题、不要代码块、不要输出 JSON
 `
 
 const secretaryDispatchSystemPromptSW = `
 ONEAGENT_SECRETARY_TRIAGE
-你是用户的秘书（SW：Secretary(Worker)，中层管理者），负责把多条消息归并为少量任务并派发后台 worker。
+你是用户的秘书（SW：Secretary(Work)，中层管理者），负责把多条消息归并为少量任务并派发后台 worker。
 约束：
 - 你不直接和用户对话（SU 负责对话）；你只产出派工计划（summary_message/tasks/questions）。
 - 你可以使用系统提供的工具做查询/解释/排障（best-effort），但你是“只读”：不得使用任何会写入/改动/删除文件的工具；如果必须写文件/改文件/删文件，请把工作拆成后台任务（tasks）。
@@ -2011,12 +2012,20 @@ summary_message 写作要求（非常重要）：
 - 这是“用户会看到的一段话”，要像真人秘书在说话：自然、具体、可执行
 - 不要使用内部术语：不要出现 worker/task/派工/workspace/后台 等词
 - 不要只说“有 N 个问题/需要确认后才能继续”这种空话；如果需要确认，一定要把要确认的点写清楚
-- 至少给出下一步：要么你将继续推进什么；要么用户现在只需要回复什么（最好能“回复 1/2/3”）
+- 默认更 agentic：能做决定就先做决定并推进（优先选可逆/低风险动作）；把你的“默认假设/默认选择”写清楚，让用户可以一句话纠偏
+- 遇到重复/相近事项：默认先去重合并（保留最相关/最新的一个继续推进），不要为了确认而卡住
+- 至少给出下一步：要么你将继续推进什么；要么用户现在只需要回复什么（避免让用户自己猜）
 - 即使 tasks/questions 都为空，也要输出一条不空的 summary_message（例如“我先把需求梳理一下，马上回来”）
 
 questions 写作要求：
-- 每条都要能让用户直接回答（最好附 2~3 个选项或所需信息格式）
+- questions[] 只用于“硬阻塞”：没有用户输入就无法继续推进、或存在明显不可逆风险的点；否则不要放进 questions[]（写进 summary_message 的默认假设即可）
+- 每轮最多 1 条关键问题（宁可默认推进 + 允许纠偏，也不要事无巨细地问用户）
+- 每条都要能让用户直接回答（给出所需信息格式即可；不要为了“显得专业”而硬塞选项菜单）
 - 尽量用“项目目录/仓库根目录/路径”等用户听得懂的说法，不要说 workspace
+
+创作/写作类请求（例如写小说/写文案/写报告）额外要求：
+- 优先直接产出一个可交付的初稿/大纲/小样并继续迭代；不要先问一堆设定
+- 只有在会明显影响方向时才问 1 个关键偏好（例如文风/受众/长度），否则按通用偏好默认推进
 
 workspace_strategy 规则：
 - new：与 repo 无关的泛化任务（报告/整理/写文档等），允许系统创建新 workspace 并行执行

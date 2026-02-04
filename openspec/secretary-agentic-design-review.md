@@ -7,7 +7,7 @@
 ## TL;DR（结论）
 
 - **秘书必须是 agent**：能自主调用工具、能自愈、能派工、能解释下一步；而不是“计数器/模板机/关键词路由器”。
-- **代码不应该做语义路由**：不要在 orchestrator 里写一堆 `strings.Contains(...)` 来判断“用户在问什么”。意图判断应交给 SW（Secretary(Worker)）planning agent，通过结构化输出（tool-call / 宽松 tags）表达 `intent`。
+- **代码不应该做语义路由**：不要在 orchestrator 里写一堆 `strings.Contains(...)` 来判断“用户在问什么”。意图判断应交给 SW（Secretary(Work)）planning agent，通过结构化输出（tool-call / 宽松 tags）表达 `intent`。
 - **结构化输出不靠纯文本 JSON**：优先 tool-call；fallback 用宽松 tags（XML-like，不要求 CDATA），避免 “invalid function arguments json” 这类脆弱失败。
 - **KV-cache 以稳定前缀为原则**：稳定 system prompt / tool schema 由 AgentFactory 装配；每轮变化信息只进入 TurnContext（volatile）或 append-only 的新消息，不重写历史。
 - **所有过程必须可追溯**：用户默认看到“像人一样的汇报”，但随时能展开 evidence（trace/findings/diff/test_report/llm_log_path）；并且 **秘书自己的 LLM 调用也要能定位**（否则 debug 只能靠猜）。
@@ -22,7 +22,7 @@
 |---|---|---:|---:|---|
 | **Worker Chat（完全模式）** | 用户 | ✅ | ✅（受 policy/approval gate） | 交互式做事，带 tool loop |
 | **Secretary(User) = SU** | 用户 | ✅（通常不需要） | ❌（默认不写） | 解释、确认、放权、交付入口、下一步 |
-| **Secretary(Worker) = SW** | 执行层/系统 | ✅ | ❌（默认不写） | 归并意图、派工、排障、恢复、自愈 |
+| **Secretary(Work) = SW** | 执行层/系统 | ✅ | ❌（默认不写） | 归并意图、派工、排障、恢复、自愈 |
 | **Worker Task（TaskQueue/subagent）** | 系统 | ✅ | ✅（受 scope/rollback/证据要求） | 真正干活，产出 artifacts |
 
 关键点：
