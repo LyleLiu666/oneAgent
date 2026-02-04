@@ -232,6 +232,42 @@ some preface
 	}
 }
 
+func TestParseObserverDecision_AcceptsLooselyFormattedXMLWhenAngleBracketsUnescaped(t *testing.T) {
+	raw := `
+<observer_decision>
+  <pass>false</pass>
+  <reason>the expression 1 < 2 & 2 > 1 appears in text</reason>
+  <evidence>
+    <item>FINDINGS.md: contains "<div>"</item>
+  </evidence>
+  <next_steps>escape &lt; &amp; &gt; or switch to JSON</next_steps>
+  <questions_for_user>
+    <item>Is "a < b" expected?</item>
+  </questions_for_user>
+</observer_decision>
+`
+
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+	if !strings.Contains(got.Reason, "1 < 2") {
+		t.Fatalf("expected reason to include raw angle brackets, got %+v", got)
+	}
+	if len(got.Evidence) != 1 || !strings.Contains(got.Evidence[0], "<div>") {
+		t.Fatalf("expected evidence item to preserve raw text, got %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) == "" {
+		t.Fatalf("expected next_steps to be parsed, got %+v", got)
+	}
+	if len(got.QuestionsForUser) != 1 || !strings.Contains(got.QuestionsForUser[0], "a < b") {
+		t.Fatalf("expected questions_for_user item to preserve raw text, got %+v", got)
+	}
+}
+
 func TestParseObserverDecision_RepairsMissingClosingObserverDecisionTag(t *testing.T) {
 	raw := "<observer_decision>\n<pass>false</pass>\n<reason>missing evidence</reason>\n<next_steps>run tests</next_steps>\n"
 	got, err := parseObserverDecision(raw)

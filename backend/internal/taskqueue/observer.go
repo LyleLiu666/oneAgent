@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"os"
 	"regexp"
 	"strings"
@@ -75,7 +76,7 @@ func (o *OutcomeObserver) Decide(ctx context.Context, in ObserveInput) (Observer
 	traceTail, traceMeta := readFileTail(in.TraceLogPath, traceTailMax)
 	testReportText, testReportMeta := readFileHead(in.TestReportPath, findingsMax)
 
-system := strings.TrimSpace(`
+	system := strings.TrimSpace(`
 You are an Outcome Observer for an autonomous coding agent.
 
 Goal: Decide if the attempt satisfies the user's original expectations.
@@ -234,10 +235,16 @@ func parseObserverDecision(out string) (ObserverDecision, error) {
 		if parsed, ok := parseObserverDecisionFromXML(xmlBlock); ok {
 			return parsed, nil
 		}
+		if parsed, ok := parseObserverDecisionFromTags(xmlBlock); ok {
+			return parsed, nil
+		}
 	}
 
 	if xmlBlock, ok := repairObserverDecisionXML(raw); ok {
 		if parsed, ok := parseObserverDecisionFromXML(xmlBlock); ok {
+			return parsed, nil
+		}
+		if parsed, ok := parseObserverDecisionFromTags(xmlBlock); ok {
 			return parsed, nil
 		}
 	}
@@ -324,11 +331,109 @@ func extractFirstXMLBlock(raw string, tag string) string {
 	return strings.TrimSpace(re.FindString(raw))
 }
 
+func extractLatestTagBlock(text string, tag string) (string, bool) {
+	text = strings.TrimSpace(text)
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	if text == "" || tag == "" {
+		return "", false
+	}
+
+	lower := strings.ToLower(text)
+	closeTag := "</" + tag + ">"
+
+	end := strings.LastIndex(lower, closeTag)
+	if end == -1 {
+		start := strings.LastIndex(lower, "<"+tag)
+		if start == -1 {
+			return "", false
+		}
+		return strings.TrimSpace(text[start:]), true
+	}
+	end = end + len(closeTag)
+
+	start := strings.LastIndex(lower[:end], "<"+tag)
+	if start == -1 {
+		return "", false
+	}
+	return strings.TrimSpace(text[start:end]), true
+}
+
+func extractTagValue(block string, tag string, stopTags []string) (string, bool) {
+	block = strings.TrimSpace(block)
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	if block == "" || tag == "" {
+		return "", false
+	}
+
+	lower := strings.ToLower(block)
+
+	start := strings.Index(lower, "<"+tag)
+	if start == -1 {
+		return "", false
+	}
+	startTagEndRel := strings.Index(block[start:], ">")
+	if startTagEndRel == -1 {
+		return "", false
+	}
+	startTagEnd := start + startTagEndRel + 1
+
+	endTag := "</" + tag + ">"
+	endRel := strings.Index(lower[startTagEnd:], endTag)
+	end := -1
+	if endRel != -1 {
+		end = startTagEnd + endRel
+	} else if len(stopTags) > 0 {
+		next := len(block)
+		for _, stop := range stopTags {
+			stop = strings.ToLower(strings.TrimSpace(stop))
+			if stop == "" || stop == tag {
+				continue
+			}
+			idx := strings.Index(lower[startTagEnd:], "<"+stop)
+			if idx == -1 {
+				continue
+			}
+			abs := startTagEnd + idx
+			if abs < next {
+				next = abs
+			}
+		}
+		if next != len(block) {
+			end = next
+		}
+	}
+
+	if end == -1 {
+		end = len(block)
+	}
+	if end < startTagEnd {
+		return "", false
+	}
+
+	value := strings.TrimSpace(block[startTagEnd:end])
+	if value == "" {
+		return "", true
+	}
+
+	// Default-CDATA behavior: accept raw text, but also tolerate explicit/malformed CDATA.
+	if strings.HasPrefix(value, "<![CDATA[") {
+		if end := strings.Index(value, "]]>"); end != -1 {
+			value = value[len("<![CDATA["):end]
+		} else {
+			value = value[len("<![CDATA["):]
+		}
+	}
+
+	value = html.UnescapeString(value)
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	return strings.TrimSpace(value), true
+}
+
 type observerDecisionXML struct {
-	Pass            string   `xml:"pass"`
-	Reason          string   `xml:"reason"`
-	Evidence        []string `xml:"evidence>item"`
-	NextSteps       string   `xml:"next_steps"`
+	Pass             string   `xml:"pass"`
+	Reason           string   `xml:"reason"`
+	Evidence         []string `xml:"evidence>item"`
+	NextSteps        string   `xml:"next_steps"`
 	QuestionsForUser []string `xml:"questions_for_user>item"`
 }
 
@@ -385,6 +490,76 @@ func parseObserverDecisionFromXML(raw string) (ObserverDecision, bool) {
 	}, true
 }
 
+func parseObserverDecisionFromTags(raw string) (ObserverDecision, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ObserverDecision{}, false
+	}
+
+	block, ok := extractLatestTagBlock(raw, "observer_decision")
+	if !ok {
+		block = raw
+	}
+
+	passText, ok := extractTagValue(block, "pass", []string{"reason", "evidence", "next_steps", "questions_for_user"})
+	passText = strings.TrimSpace(passText)
+	if !ok || passText == "" {
+		return ObserverDecision{}, false
+	}
+
+	pass := false
+	switch strings.ToLower(passText) {
+	case "true", "1", "yes", "y", "是":
+		pass = true
+	case "false", "0", "no", "n", "否":
+		pass = false
+	default:
+		return ObserverDecision{}, false
+	}
+
+	reason, _ := extractTagValue(block, "reason", []string{"evidence", "next_steps", "questions_for_user"})
+	evidenceRaw, _ := extractTagValue(block, "evidence", []string{"next_steps", "questions_for_user"})
+	nextSteps, _ := extractTagValue(block, "next_steps", []string{"questions_for_user"})
+	questionsRaw, _ := extractTagValue(block, "questions_for_user", nil)
+
+	evidence := parseObserverDecisionItems(evidenceRaw)
+	qs := parseObserverDecisionItems(questionsRaw)
+
+	return ObserverDecision{
+		Pass:             pass,
+		Reason:           strings.TrimSpace(reason),
+		Evidence:         evidence,
+		NextSteps:        strings.TrimSpace(nextSteps),
+		QuestionsForUser: qs,
+	}, true
+}
+
+func parseObserverDecisionItems(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	items := extractAllTagBlocks(raw, "item")
+	if len(items) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		v, ok := extractTagValue(item, "item", nil)
+		v = strings.TrimSpace(v)
+		if !ok || v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 var reObserverPass = regexp.MustCompile(`(?im)\bpass\b\s*[:：]\s*(true|false)\b`)
 var reMarkdownOrderedListPrefix = regexp.MustCompile(`^\s*\d+\s*[.)]\s+`)
 
@@ -408,6 +583,36 @@ func parseObserverDecisionFromText(raw string) (ObserverDecision, bool) {
 	decision.QuestionsForUser = parseMarkdownList(extractMarkdownSection(raw, []string{"需要你确认", "Questions", "questions_for_user"}))
 
 	return decision, true
+}
+
+func extractAllTagBlocks(text string, tag string) []string {
+	text = strings.TrimSpace(text)
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	if text == "" || tag == "" {
+		return nil
+	}
+
+	lower := strings.ToLower(text)
+	closeTag := "</" + tag + ">"
+
+	var out []string
+	search := 0
+	for {
+		openRel := strings.Index(lower[search:], "<"+tag)
+		if openRel == -1 {
+			break
+		}
+		open := search + openRel
+		closeRel := strings.Index(lower[open:], closeTag)
+		if closeRel == -1 {
+			out = append(out, strings.TrimSpace(text[open:]))
+			break
+		}
+		end := open + closeRel + len(closeTag)
+		out = append(out, strings.TrimSpace(text[open:end]))
+		search = end
+	}
+	return out
 }
 
 func extractMarkdownSection(raw string, headings []string) string {
