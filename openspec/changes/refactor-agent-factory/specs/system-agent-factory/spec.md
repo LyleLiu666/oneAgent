@@ -9,6 +9,8 @@ Agent Factory 的 config 至少应覆盖（best-effort）：
 - `system_prompt_assets`（稳定前缀的模块化资产）
 - `tool_protocol`（`none|json|xml`）
 - `tool_ids`（挂载哪些 tools；含是否挂载 `subagent`）
+- `policy_snapshot`（工具权限策略快照：允许哪些工具/动作；默认 fail-closed）
+- `workspace_config`（是否提供 workspace、是否允许文件变更；best-effort）
 - `skills`（是否启用 skills/recall/read-gating；best-effort）
 - `persistence_policy`（message list 留痕策略：text/tool_call/tool_result/trace pointers；append-only，best-effort）
 
@@ -19,6 +21,12 @@ Agent Factory 的 config 至少应覆盖（best-effort）：
 - **GIVEN** 一个 secretary agent 选择使用 XML `<tool_data>`（best-effort）
 - **WHEN** 系统用同一套 Factory 构建该 agent（best-effort）
 - **THEN** 该 agent 使用 `tool_protocol=xml` 并复用 XML engine（best-effort）
+
+#### Scenario: Secretary agent is configured as “no file mutation” via policy (best-effort)
+- **GIVEN** Secretary agent 被配置为“可以查询/排障，但禁止对用户目录做增删改”（best-effort）
+- **WHEN** 系统用 Agent Factory 构建该 agent（best-effort）
+- **THEN** tool permissions 以 `policy_snapshot` 强制执行（fail-closed，best-effort）
+- **AND** 当模型尝试调用被禁止的文件变更工具时，系统以 `tool_result` 将失败原因反馈给模型，以便其自行换方案或改为派工（best-effort）
 
 ### Requirement: Agent Factory MUST preserve KV-cache friendly stable prefix (best-effort)
 系统必须 (MUST) 确保由 Agent Factory 构建的 agent 在启用 KV-cache 时满足“稳定前缀可缓存”的约束（best-effort）：
@@ -45,4 +53,3 @@ Agent Factory 的 config 至少应覆盖（best-effort）：
 - **WHEN** 系统调用该 agent（best-effort）
 - **THEN** 结构化输出通过 tool-call 或宽松 tags 返回（best-effort）
 - **AND** 系统能将其解析为内部 plan 结构并继续流程（best-effort）
-

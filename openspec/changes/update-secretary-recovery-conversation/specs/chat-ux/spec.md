@@ -8,6 +8,7 @@
 - 一键继续（`POST /api/tasks/:id/resume`；支持携带 `review_notes`，best-effort）
 - 排障入口（优先在秘书模式内打开 trace；无 trace 时再进入完全模式排障，best-effort）
 - **直通入口折叠**：findings/diff/trace 等细节入口不得默认显式展示；应放在“更多/展开”中（progressive disclosure，best-effort）
+- **具体而非报数**：当同一时间存在多个待处理事项时，系统不得只报数量；必须给出每个事项的具体“原因/下一步/需要你确认什么”（best-effort）
 
 #### Scenario: Failed task is surfaced in secretary mode
 - **GIVEN** `GET /api/tasks` 返回至少 1 个任务，其 latest attempt 处于失败终态（非 `queued/running` 且非 `succeeded`）
@@ -29,14 +30,12 @@
 - **AND** 系统将用户回复注入该次 resume 的 `review_notes`（best-effort）
 - **AND** 对话区追加一条低噪声回执消息，留痕“已继续推进 + 绑定的 task/attempt”（best-effort）
 
-#### Scenario: Secretary reports multiple pending issues one by one (best-effort)
+#### Scenario: Multiple failed tasks are surfaced with a focused current item (best-effort)
 - **GIVEN** 用户处于秘书模式（best-effort）
 - **AND** 同一时间存在 N 个“需要处理”的任务（N>=2，best-effort）
 - **WHEN** UI 检测到这些任务需要用户介入（best-effort）
-- **THEN** 秘书在对话区发送一条低噪声汇总消息：“我这里有 N 个事情，接下来一个个请示”（best-effort）
-- **AND** 秘书从第 1 个事项开始提出问题/请求确认（best-effort）
-- **WHEN** 用户对第 1 个事项完成答复并触发继续/暂缓（best-effort）
-- **THEN** 秘书推进到第 2 个事项并继续请示（best-effort）
+- **THEN** 对话区至少追加 1 条“秘书转达”消息，且每个事项包含原因/下一步/问题（best-effort）
+- **AND** UI 默认聚焦到一个当前事项（例如最新/最相关，best-effort），并允许用户切换要处理的事项（best-effort）
 
 #### Scenario: Troubleshoot opens trace inline when available (best-effort)
 - **GIVEN** 失败任务提示已展示（best-effort）
