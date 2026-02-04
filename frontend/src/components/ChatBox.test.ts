@@ -13,6 +13,7 @@ vi.mock('@/api/client', () => ({
     appendSecretaryInboxMessage: vi.fn(),
     secretaryTriage: vi.fn(),
     getSecretaryState: vi.fn(async () => ({ cursor_message_id: 0, triage_runs: [] })),
+    setSecretaryRecoveryFocus: vi.fn(),
     getSecretarySession: vi.fn(async () => ({ id: 's1', messages: [], metadata: {} })),
     getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
     getLedgerStatusToday: vi.fn(async () => ({

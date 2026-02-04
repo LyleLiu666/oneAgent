@@ -341,6 +341,10 @@ export async function secretaryTriage(payload: {
 export interface SecretaryStateResponse {
   session_id: string;
   cursor_message_id: number;
+  recovery_focus?: {
+    task_id: string;
+    attempt_id: string;
+  };
   triage_runs?: Array<{
     from_cursor: number;
     to_message_id: number;
@@ -355,6 +359,13 @@ export interface SecretaryStateResponse {
 
 export async function getSecretaryState(): Promise<SecretaryStateResponse> {
   return api(`/api/secretary/state`);
+}
+
+export async function setSecretaryRecoveryFocus(payload: {
+  task_id?: string;
+  attempt_id?: string;
+}): Promise<{ session_id: string; recovery_focus?: { task_id: string; attempt_id: string } }> {
+  return api("/api/secretary/recovery/focus", { method: "POST", body: payload });
 }
 
 export async function getSecretarySession() {

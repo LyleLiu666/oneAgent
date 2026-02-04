@@ -184,6 +184,48 @@ func (h *SecretaryHandler) GetState(c *gin.Context) {
 		"session_id":        sessionID,
 		"cursor_message_id": st.CursorMessageID,
 		"triage_runs":       st.TriageRuns,
+		"recovery_focus":    st.RecoveryFocus,
+	})
+}
+
+type recoveryFocusRequest struct {
+	TaskID    string `json:"task_id,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
+}
+
+func (h *SecretaryHandler) SetRecoveryFocus(c *gin.Context) {
+	if h == nil || h.rt == nil || h.orch == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	var req recoveryFocusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+
+	sessionID, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		return
+	}
+
+	st, err := h.orch.SetRecoveryFocus(c.Request.Context(), userID, sessionID, req.TaskID, req.AttemptID)
+	if err != nil {
+		RespondError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"session_id":     sessionID,
+		"recovery_focus": st.RecoveryFocus,
 	})
 }
 

@@ -21,6 +21,7 @@ import {
   appendSecretaryInboxMessage,
   secretaryTriage,
   getSecretaryState,
+  setSecretaryRecoveryFocus,
   getSecretarySession,
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
@@ -122,6 +123,8 @@ const secretaryRecoveryQueue = ref<SecretaryRecoveryItem[]>([])
 const secretaryRecoverySeenKeys = ref<Set<string>>(new Set())
 const secretaryRecoveryAwaitingReply = ref(false)
 const secretaryRecoveryFocusedKey = ref('')
+let secretaryRecoveryFocusPersistTimer: ReturnType<typeof setTimeout> | undefined
+let secretaryRecoveryFocusLastPersistedKey = ''
 
 const normalizeSecretaryQuestions = (raw: any): string[] => {
   const list = Array.isArray(raw) ? raw : []
@@ -735,6 +738,17 @@ const loadSessionMessages = async (
     if (isSecretaryMode.value) {
       try {
         const st: any = await getSecretaryState()
+        const focus = (st as any)?.recovery_focus
+        const focusTaskId = String(focus?.task_id || focus?.taskId || '').trim()
+        const focusAttemptId = String(focus?.attempt_id || focus?.attemptId || '').trim()
+        if (focusTaskId && focusAttemptId) {
+          secretaryRecoveryFocusedKey.value = `${focusTaskId}:${focusAttemptId}`
+          secretaryRecoveryFocusLastPersistedKey = secretaryRecoveryFocusedKey.value
+        } else {
+          secretaryRecoveryFocusedKey.value = ''
+          secretaryRecoveryFocusLastPersistedKey = ''
+        }
+
         const cursor = Number((st as any)?.cursor_message_id)
         secretaryCursorMessageId.value = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
         const runs = Array.isArray((st as any)?.triage_runs) ? ((st as any).triage_runs as any[]) : []
@@ -785,6 +799,15 @@ const startNewSession = () => {
   secretaryPendingQuestionsModalOpen.value = false
   secretaryTriageSubmitting.value = false
   secretaryTriageQueued.value = false
+  secretaryRecoveryQueue.value = []
+  secretaryRecoverySeenKeys.value = new Set()
+  secretaryRecoveryAwaitingReply.value = false
+  secretaryRecoveryFocusedKey.value = ''
+  secretaryRecoveryFocusLastPersistedKey = ''
+  if (secretaryRecoveryFocusPersistTimer) {
+    clearTimeout(secretaryRecoveryFocusPersistTimer)
+    secretaryRecoveryFocusPersistTimer = undefined
+  }
   if (secretaryTriageTimer) {
     clearTimeout(secretaryTriageTimer)
     secretaryTriageTimer = undefined
@@ -1606,6 +1629,33 @@ const recoveryKeyOf = (item: SecretaryRecoveryItem) => {
   return `${tid}:${aid}`
 }
 
+const schedulePersistRecoveryFocus = () => {
+  if (!isSecretaryMode.value) return
+
+  if (secretaryRecoveryFocusPersistTimer) {
+    clearTimeout(secretaryRecoveryFocusPersistTimer)
+    secretaryRecoveryFocusPersistTimer = undefined
+  }
+
+  secretaryRecoveryFocusPersistTimer = setTimeout(async () => {
+    secretaryRecoveryFocusPersistTimer = undefined
+    const key = String(secretaryRecoveryFocusedKey.value || '').trim()
+    if (key === secretaryRecoveryFocusLastPersistedKey) return
+
+    const [taskId, attemptId] = key.split(':', 2).map((p) => String(p || '').trim())
+    try {
+      if (taskId && attemptId) {
+        await setSecretaryRecoveryFocus({ task_id: taskId, attempt_id: attemptId })
+      } else {
+        await setSecretaryRecoveryFocus({})
+      }
+      secretaryRecoveryFocusLastPersistedKey = key
+    } catch (error) {
+      console.warn('Failed to persist secretary recovery focus:', error)
+    }
+  }, 120)
+}
+
 const enqueueRecoveryItems = (rawItems: any) => {
   const items = Array.isArray(rawItems) ? rawItems : []
   if (items.length === 0) return
@@ -1636,6 +1686,18 @@ const enqueueRecoveryItems = (rawItems: any) => {
   if (!secretaryRecoveryFocusedKey.value && nextQueue.length > 0) {
     const firstKey = recoveryKeyOf(nextQueue[0])
     if (firstKey) secretaryRecoveryFocusedKey.value = firstKey
+    schedulePersistRecoveryFocus()
+  }
+
+  const focused = String(secretaryRecoveryFocusedKey.value || '').trim()
+  if (focused) {
+    const idx = nextQueue.findIndex((i) => recoveryKeyOf(i) === focused)
+    if (idx > 0) {
+      const reordered = [...nextQueue]
+      const [selected] = reordered.splice(idx, 1)
+      reordered.unshift(selected)
+      secretaryRecoveryQueue.value = reordered
+    }
   }
 }
 
@@ -1721,6 +1783,7 @@ const onRecoveryFocus = (raw: any) => {
     next.unshift(selected)
     secretaryRecoveryQueue.value = next
   }
+  schedulePersistRecoveryFocus()
 }
 
 const onRecoveryAction = (raw: any) => {
@@ -1744,6 +1807,7 @@ const onRecoveryAction = (raw: any) => {
     secretaryRecoveryFocusedKey.value = nextKey
   }
   if (nextQueue.length === 0) secretaryRecoveryFocusedKey.value = ''
+  schedulePersistRecoveryFocus()
 
   secretaryRecoveryAwaitingReply.value = false
 
@@ -1836,6 +1900,7 @@ const sendRecoveryReply = async (rawMessage: string) => {
     } else {
       secretaryRecoveryFocusedKey.value = ''
     }
+    schedulePersistRecoveryFocus()
   } catch (error) {
     console.error('Failed to resume task from secretary recovery:', error)
     chatStore.addMessage({
@@ -2130,6 +2195,10 @@ onUnmounted(() => {
   if (secretaryTriageTimer) {
     clearTimeout(secretaryTriageTimer)
     secretaryTriageTimer = undefined
+  }
+  if (secretaryRecoveryFocusPersistTimer) {
+    clearTimeout(secretaryRecoveryFocusPersistTimer)
+    secretaryRecoveryFocusPersistTimer = undefined
   }
   document.removeEventListener('click', handleDocumentClick)
 })

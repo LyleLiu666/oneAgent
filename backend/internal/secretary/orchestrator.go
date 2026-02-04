@@ -617,7 +617,54 @@ func (o *Orchestrator) GetState(_ context.Context, userID, sessionID string) (St
 		return StateResult{}, err
 	}
 	state, _ := decodeState(session.Metadata)
-	return StateResult{CursorMessageID: state.CursorMessageID, TriageRuns: state.TriageRuns}, nil
+	return StateResult{CursorMessageID: state.CursorMessageID, TriageRuns: state.TriageRuns, RecoveryFocus: state.RecoveryFocus}, nil
+}
+
+func (o *Orchestrator) SetRecoveryFocus(_ context.Context, userID, sessionID, taskID, attemptID string) (StateResult, error) {
+	if o == nil || o.Sessions == nil {
+		return StateResult{}, errors.New("sessions store not initialized")
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "local"
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return StateResult{}, errors.New("sessionID is required")
+	}
+
+	taskID = strings.TrimSpace(taskID)
+	attemptID = strings.TrimSpace(attemptID)
+
+	// Best-effort per-session mutex.
+	mu := o.lock(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Ensure secretary session exists for bootstrap.
+	if _, err := o.Sessions.GetOrCreateSession(sessionID, userID, secretaryModuleSU, "Secretary"); err != nil {
+		return StateResult{}, err
+	}
+
+	session, _, err := o.Sessions.GetSessionWithMessages(sessionID, userID)
+	if err != nil {
+		return StateResult{}, err
+	}
+
+	state, _ := decodeState(session.Metadata)
+	if taskID != "" && attemptID != "" {
+		state.RecoveryFocus = &RecoveryFocus{TaskID: taskID, AttemptID: attemptID}
+	} else {
+		state.RecoveryFocus = nil
+	}
+
+	meta := upsertState(session.Metadata, state)
+	if err := o.Sessions.UpdateSessionMetadata(sessionID, meta); err != nil {
+		return StateResult{}, err
+	}
+
+	return StateResult{CursorMessageID: state.CursorMessageID, TriageRuns: state.TriageRuns, RecoveryFocus: state.RecoveryFocus}, nil
 }
 
 type triagePlan struct {

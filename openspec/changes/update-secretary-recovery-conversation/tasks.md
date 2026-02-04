@@ -18,5 +18,5 @@
   - [x] 2.6.6 Artifacts buttons are not visible by default in secretary mode; become visible after “展开/更多”
 
 ## 3. Backend (optional best-effort)
-- [ ] 3.1 If needed, add a lightweight server-side “secretary recovery state” to persist active binding across refresh
+- [x] 3.1 Add a lightweight server-side “secretary recovery state” to persist active binding across refresh
 - [x] 3.2 Ensure resume events record `review_notes` source as `secretary-recovery` (best-effort)
