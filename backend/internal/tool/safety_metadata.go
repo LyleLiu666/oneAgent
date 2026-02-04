@@ -30,7 +30,6 @@ func SafetyForToolID(toolID string) SafetyMetadata {
 		ToolIDGlob,
 		ToolIDRg,
 		ToolIDSearch,
-		ToolIDPlan,
 		ToolIDSkillRead,
 		ToolIDLSPDefinition,
 		ToolIDLSPReferences,
@@ -44,7 +43,8 @@ func SafetyForToolID(toolID string) SafetyMetadata {
 		ToolIDEditV2,
 		ToolIDMultiEdit,
 		ToolIDTrashFile,
-		ToolIDDocumentExport:
+		ToolIDDocumentExport,
+		ToolIDPlan:
 		return SafetyMetadata{
 			Effect:        SafetyEffectMutating,
 			Reversibility: SafetyReversibilityRollbackable,

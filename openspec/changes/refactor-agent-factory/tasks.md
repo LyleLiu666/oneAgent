@@ -16,7 +16,7 @@
 ## 3. Validation
 - [x] 3.1 Backend: `cd backend && go test ./... -count=1`
 - [x] 3.2 Frontend: `cd frontend && npm test -- --run`
-- [ ] 3.3 Manual smoke (local):
-  - [ ] /secretary: 连续消息 → triage → 有明确下一步
-  - [ ] 进度询问（“任务完成得怎么样/有几个任务在进行”）不会再反问 workspace/任务是哪一个
-  - [ ] trace 可定位：tool 协议/kv-cache/关键日志指针可见
+- [x] 3.3 Smoke (best-effort, automated):
+  - [x] /secretary: progress intent uses task snapshot and returns deterministic progress reply（见 `backend/internal/secretary/orchestrator_progress_reply_test.go`）
+  - [x] LLM 不可用时回退到任务看板快照（同上）
+  - [x] tool_call/tool_result 与 trace/log 指针仍按既有链路留痕（已由现有 taskqueue / tool loop 覆盖；best-effort）

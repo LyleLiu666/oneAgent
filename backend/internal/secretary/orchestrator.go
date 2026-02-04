@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -89,35 +88,73 @@ func buildTextLLMHistory(dbMessages []model.ChatMessage) []llm.ChatMessage {
 const secretaryToolMaxSteps = 5
 
 func secretaryReadOnlyPolicy() permissions.Policy {
+	deny := []string{
+		tool.ToolIDBash,
+		tool.ToolIDRunCommand,
+		tool.ToolIDSubagent,
+
+		tool.ToolIDWriteFile,
+		tool.ToolIDEdit,
+		tool.ToolIDEditV2,
+		tool.ToolIDMultiEdit,
+		tool.ToolIDTrashFile,
+		tool.ToolIDDocumentExport,
+		tool.ToolIDPlan,
+	}
+
+	denySet := make(map[string]struct{}, len(deny))
+	rules := make([]permissions.Rule, 0, len(deny)+16)
+	for _, id := range deny {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		denySet[id] = struct{}{}
+		rules = append(rules, permissions.Rule{
+			ID:     "deny-" + id,
+			Effect: permissions.EffectDeny,
+			ToolID: id,
+		})
+	}
+
+	// Default deny, then allow every known read-only tool (except those explicitly denied above).
+	for _, def := range tool.All() {
+		id := strings.TrimSpace(def.ID)
+		if id == "" {
+			continue
+		}
+		if _, denied := denySet[id]; denied {
+			continue
+		}
+		safety := tool.SafetyForToolID(id)
+		if safety.Effect != tool.SafetyEffectReadOnly {
+			continue
+		}
+		rules = append(rules, permissions.Rule{
+			ID:     "allow-" + id,
+			Effect: permissions.EffectAllow,
+			ToolID: id,
+		})
+	}
+
 	return permissions.Policy{
 		ID:            "secretary_read_only",
 		DefaultEffect: permissions.EffectDeny,
-		Rules: []permissions.Rule{
-			{ID: "allow-search", Effect: permissions.EffectAllow, ToolID: tool.ToolIDSearch},
-			{ID: "allow-skill-read", Effect: permissions.EffectAllow, ToolID: tool.ToolIDSkillRead},
-			{ID: "allow-read-file", Effect: permissions.EffectAllow, ToolID: tool.ToolIDReadFile},
-			{ID: "allow-ls", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLs},
-			{ID: "allow-glob", Effect: permissions.EffectAllow, ToolID: tool.ToolIDGlob},
-			{ID: "allow-rg", Effect: permissions.EffectAllow, ToolID: tool.ToolIDRg},
-			{ID: "allow-lsp-definition", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLSPDefinition},
-			{ID: "allow-lsp-references", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLSPReferences},
-			{ID: "allow-lsp-rename-preview", Effect: permissions.EffectAllow, ToolID: tool.ToolIDLSPRenamePreview},
-		},
+		Rules:         rules,
 	}
 }
 
-func secretaryDefaultToolIDs() []string {
-	return []string{
-		tool.ToolIDSearch,
-		tool.ToolIDSkillRead,
-		tool.ToolIDReadFile,
-		tool.ToolIDLs,
-		tool.ToolIDGlob,
-		tool.ToolIDRg,
-		tool.ToolIDLSPDefinition,
-		tool.ToolIDLSPReferences,
-		tool.ToolIDLSPRenamePreview,
+func secretaryDefaultToolIDs(policySnapshot permissions.Snapshot) []string {
+	infos := tool.InfosWithSnapshot(policySnapshot)
+	ids := make([]string, 0, len(infos))
+	for _, info := range infos {
+		id := strings.TrimSpace(info.ID)
+		if id == "" {
+			continue
+		}
+		ids = append(ids, id)
 	}
+	return ids
 }
 
 func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID, content, workspace string) (InboxAppendResult, error) {
@@ -287,9 +324,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
 	if err != nil {
 		// Best-effort fallback: some deployments/tests may not have an LLM configured for secretary triage.
-		// If the user is asking a question and we have a non-empty progress snapshot, answer with the snapshot
-		// instead of failing hard.
-		if len(newUserMsgs) == 1 && looksLikeQuestion(newUserMsgs[0].Content) && progressSnapshotHasWork(progressSnapshot) {
+		// If we have a non-empty progress snapshot, answer with it instead of failing hard.
+		if progressSnapshotHasWork(progressSnapshot) {
 			summaryMsg, persistErr := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
 				Role:    model.MessageRoleAssistant,
 				Type:    model.MessageTypeText,
@@ -363,11 +399,17 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	questions := dispatch.Questions
 	workspacesCreated := dispatch.WorkspacesCreated
 
-	summary := buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
-	if len(createdTaskIDs) > 0 || len(questions) > 0 {
-		if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
-			if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
-				summary = trimmed
+	summary := ""
+	intent := strings.ToLower(strings.TrimSpace(plan.Intent))
+	if intent == "progress" && progressSnapshotHasWork(progressSnapshot) {
+		summary = progressSnapshot
+	} else {
+		summary = buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
+		if len(createdTaskIDs) > 0 || len(questions) > 0 {
+			if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
+				if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
+					summary = trimmed
+				}
 			}
 		}
 	}
@@ -780,45 +822,6 @@ func extractAllTagBlocks(text string, tag string) []string {
 	return out
 }
 
-func (o *Orchestrator) generateQuickAck(ctx context.Context, userID string, metadata model.JSONB, userContent string) (ackText string, resolvedModelID string, err error) {
-	if o.ResolveModel == nil {
-		return "", "", errors.New("ResolveModel is required")
-	}
-	modelID := ""
-	if v, ok := metadata["model_id"].(string); ok {
-		modelID = strings.TrimSpace(v)
-	}
-	client, resolvedID, err := o.ResolveModel(ctx, userID, modelID)
-	if err != nil {
-		return "", "", err
-	}
-
-	sys := strings.TrimSpace(secretaryAckSystemPrompt)
-	msgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
-	if injected := o.buildMemorySyncPrompt(ctx, userID, "SU", "SW"); strings.TrimSpace(injected) != "" {
-		msgs = append(msgs, llm.BuildUserMessage(injected))
-	}
-	msgs = append(msgs, llm.BuildUserMessage(userContent))
-
-	temp := 0.2
-	maxTokens := 80
-	out, err := client.ChatCompletion(ctx, msgs, &llm.ChatCompletionOptions{
-		Temperature: &temp,
-		MaxTokens:   &maxTokens,
-	})
-	if err != nil {
-		return "", "", err
-	}
-
-	ack := strings.TrimSpace(out)
-	ack = strings.Trim(ack, "\"")
-	ack = sanitizeQuickAckText(userContent, ack)
-	if ack == "" {
-		return "", "", errors.New("empty quick ack")
-	}
-	return ack, resolvedID, nil
-}
-
 func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID, sessionWorkspace, progressSnapshot string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
 	if o.ResolveModel == nil {
 		return triagePlan{}, "", errors.New("ResolveModel is required")
@@ -854,7 +857,7 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 		Spec: agent.AgentSpec{
 			ID:           "secretary-sw",
 			BaseOverride: sys,
-			ToolIDs:      secretaryDefaultToolIDs(),
+			ToolIDs:      secretaryDefaultToolIDs(policySnapshot),
 			ToolProtocol: agent.ToolProtocolXML,
 		},
 		Client:         client,
@@ -1596,60 +1599,6 @@ func formatApproxChineseChars(n int) string {
 	return fmt.Sprintf("%dw字", w)
 }
 
-func looksLikeQuestion(text string) bool {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return false
-	}
-	if strings.ContainsAny(t, "？?") {
-		return true
-	}
-	if strings.HasSuffix(t, "吗") || strings.HasSuffix(t, "么") {
-		return true
-	}
-	keywords := []string{
-		"多少",
-		"进度",
-		"写到哪",
-		"写好",
-		"完成",
-		"到哪",
-		"跑得怎么样",
-		"跑了吗",
-		"状态",
-		"现在怎么样",
-		"情况如何",
-	}
-	for _, kw := range keywords {
-		if kw != "" && strings.Contains(t, kw) {
-			return true
-		}
-	}
-	return false
-}
-
-func sanitizeQuickAckText(userContent, ack string) string {
-	text := strings.TrimSpace(ack)
-	if text == "" {
-		return ""
-	}
-
-	// Normalize common LLM “assistant-y” patterns to avoid looking dumb.
-	bannedPrefixes := []string{"已记下", "已记录", "收到您的", "收到你", "收到您"}
-	for _, p := range bannedPrefixes {
-		if strings.HasPrefix(text, p) {
-			return fallbackQuickAckText(userContent)
-		}
-	}
-	// Avoid colon-style receipts like "已记下：xxx".
-	if strings.ContainsAny(text, "：:") && strings.Contains(text, "记") {
-		return fallbackQuickAckText(userContent)
-	}
-
-	// Keep it short.
-	return truncateString(text, 60)
-}
-
 func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (summary string, questions []string, err error) {
 	if o == nil {
 		return "", nil, errors.New("orchestrator is nil")
@@ -1969,23 +1918,6 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 	return strings.TrimSpace(b.String()), nil, nil
 }
 
-func fallbackQuickAckText(userContent string) string {
-	text := strings.TrimSpace(userContent)
-	// Keep it short and natural; avoid repeating a fixed phrase like “已记下”.
-	templates := []string{"收到，我来处理。", "好的，我安排一下。", "明白，我继续跟进。", "了解，我马上处理。", "收到，我继续推进。"}
-	questionTemplates := []string{"我看看。", "我查一下。", "我确认一下。", "我看下进度。"}
-	if text == "" {
-		return templates[0]
-	}
-	looksQuestion := looksLikeQuestion(text)
-	if looksQuestion {
-		idx := int(crc32.ChecksumIEEE([]byte(text)) % uint32(len(questionTemplates)))
-		return questionTemplates[idx]
-	}
-	idx := int(crc32.ChecksumIEEE([]byte(text)) % uint32(len(templates)))
-	return templates[idx]
-}
-
 // deriveTaskTitle matches handler/tasks.go logic (kept local to avoid circular deps).
 func deriveTaskTitle(prompt string) string {
 	prompt = strings.TrimSpace(prompt)
@@ -2003,16 +1935,6 @@ func deriveTaskTitle(prompt string) string {
 	}
 	return truncateString(line, 60)
 }
-
-const secretaryAckSystemPrompt = `
-ONEAGENT_SECRETARY_ACK
-你是用户的秘书。请对用户刚刚的消息做一个“快速确认”，满足：
-- 只输出一句中文，不要分析，不要列清单
-- 不要调用任何工具
-- 6~14 个字，语气自然（像真人助理），不要使用“已记下/已记录/收到您的…请求”等机械句式
-- 如果用户在问进度/状态/数量，优先回复“我看看/我查一下”这类短句
-- 尽量点出/复述 1 个关键信息，避免固定模板
-`
 
 const secretaryReportSystemPromptSU = `
 ONEAGENT_SECRETARY_SU_REPORT

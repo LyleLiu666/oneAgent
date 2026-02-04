@@ -10,8 +10,10 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/model"
+	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
+	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
 
 type promptAssertingClient struct {
@@ -74,7 +76,7 @@ func (c *promptAssertingClient) ChatCompletionWithTools(ctx context.Context, mes
 				Type: "function",
 				Function: llm.ToolCallFunction{
 					Name:      "secretary_triage_plan",
-					Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"questions":[]}`,
+					Arguments: `{"intent":"progress","summary_message":"ok","tasks":[],"questions":[]}`,
 				},
 			},
 		},
@@ -85,7 +87,7 @@ func (c *promptAssertingClient) ChatCompletionStream(ctx context.Context, messag
 	return errors.New("not implemented")
 }
 
-func TestTriage_ProgressQuestion_UsesSWPlanAndIncludesTaskSnapshot(t *testing.T) {
+func TestTriage_ProgressQuestion_UsesTaskSnapshot_AndReturnsDeterministicProgressReply(t *testing.T) {
 	sessions, err := sessionstore.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("new sessionstore: %v", err)
@@ -143,11 +145,117 @@ func TestTriage_ProgressQuestion_UsesSWPlanAndIncludesTaskSnapshot(t *testing.T)
 	if err != nil {
 		t.Fatalf("Triage: %v", err)
 	}
-	if strings.TrimSpace(triaged.SummaryMessage) != "ok" {
-		t.Fatalf("expected triage summary ok, got %q", triaged.SummaryMessage)
+	if got := strings.TrimSpace(triaged.SummaryMessage); got == "" {
+		t.Fatalf("expected triage summary to be non-empty")
+	}
+	if !strings.Contains(triaged.SummaryMessage, "我查了下：运行") {
+		t.Fatalf("expected deterministic progress reply, got %q", triaged.SummaryMessage)
+	}
+	if !strings.Contains(triaged.SummaryMessage, running.Title) {
+		t.Fatalf("expected progress reply to include running task title, got %q", triaged.SummaryMessage)
 	}
 	if !client.called {
 		t.Fatalf("expected SW client to be called")
+	}
+}
+
+func TestTriage_WhenLLMUnavailable_ReturnsProgressSnapshot(t *testing.T) {
+	sessions, err := sessionstore.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new sessionstore: %v", err)
+	}
+	tasks, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws := t.TempDir()
+	running, err := tasks.CreateTask("local", ws, "写武侠小说", "prompt", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := tasks.UpdateTask(running.ID, func(tk *taskqueue.Task) error {
+		a := tk.LatestAttempt()
+		a.Status = taskqueue.AttemptRunning
+		a.StartedAt = &now
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	o := &Orchestrator{
+		Sessions: sessions,
+		Tasks:    tasks,
+		Runner:   &taskqueue.TaskRunner{},
+		// No ResolveModel: simulate deployments/tests without LLM configured.
+	}
+
+	if _, err := o.AppendInboxMessage(context.Background(), "local", "session-1", "任务完成得怎么样", ws); err != nil {
+		t.Fatalf("AppendInboxMessage: %v", err)
+	}
+
+	triaged, err := o.Triage(context.Background(), "local", "session-1", nil)
+	if err != nil {
+		t.Fatalf("Triage: %v", err)
+	}
+	if got := strings.TrimSpace(triaged.SummaryMessage); got == "" {
+		t.Fatalf("expected triage summary to be non-empty")
+	}
+	if !strings.Contains(triaged.SummaryMessage, "我查了下：运行") {
+		t.Fatalf("expected progress snapshot reply, got %q", triaged.SummaryMessage)
+	}
+	if !strings.Contains(triaged.SummaryMessage, running.Title) {
+		t.Fatalf("expected progress snapshot to include running task title, got %q", triaged.SummaryMessage)
+	}
+}
+
+func TestSecretaryDefaultToolIDs_UsesPolicyAllowlist(t *testing.T) {
+	snap := permissions.ResolveSnapshot("local", secretaryReadOnlyPolicy(), time.Now())
+	ids := secretaryDefaultToolIDs(snap)
+	if len(ids) == 0 {
+		t.Fatalf("expected tool ids to be non-empty")
+	}
+
+	want := []string{
+		tool.ToolIDSearch,
+		tool.ToolIDReadFile,
+		tool.ToolIDLs,
+		tool.ToolIDGlob,
+		tool.ToolIDRg,
+		tool.ToolIDSkillRead,
+	}
+	for _, id := range want {
+		found := false
+		for _, got := range ids {
+			if got == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected tool ids to include %q, got %v", id, ids)
+		}
+	}
+
+	deny := []string{
+		tool.ToolIDWriteFile,
+		tool.ToolIDEdit,
+		tool.ToolIDEditV2,
+		tool.ToolIDMultiEdit,
+		tool.ToolIDTrashFile,
+		tool.ToolIDDocumentExport,
+		tool.ToolIDPlan,
+		tool.ToolIDBash,
+		tool.ToolIDRunCommand,
+		tool.ToolIDSubagent,
+	}
+	for _, id := range deny {
+		for _, got := range ids {
+			if got == id {
+				t.Fatalf("expected tool ids to exclude %q, got %v", id, ids)
+			}
+		}
 	}
 }
 
