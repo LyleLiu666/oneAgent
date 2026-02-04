@@ -120,10 +120,8 @@ type SecretaryRecoveryItem = {
 
 const secretaryRecoveryQueue = ref<SecretaryRecoveryItem[]>([])
 const secretaryRecoverySeenKeys = ref<Set<string>>(new Set())
-const secretaryRecoveryIntroSent = ref(false)
 const secretaryRecoveryAwaitingReply = ref(false)
-const secretaryRecoveryTotal = ref(0)
-const secretaryRecoveryHandled = ref(0)
+const secretaryRecoveryFocusedKey = ref('')
 
 const normalizeSecretaryQuestions = (raw: any): string[] => {
   const list = Array.isArray(raw) ? raw : []
@@ -1635,14 +1633,13 @@ const enqueueRecoveryItems = (rawItems: any) => {
 
   secretaryRecoverySeenKeys.value = seen
   secretaryRecoveryQueue.value = nextQueue
-
-  if (secretaryRecoveryIntroSent.value) {
-    const total = secretaryRecoveryHandled.value + nextQueue.length
-    if (total > secretaryRecoveryTotal.value) secretaryRecoveryTotal.value = total
+  if (!secretaryRecoveryFocusedKey.value && nextQueue.length > 0) {
+    const firstKey = recoveryKeyOf(nextQueue[0])
+    if (firstKey) secretaryRecoveryFocusedKey.value = firstKey
   }
 }
 
-const formatRecoveryAsk = (item: SecretaryRecoveryItem, index: number, total: number) => {
+const formatRecoveryAsk = (item: SecretaryRecoveryItem, otherTitles: string[]) => {
   const title = String(item?.title || '').trim() || '任务'
   const status = String(item?.status || '').trim()
 
@@ -1653,18 +1650,19 @@ const formatRecoveryAsk = (item: SecretaryRecoveryItem, index: number, total: nu
     : []
 
   const lines: string[] = []
-  if (index > 1 && total >= 2) {
-    lines.push(`另外还有一件事需要你确认：${title}`)
-  } else {
-    lines.push(`有个任务需要你确认：${title}`)
-  }
-  if (status) lines.push(`当前状态：${status}`)
-  if (reason) lines.push(`发生了什么：${reason}`)
+  lines.push(`需要你确认才能继续：${title}`)
+  if (status) lines.push(`状态：${status}`)
+  if (reason) lines.push(`原因：${reason}`)
   if (questions.length > 0) {
-    lines.push(`需要你确认：${questions.map((q, i) => `${i + 1}) ${truncateForChat(q, 120)}`).join(' ')}`)
+    lines.push('需要你确认：')
+    for (const q of questions) lines.push(`- ${truncateForChat(q, 120)}`)
   }
-  if (nextSteps) lines.push(`我建议下一步：${nextSteps}`)
-  lines.push('你直接回复你的决定/补充，我来继续推进。')
+  if (nextSteps) lines.push(`下一步：${nextSteps}`)
+  if (otherTitles.length > 0) {
+    lines.push(`其他待处理：${otherTitles.map((t) => truncateForChat(t, 40)).join('、')}`)
+  }
+  lines.push('直接回复你的补充/决定，我会把它作为 review_notes 继续推进。')
+  lines.push('证据入口在上方「需要处理」面板（更多 → Findings/Trace/Diff）。')
   return lines.join('\n')
 }
 
@@ -1674,19 +1672,14 @@ const maybeStartRecoveryConversation = () => {
   if (secretaryRecoveryQueue.value.length === 0) return
   if (secretaryRecoveryAwaitingReply.value) return
 
-  if (!secretaryRecoveryIntroSent.value) {
-    const n = secretaryRecoveryQueue.value.length
-    secretaryRecoveryHandled.value = 0
-    secretaryRecoveryTotal.value = n
-    secretaryRecoveryIntroSent.value = true
-  }
-
   const item = secretaryRecoveryQueue.value[0]
   if (!item) return
-  const index = secretaryRecoveryHandled.value + 1
-  const total = Math.max(secretaryRecoveryTotal.value, secretaryRecoveryHandled.value+secretaryRecoveryQueue.value.length)
-  secretaryRecoveryTotal.value = total
-  const ask = formatRecoveryAsk(item, index, total)
+  const others = secretaryRecoveryQueue.value
+    .slice(1)
+    .map((i) => String(i?.title || '').trim())
+    .filter(Boolean)
+    .slice(0, 3)
+  const ask = formatRecoveryAsk(item, others)
   chatStore.addMessage({
     id: Date.now(),
     role: 'assistant',
@@ -1701,14 +1694,32 @@ const maybeStartRecoveryConversation = () => {
 
 const onRecoverySnapshot = (items: any) => {
   enqueueRecoveryItems(items)
-  maybeStartRecoveryConversation()
 }
 
 const onTaskNeedsAttention = (item: any) => {
   enqueueRecoveryItems([item])
-  if (secretaryRecoveryQueue.value.length === 1) {
-    // Start immediately when the first item arrives.
-    maybeStartRecoveryConversation()
+  // New item wins focus (latest wins).
+  onRecoveryFocus(item)
+  maybeStartRecoveryConversation()
+}
+
+const onRecoveryFocus = (raw: any) => {
+  if (!isSecretaryMode.value) return
+
+  const tid = String((raw as any)?.taskId || (raw as any)?.task_id || '').trim()
+  const aid = String((raw as any)?.attemptId || (raw as any)?.attempt_id || '').trim()
+  if (!tid || !aid) return
+
+  const key = `${tid}:${aid}`
+  const idx = secretaryRecoveryQueue.value.findIndex((i) => recoveryKeyOf(i) === key)
+  if (idx < 0) return
+
+  secretaryRecoveryFocusedKey.value = key
+  if (idx > 0) {
+    const next = [...secretaryRecoveryQueue.value]
+    const [selected] = next.splice(idx, 1)
+    next.unshift(selected)
+    secretaryRecoveryQueue.value = next
   }
 }
 
@@ -1724,26 +1735,24 @@ const onRecoveryAction = (raw: any) => {
   const shortID = taskId.slice(0, 8)
 
   const key = `${taskId}:${attemptId}`
-  const prevLen = secretaryRecoveryQueue.value.length
   const nextQueue = secretaryRecoveryQueue.value.filter((i) => recoveryKeyOf(i) !== key)
   secretaryRecoveryQueue.value = nextQueue
 
-  if (prevLen !== nextQueue.length) {
-    secretaryRecoveryAwaitingReply.value = false
-    secretaryRecoveryHandled.value += 1
-    if (nextQueue.length === 0) {
-      secretaryRecoveryIntroSent.value = false
-      secretaryRecoveryTotal.value = 0
-      secretaryRecoveryHandled.value = 0
-    }
+  const focused = String(secretaryRecoveryFocusedKey.value || '').trim()
+  if (focused && focused === key) {
+    const nextKey = nextQueue.length > 0 ? recoveryKeyOf(nextQueue[0]) : ''
+    secretaryRecoveryFocusedKey.value = nextKey
   }
+  if (nextQueue.length === 0) secretaryRecoveryFocusedKey.value = ''
+
+  secretaryRecoveryAwaitingReply.value = false
 
   if (action === 'resume') {
     chatStore.addMessage({
       id: Date.now(),
       role: 'assistant',
       type: 'text',
-      content: `好，我继续推进：${title}（task=${shortID}）。`,
+      content: `已继续：${title}（task=${shortID}）。`,
       createdAt: new Date(),
       isStreaming: false,
     })
@@ -1753,7 +1762,7 @@ const onRecoveryAction = (raw: any) => {
       id: Date.now(),
       role: 'assistant',
       type: 'text',
-      content: `好的，先稍后处理：${title}（task=${shortID}）。`,
+      content: `已暂缓：${title}（task=${shortID}）。`,
       createdAt: new Date(),
       isStreaming: false,
     })
@@ -1771,7 +1780,9 @@ const sendRecoveryReply = async (rawMessage: string) => {
   if (loadingHistory.value) return
   if (secretaryRecoverySubmitting.value) return
 
-  const item = secretaryRecoveryQueue.value[0]
+  const focused = String(secretaryRecoveryFocusedKey.value || '').trim()
+  const item =
+    secretaryRecoveryQueue.value.find((i) => recoveryKeyOf(i) === focused) || secretaryRecoveryQueue.value[0]
   const taskId = String(item?.taskId || '').trim()
   if (!taskId) return
 
@@ -1795,21 +1806,24 @@ const sendRecoveryReply = async (rawMessage: string) => {
       id: Date.now(),
       role: 'assistant',
       type: 'text',
-      content: `明白，我继续推进：${title}（task=${shortID}）。`,
+      content: `已继续：${title}（task=${shortID}）。`,
       createdAt: new Date(),
       isStreaming: false,
     })
 
-    // Advance queue.
+    // Advance queue (remove the resumed item).
     secretaryRecoveryAwaitingReply.value = false
-    secretaryRecoveryHandled.value += 1
-    secretaryRecoveryQueue.value = secretaryRecoveryQueue.value.slice(1)
+    const key = recoveryKeyOf(item)
+    secretaryRecoveryQueue.value = secretaryRecoveryQueue.value.filter((i) => recoveryKeyOf(i) !== key)
     if (secretaryRecoveryQueue.value.length > 0) {
       const next = secretaryRecoveryQueue.value[0]
-      const index = secretaryRecoveryHandled.value + 1
-      const total = Math.max(secretaryRecoveryTotal.value, secretaryRecoveryHandled.value+secretaryRecoveryQueue.value.length)
-      secretaryRecoveryTotal.value = total
-      const ask = formatRecoveryAsk(next, index, total)
+      secretaryRecoveryFocusedKey.value = recoveryKeyOf(next)
+      const others = secretaryRecoveryQueue.value
+        .slice(1)
+        .map((i) => String(i?.title || '').trim())
+        .filter(Boolean)
+        .slice(0, 3)
+      const ask = formatRecoveryAsk(next, others)
       chatStore.addMessage({
         id: Date.now(),
         role: 'assistant',
@@ -1820,9 +1834,7 @@ const sendRecoveryReply = async (rawMessage: string) => {
       })
       secretaryRecoveryAwaitingReply.value = true
     } else {
-      secretaryRecoveryIntroSent.value = false
-      secretaryRecoveryTotal.value = 0
-      secretaryRecoveryHandled.value = 0
+      secretaryRecoveryFocusedKey.value = ''
     }
   } catch (error) {
     console.error('Failed to resume task from secretary recovery:', error)
@@ -1849,7 +1861,7 @@ const sendMessage = async () => {
   if (inputEl.value) inputEl.value.style.height = ''
 
   if (isSecretaryMode.value) {
-    if (secretaryRecoveryQueue.value.length > 0 || secretaryRecoverySubmitting.value) {
+    if (secretaryRecoveryAwaitingReply.value || secretaryRecoverySubmitting.value) {
       await sendRecoveryReply(message)
       return
     }
@@ -2307,6 +2319,7 @@ onUnmounted(() => {
         @task-completed="onTaskCompleted"
         @recovery-snapshot="onRecoverySnapshot"
         @task-needs-attention="onTaskNeedsAttention"
+        @recovery-focus="onRecoveryFocus"
         @recovery-action="onRecoveryAction"
       />
 

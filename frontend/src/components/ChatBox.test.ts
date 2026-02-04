@@ -253,8 +253,21 @@ it('recovery ask prefers error over summary (secretary mode)', async () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('发生了什么：invalid observer output (expected JSON)')
-    expect(wrapper.text()).not.toContain('发生了什么：subagent finished')
+    // No history replay: snapshot only fills the recovery inbox.
+    expect(wrapper.text()).not.toContain('原因：invalid observer output (expected JSON)')
+
+    deliverables.vm.$emit('task-needs-attention', {
+        taskId: 't1',
+        attemptId: 'a1',
+        title: 'task1',
+        status: 'failed',
+        summary: 'subagent finished',
+        error: 'invalid observer output (expected JSON)',
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('原因：invalid observer output (expected JSON)')
+    expect(wrapper.text()).not.toContain('原因：subagent finished')
 })
 
 it('shows a stop button while streaming and calls stop endpoint', async () => {
@@ -751,7 +764,7 @@ it('optimistically renders secretary message and prevents resubmission while pen
     expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
 })
 
-it('queues recovery items and resumes them one-by-one via chat reply (secretary mode)', async () => {
+it('does not replay recovery asks on initial recovery snapshot (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -765,8 +778,6 @@ it('queues recovery items and resumes them one-by-one via chat reply (secretary 
 
     const { useChatStore } = await import('@/stores/chat')
     const chat = useChatStore()
-
-    ;(apiClient.resumeTask as any).mockResolvedValue({})
 
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
     const wrapper = shallowMount(ChatBox, {
@@ -792,24 +803,72 @@ it('queues recovery items and resumes them one-by-one via chat reply (secretary 
     await wrapper.get('[data-testid="emit-recovery-snapshot"]').trigger('click')
     await flushPromises()
 
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('有个任务需要你确认：task1'))).toBe(true)
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('task1'))).toBe(true)
+    // Baseline snapshot should not spam chat with recovery asks (no history replay).
+    expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
+})
 
-    await wrapper.get('textarea').setValue('先按 next_steps 继续')
+it('handles recovery focus switching and resumes via chat reply (secretary mode)', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+
+    ;(apiClient.resumeTask as any).mockResolvedValue({})
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+            stubs: {
+                SecretaryTaskDeliverables: {
+                    template: `
+                      <button data-testid="emit-task1" @click="$emit('task-needs-attention', { taskId: 't1', attemptId: 'a1', title: 'task1', status: 'failed', summary: 's1', observer: { next_steps: 'n1', questions_for_user: ['q1'] } })"></button>
+                      <button data-testid="emit-task2" @click="$emit('task-needs-attention', { taskId: 't2', attemptId: 'a2', title: 'task2', status: 'failed', summary: 's2', observer: { next_steps: 'n2' } })"></button>
+                      <button data-testid="focus-task2" @click="$emit('recovery-focus', { taskId: 't2', attemptId: 'a2', title: 'task2', status: 'failed', summary: 's2', observer: { next_steps: 'n2' } })"></button>
+                    `,
+                },
+            },
+        },
+    })
+
+    await flushPromises()
+    expect(chat.messages.length).toBe(0)
+
+    await wrapper.get('[data-testid="emit-task1"]').trigger('click')
+    await wrapper.get('[data-testid="emit-task2"]').trigger('click')
+    await flushPromises()
+
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('task1'))).toBe(true)
+
+    // Switch focus to task2 before replying.
+    await wrapper.get('[data-testid="focus-task2"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('先处理第二个')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
     await flushPromises()
 
     expect(apiClient.resumeTask).toHaveBeenCalledTimes(1)
-    expect(apiClient.resumeTask).toHaveBeenCalledWith('t1', { review_notes: '先按 next_steps 继续' })
+    expect(apiClient.resumeTask).toHaveBeenCalledWith('t2', { review_notes: '先处理第二个' })
     expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(0)
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('task2'))).toBe(true)
 
-    await wrapper.get('textarea').setValue('继续第二个')
+    // Remaining item can still be resumed afterwards.
+    await wrapper.get('textarea').setValue('再处理第一个')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
     await flushPromises()
 
     expect(apiClient.resumeTask).toHaveBeenCalledTimes(2)
-    expect(apiClient.resumeTask).toHaveBeenLastCalledWith('t2', { review_notes: '继续第二个' })
+    expect(apiClient.resumeTask).toHaveBeenLastCalledWith('t1', { review_notes: '再处理第一个' })
 
     // After the queue drains, messages go back to normal secretary sending.
     await wrapper.get('textarea').setValue('正常聊天')
@@ -860,7 +919,7 @@ it('records direct recovery actions as secretary receipts (dismiss clears recove
     // Receipt exists and recovery mode is cleared (next send uses inbox append, not resume).
     const { useChatStore } = await import('@/stores/chat')
     const chat = useChatStore()
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('稍后处理'))).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('已暂缓'))).toBe(true)
 
     await wrapper.get('textarea').setValue('正常聊天')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')

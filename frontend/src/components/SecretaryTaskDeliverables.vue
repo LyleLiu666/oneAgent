@@ -70,6 +70,7 @@ const emit = defineEmits<{
   (e: 'task-completed', payload: TaskCompletedEvent): void
   (e: 'task-needs-attention', payload: TaskNeedsAttentionEvent): void
   (e: 'recovery-snapshot', payload: TaskNeedsAttentionEvent[]): void
+  (e: 'recovery-focus', payload: TaskNeedsAttentionEvent): void
   (e: 'recovery-action', payload: RecoveryActionEvent): void
 }>()
 
@@ -351,6 +352,11 @@ const refresh = async () => {
 const recoverySubmittingTaskId = ref<string>('')
 const recoveryError = ref<string>('')
 
+const onFocus = (card: RecoveryCard) => {
+  if (!card) return
+  emit('recovery-focus', toNeedsAttentionEvent(card.task, card.attempt))
+}
+
 const onResume = async (card: RecoveryCard) => {
   const id = String(card?.task?.id || '').trim()
   const attemptID = String(card?.attempt?.id || '').trim()
@@ -525,7 +531,8 @@ onUnmounted(() => {
           <div
             v-for="card in recoveryCards"
             :key="card.task.id"
-            class="rounded-2xl bg-surface-900/40 p-4"
+            class="rounded-2xl bg-surface-900/40 p-4 cursor-pointer hover:bg-surface-900/55"
+            @click="onFocus(card)"
           >
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
@@ -572,7 +579,7 @@ onUnmounted(() => {
                         ? 'recovery-open-diff'
                         : undefined
                 "
-                @click="openArtifactModal(card.task.id, card.attempt.id, a)"
+                @click.stop="openArtifactModal(card.task.id, card.attempt.id, a)"
               >
                 {{ a.label }}
               </button>
@@ -584,7 +591,7 @@ onUnmounted(() => {
                 data-testid="secretary-task-recovery-resume"
                 class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-900 dark:text-amber-100 hover:bg-amber-500/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 :disabled="Boolean(recoverySubmittingTaskId)"
-                @click="onResume(card)"
+                @click.stop="onResume(card)"
               >
                 继续
               </button>
@@ -592,7 +599,7 @@ onUnmounted(() => {
                 type="button"
                 data-testid="secretary-task-recovery-troubleshoot"
                 class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
-                @click="onTroubleshoot(card)"
+                @click.stop="onTroubleshoot(card)"
               >
                 排障
               </button>
@@ -601,7 +608,7 @@ onUnmounted(() => {
                 data-testid="secretary-task-recovery-dismiss"
                 class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
                 title="暂时隐藏（仍可在任务工作台查看）"
-                @click="onDismiss(card)"
+                @click.stop="onDismiss(card)"
               >
                 稍后
               </button>
