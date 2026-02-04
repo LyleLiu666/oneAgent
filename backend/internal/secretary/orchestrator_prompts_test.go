@@ -23,14 +23,25 @@ func TestSecretaryDispatchSystemPromptSW_QuestionsAreHardBlockersAndLimited(t *t
 	if !strings.Contains(prompt, "ONEAGENT_SECRETARY_TRIAGE") {
 		t.Fatalf("expected marker in SW prompt, got %q", prompt)
 	}
+	if !strings.Contains(prompt, "secretary_triage_plan") {
+		t.Fatalf("expected SW prompt to mention secretary_triage_plan protocol, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "<secretary_triage_plan>") {
+		t.Fatalf("expected SW prompt to mention <secretary_triage_plan> tags fallback, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "5") || !strings.Contains(prompt, "工具调用") {
+		t.Fatalf("expected SW prompt to mention tool-call budget, got %q", prompt)
+	}
 	if !strings.Contains(prompt, "questions[]") {
 		t.Fatalf("expected SW prompt to mention questions[] guidance, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "硬阻塞") && !strings.Contains(prompt, "硬阻断") {
 		t.Fatalf("expected SW prompt to describe questions[] as hard blockers, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "最多 1") && !strings.Contains(prompt, "最多1") {
-		t.Fatalf("expected SW prompt to limit questions per round, got %q", prompt)
+	if !strings.Contains(prompt, "每轮最多问 1") && !strings.Contains(prompt, "每轮最多问1") {
+		t.Fatalf("expected SW prompt to limit questions per turn, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "严禁编造进度") {
+		t.Fatalf("expected SW prompt to include anti-hallucination guardrail, got %q", prompt)
 	}
 }
-
