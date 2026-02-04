@@ -299,6 +299,110 @@ it("queues a task for selected workspace", async () => {
   wrapper.unmount();
 });
 
+it("selects persisted workspace on mount when available", async () => {
+  const store = new Map<string, string>([["oneagent-workspace", "/tmp/wsB"]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  (apiClient.listTasks as any).mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "local",
+      workspace: "/tmp/wsA",
+      title: "A1",
+      prompt: "do A",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: "a1", status: "running", created_at: new Date().toISOString() },
+      ],
+    },
+    {
+      id: "t2",
+      user_id: "local",
+      workspace: "/tmp/wsB",
+      title: "B1",
+      prompt: "do B",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      attempts: [
+        { id: "a1", status: "queued", created_at: new Date().toISOString() },
+      ],
+    },
+  ]);
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  const wsItems = wrapper.findAll('[data-testid="workspace-item"]');
+  const wsB = wsItems.find((w) => w.text().includes("/tmp/wsB"));
+  expect(wsB, "expected /tmp/wsB workspace item").toBeTruthy();
+  expect(wsB!.classes()).toContain("ring-1");
+
+  wrapper.unmount();
+});
+
+it("queues a task on cmd/ctrl+enter in the prompt", async () => {
+  const store = new Map<string, string>([["oneagent-workspace", "/tmp/wsA"]]);
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => void store.clear(),
+  });
+
+  const { default: TaskWorkbench } = await import("@/views/TaskWorkbench.vue");
+
+  (apiClient.listTasks as any).mockResolvedValueOnce([]);
+  (apiClient.createTask as any).mockResolvedValueOnce({
+    id: "t1",
+    user_id: "local",
+    workspace: "/tmp/wsA",
+    title: "T",
+    prompt: "do it",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      { id: "a1", status: "queued", created_at: new Date().toISOString() },
+    ],
+  });
+  (apiClient.listTasks as any).mockResolvedValueOnce([]);
+  (apiClient.getTask as any).mockResolvedValueOnce({
+    id: "t1",
+    user_id: "local",
+    workspace: "/tmp/wsA",
+    title: "T",
+    prompt: "do it",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    attempts: [
+      { id: "a1", status: "queued", created_at: new Date().toISOString() },
+    ],
+  });
+  (apiClient.getTaskEvents as any).mockResolvedValueOnce([]);
+
+  const wrapper = shallowMount(TaskWorkbench);
+  await flushPromises();
+
+  const textarea = wrapper.get('[data-testid="workbench-prompt"]');
+  await textarea.setValue("do it");
+
+  await textarea.trigger("keydown", { key: "Enter", metaKey: true });
+  await flushPromises();
+
+  expect(apiClient.createTask).toHaveBeenCalledWith(
+    expect.objectContaining({ workspace: "/tmp/wsA", prompt: "do it" }),
+  );
+
+  wrapper.unmount();
+});
+
 it("shows guided empty state when no task is selected", async () => {
   vi.stubGlobal("localStorage", {
     getItem: () => null,
