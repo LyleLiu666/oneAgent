@@ -10,7 +10,7 @@
 - **代码不应该做语义路由**：不要在 orchestrator 里写一堆 `strings.Contains(...)` 来判断“用户在问什么”。意图判断应交给 SW（Secretary(Worker)）planning agent，通过结构化输出（tool-call / 宽松 tags）表达 `intent`。
 - **结构化输出不靠纯文本 JSON**：优先 tool-call；fallback 用宽松 tags（XML-like，不要求 CDATA），避免 “invalid function arguments json” 这类脆弱失败。
 - **KV-cache 以稳定前缀为原则**：稳定 system prompt / tool schema 由 AgentFactory 装配；每轮变化信息只进入 TurnContext（volatile）或 append-only 的新消息，不重写历史。
-- **所有过程必须可追溯**：用户默认看到“像人一样的汇报”，但随时能展开 evidence（trace/findings/diff/test_report/llm_log_path）。
+- **所有过程必须可追溯**：用户默认看到“像人一样的汇报”，但随时能展开 evidence（trace/findings/diff/test_report/llm_log_path）；并且 **秘书自己的 LLM 调用也要能定位**（否则 debug 只能靠猜）。
 
 ---
 
@@ -41,6 +41,7 @@
 3) **自愈（Self-heal）**：工具调用失败/输出解析失败，先把错误以 `tool_result` 反馈给模型，允许它修复参数/换路再试（受 max steps 限制）。
 4) **留痕（Append-only traceability）**：消息列表是事实来源；重要过程有 trace/log pointers；不靠“我记得”。
 5) **KV-cache 友好（Stable prefix）**：稳定前缀字节级稳定；易变内容只进入 volatile TurnContext 或追加消息。
+6) **预算与降级（Budget & degrade）**：秘书应有明确的“自处理上限”（例如 ≤5 轮 tool loop / ≤N 秒 / ≤N tokens）。超过预算或涉及写入时，自动降级为派工（Worker Task）或引导切换到完整模式。
 
 ---
 
@@ -119,11 +120,63 @@ SW 的“内部 session”也遵守 append-only：压缩通过追加 summary 消
 - 对“需要处理/失败”的条目，默认给出一个 **可点击的 evidence 入口**（trace/findings/diff/test_report/llm_log_path）。
 - 不改变 message list 的前提下，尽量把“关键指针”放进可恢复的 state 或 work ledger 里（渐进披露）。
 
+### 4.5 关键缺口：秘书的“工具执行”与“低噪声留痕”的边界需要写清楚
+
+这里容易产生误解：**“不要把工具细节塞进用户对话”** ≠ **“秘书不能执行工具”**。
+
+更 agentic、也更符合“放权与信任 + 可追溯过程”的边界应该是：
+- SU（用户看到的 message list）保持低噪声：默认只追加 `role=assistant,type=text` 的自然语言总结。
+- SW（内部 session / trace / ledger）可以保留 tool_call/tool_result 与中间决策，作为可追溯证据（append-only）。
+- 工具失败必须回注给 LLM（`tool_result`/repair prompt）做自愈；不要把工程错误升级为“需要用户确认”。
+
+同时，这也意味着：如果现有 spec 写了 “triage MUST NOT execute tools”，更准确的表述应是：
+- **MUST NOT 污染 SU 对话**（不出现 tool_call/tool_result），而不是禁止 SW 在 planning 时做只读查询。
+
+### 4.6 关键缺口：秘书侧的 LLM 可观测性仍不一致（难 debug）
+
+当前 Worker Chat 的 LLM 调用具备较完整的可观测性（例如 `llm_log_path`、KV-cache key hash、cacheable indexes、tool_protocol 等）。
+但秘书（SW/SU）的 LLM 调用如果缺少同等级的记录，会导致：
+- 用户明明点了 trace/留痕，但定位不到“是哪次模型调用/哪套 prompt/哪个 tool protocol”导致的问题；
+- 只能靠截图和猜测，debug 成本指数上升（这也是“看起来降智”的重要根因之一）。
+
+建议补齐的“秘书 LLM 调用证据”（best-effort）：
+- `llm_log_path`（或等价的 call record path）
+- `tool_protocol`（json/xml/none + fallback 事件）
+- `prompt_cache_enabled` + `prompt_cache_key_hash` + cacheable indexes
+- `request_id`（透传 provider 的 request id，或生成本地 call id）
+
+### 4.7 关键缺口：Inbox/Triage 的节奏与 “ack” 策略需要稳定化（避免机械话术）
+
+你已经明确不喜欢“收到/我继续推进”等机械 ack；在秘书模式里更自然的做法是：
+- 允许连续输入（Append-only），而不是强行一问一答；
+- 由一次 triage 汇总回复来承担“我看到了、我理解了、下一步是什么”；
+- 如果确实需要即时反馈，也应是 **可关闭/可降噪的轻量提示**（例如 UI 层状态，不必落盘成助手发言）。
+
+也就是说：**“是否 quick ack”应是策略项**，而不是写死在系统流程里。
+
+### 4.8 关键缺口：Observer 仍是“严格 XML 解析”路径，仍可能成为系统性脆点
+
+你遇到的 “invalid observer output (expected XML or JSON)” 本质上是同一类问题：**把“结构化输出”押注在单一、严格的文本格式**。
+
+更 agentic 的方向是把 Observer 也视为一个 agent profile：
+- tool-call 优先（或至少是宽松 tags + 自愈重试）
+- 输出失败时先自愈，再暴露给上层；并且错误要可追溯（trace/log pointer）
+
 ---
 
 ## 5. 下一步改造建议（地基 → 上层）
 
 下面是按“地基优先”的顺序，最符合 agent system 长期收益的推进路线：
+
+### 5.0 Phase 0：补齐秘书 LLM 调用的可观测性（先让 debug 变得便宜）
+
+目标：当秘书“看起来降智”时，能在 trace/ledger 里定位：
+1) 具体是哪次 LLM call
+2) 当时使用了哪个 tool protocol / 是否 fallback
+3) KV-cache 是否启用/是否 downgrade
+4) 结构化输出是 tool-call 还是 tags fallback
+
+没有这层证据，后续的“更 agentic”改造会继续被“定位困难”拖累。
 
 ### 5.1 Phase 1：把“秘书也是 agent”真正配置化（AgentFactory v2）
 
@@ -176,4 +229,3 @@ SW 的“内部 session”也遵守 append-only：压缩通过追加 summary 消
 - Agent Factory（抽取 build-agent）：`openspec/changes/refactor-agent-factory/design.md`
 - Secretary 编排能力规范：`openspec/specs/system-secretary-orchestration/spec.md`
 - Toolcalling 可靠性规范：`openspec/specs/system-toolcalling-reliability/spec.md`
-
