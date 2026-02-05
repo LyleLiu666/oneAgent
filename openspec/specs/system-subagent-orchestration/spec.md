@@ -80,6 +80,27 @@ TBD - created by archiving change enable-subagent-orchestration. Update Purpose 
 - **THEN** TurnContext 中包含与翻译相关的技能摘要（例如包含 Translator skill 的名称与描述）
 - **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
+### Requirement: Toolkit-as-skill 选择子 Agent 工具集 (Toolkits via Skills)
+系统应该 (SHOULD) 支持将 skill 作为“工具包技能（toolkit skill）”来决定子 Agent 的工具集合，以避免主上下文频繁变更 tool_ids 破坏 KV-cache，同时也避免子 Agent 默认挂载全量工具导致的上下文爆炸。
+
+工具集选择顺序（best-effort）：
+1) **显式 tool_ids**：若调用方提供 `tool_ids`，系统按其挂载（受 policy/approval gate 限制）。
+2) **toolkit skill 推导**：若 `tool_ids` 为空但提供了 `skill_ids`，且这些 skills 的 frontmatter 声明了 `tool_ids`，系统应使用这些 `tool_ids` 作为子 Agent 工具集（受 policy/approval gate 限制）。
+3) **继承父工具集**：若以上都为空，系统应默认继承父上下文已挂载的工具集合（排除 `subagent` 本身，防递归），而不是隐式扩张为全量工具。
+
+#### Scenario: Toolkit skill infers tool_ids when omitted
+- **GIVEN** 用户/主 Agent 调用子 Agent，未显式传 `tool_ids`
+- **AND** 该调用显式传入 `skill_ids=["repo-toolkit"]`
+- **AND** skill `repo-toolkit` 的 frontmatter 声明 `tool_ids=["rg","read_file"]`
+- **WHEN** 系统启动子 Agent
+- **THEN** 子 Agent 的工具集合包含 `rg` 与 `read_file`（best-effort，仍受 policy 限制）
+
+#### Scenario: Omitted tool_ids inherits parent's mounted tools
+- **GIVEN** 用户/主 Agent 调用子 Agent，未显式传 `tool_ids` 且未传入任何 toolkit skill
+- **AND** 父上下文当前挂载工具集合为 `["read_file","rg","subagent"]`
+- **WHEN** 系统启动子 Agent
+- **THEN** 子 Agent 默认工具集合为 `["read_file","rg"]`（排除 subagent 本身；best-effort）
+
 ### Requirement: 限制与递归控制 (Limits & Recursion Control)
 系统必须 (MUST) 对子 Agent 的执行施加限制，包括但不限于：最大递归深度、最大工具执行步数/时长、交接输出大小上限；并且默认禁止子 Agent 再次启动子 Agent（或限制在允许的最大深度内）。
 
@@ -136,4 +157,3 @@ TBD - created by archiving change enable-subagent-orchestration. Update Purpose 
 - **GIVEN** 父上下文不允许 `bash`
 - **WHEN** 子 Agent 尝试调用 `bash`
 - **THEN** 系统拒绝并返回权限错误
-

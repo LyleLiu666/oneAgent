@@ -27,7 +27,7 @@ func TestBuildSkillSuggestionTurnContext_IncludesSkillsHelpWhenAsked(t *testing.
 	}
 
 	manager := skill.NewManager(0)
-	out := buildSkillSuggestionTurnContext(context.Background(), manager, "", "有哪些技能可用？")
+	out := buildSkillSuggestionTurnContext(context.Background(), manager, "", "有哪些技能可用？", skillTurnContextCaps{})
 	if !strings.Contains(out, "## 技能帮助") {
 		t.Fatalf("expected skills help header, got %q", out)
 	}
@@ -53,5 +53,39 @@ func TestBuildSkillSuggestionTurnContext_IncludesSkillsHelpWhenAsked(t *testing.
 	}
 	if !strings.Contains(out, "- skill-00") {
 		t.Fatalf("expected preview to include a generated skill, got %q", out)
+	}
+}
+
+func TestBuildSkillSuggestionTurnContext_ToolkitSkillIncludesToolIDsAndSubagentHint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path := filepath.Join(home, ".claude", "skills", "repo-toolkit", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := `---
+name: repo-toolkit
+description: Repo maintenance toolkit
+tool_ids: [rg, read_file]
+---
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	manager := skill.NewManager(0)
+	out := buildSkillSuggestionTurnContext(context.Background(), manager, "", "请使用 repo-toolkit 这个技能", skillTurnContextCaps{
+		HasSkillRead: true,
+		HasSubagent:  true,
+	})
+	if !strings.Contains(out, "工具包 (tool_ids): rg, read_file") {
+		t.Fatalf("expected tool_ids to be surfaced, got %q", out)
+	}
+	if !strings.Contains(out, "`subagent`") {
+		t.Fatalf("expected subagent hint, got %q", out)
+	}
+	if !strings.Contains(out, "`skill_read`") {
+		t.Fatalf("expected skill_read hint, got %q", out)
 	}
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/permissions"
+	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	"github.com/liu_y/oneAgent/backend/internal/skill"
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 	"github.com/liu_y/oneAgent/backend/internal/subagent"
@@ -49,7 +51,7 @@ func subagentDefinition() Definition {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "subagent",
-			Description: "启动一个隔离上下文的子 Agent 执行一个独立步骤。输入 task（必填）+ 可选 context_summary/scope/tool_ids/max_steps/max_runtime_seconds/k_skills；输出短总结 summary + findings_path/trace_log_path 指针。默认禁止递归（子 Agent 不挂载 subagent 工具本身）。",
+			Description: "启动一个隔离上下文的子 Agent 执行一个独立步骤。输入 task（必填）+ 可选 context_summary/scope/tool_ids/skill_ids/max_steps/max_runtime_seconds/k_skills；输出短总结 summary + findings_path/trace_log_path 指针。默认禁止递归（子 Agent 不挂载 subagent 工具本身）。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -63,7 +65,7 @@ func subagentDefinition() Definition {
 					},
 					"tool_ids": map[string]any{
 						"type":        "array",
-						"description": "（可选）子 Agent 允许使用的工具 ID 列表；为空则默认使用主工具集（排除 subagent 本身）。",
+						"description": "（可选）子 Agent 允许使用的工具 ID 列表；为空则默认继承主工具集（排除 subagent 本身）。若同时提供 skill_ids 且该 skill 声明了 tool_ids，可省略 tool_ids（系统会从 skill 元数据推导）。",
 						"items":       map[string]any{"type": "string"},
 					},
 					"scope": map[string]any{
@@ -94,7 +96,7 @@ func subagentDefinition() Definition {
 					},
 					"skill_ids": map[string]any{
 						"type":        "array",
-						"description": "（可选）显式指定要注入的技能（优先基于 skill_id 解析，找不到则按 name 尝试）。会以“摘要块”写入子 Agent TurnContext（volatile），并提示子 Agent 需要时自行调用 `skill_read` 读取完整 SKILL.md（兼容旧名：`skill.read`）。",
+						"description": "（可选）显式指定要注入的技能（优先基于 skill_id 解析，找不到则按 name 尝试）。会以“摘要块”写入子 Agent TurnContext（volatile）。当该 skill 在 frontmatter 声明 tool_ids 且本次未显式提供 tool_ids 时，系统会自动使用这些 tool_ids 作为子 Agent 工具集（仍受 policy 限制）。子 Agent 如需完整说明，可自行调用 `skill_read` 读取 `SKILL.md`（兼容旧名：`skill.read`）。",
 						"items":       map[string]any{"type": "string"},
 					},
 				},
@@ -138,47 +140,15 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, errors.New("missing llm client")
 	}
 
-	systemPrompt := SystemPromptFromContext(ctx)
-
 	ws := WorkspaceFromContext(ctx)
 	workspaceRoot := ""
 	if ws.Enabled {
 		workspaceRoot = ws.Root
 	}
 
-	// Build tool set for subagent (exclude subagent itself to prevent recursion).
-	ids := req.ToolIDs
-	if len(ids) == 0 {
-		for _, def := range All() {
-			if def.ID == ToolIDSubagent {
-				continue
-			}
-			ids = append(ids, def.ID)
-		}
-	} else {
-		filtered := make([]string, 0, len(ids))
-		for _, id := range ids {
-			id = strings.TrimSpace(id)
-			if id == "" || id == ToolIDSubagent {
-				continue
-			}
-			filtered = append(filtered, id)
-		}
-		ids = filtered
-	}
-
 	snap, ok := PolicySnapshotFromContext(ctx)
 	if !ok {
 		snap = permissions.ResolveSnapshot(userID, permissions.DefaultPolicy(), time.Now())
-	}
-	defs, err := MountWithSnapshot(ids, snap)
-	if err != nil {
-		return nil, err
-	}
-
-	handlers := make(map[string]subagent.ToolHandler, len(defs))
-	for _, def := range defs {
-		handlers[def.Spec.Function.Name] = subagent.ToolHandler(def.Handler)
 	}
 
 	subCtx := ctx
@@ -201,7 +171,32 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 		k = 8
 	}
 
+	normalizeToolIDs := func(values []string) []string {
+		if len(values) == 0 {
+			return nil
+		}
+		seen := make(map[string]bool, len(values))
+		out := make([]string, 0, len(values))
+		for _, raw := range values {
+			id := strings.ToLower(strings.TrimSpace(raw))
+			if id == "" {
+				continue
+			}
+			id = CanonicalToolName(id)
+			if id == "" || id == ToolIDSubagent {
+				continue
+			}
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, id)
+		}
+		return out
+	}
+
 	manager := SkillManagerFromContext(ctx)
+	toolkitToolIDs := []string(nil)
 	if manager != nil {
 		loadCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		cat, err := manager.Load(loadCtx, workspaceRoot)
@@ -225,6 +220,9 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 					s, ok = cat.ByName(name)
 				}
 				if ok {
+					if len(s.ToolIDs) > 0 {
+						toolkitToolIDs = append(toolkitToolIDs, s.ToolIDs...)
+					}
 					b.WriteString("- ")
 					b.WriteString(strings.TrimSpace(s.Name))
 					b.WriteString(": ")
@@ -298,6 +296,42 @@ func runSubagentTool(ctx context.Context, raw json.RawMessage) (any, error) {
 			skillsSummary = b.String()
 		}
 	}
+
+	// Resolve tool set for subagent (exclude subagent itself to prevent recursion).
+	ids := normalizeToolIDs(req.ToolIDs)
+	if len(ids) == 0 {
+		ids = normalizeToolIDs(toolkitToolIDs)
+	}
+	if len(ids) == 0 {
+		if parentIDs, ok := MountedToolIDsFromContext(ctx); ok {
+			ids = normalizeToolIDs(parentIDs)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no tools configured for subagent: provide tool_ids, or pass a toolkit skill in skill_ids (with frontmatter tool_ids)")
+	}
+
+	defs, err := MountWithSnapshot(ids, snap)
+	if err != nil {
+		return nil, err
+	}
+
+	toolNames := make([]string, 0, len(defs))
+	handlers := make(map[string]subagent.ToolHandler, len(defs))
+	for _, def := range defs {
+		toolNames = append(toolNames, def.Spec.Function.Name)
+		handlers[def.Spec.Function.Name] = subagent.ToolHandler(def.Handler)
+	}
+
+	baseOverride := strings.TrimSpace(PromptBaseOverrideFromContext(ctx))
+	assembled, err := prompt.AssembleStablePrefix(prompt.AssembleInput{
+		BaseOverride: baseOverride,
+		ToolNames:    toolNames,
+	})
+	if err != nil {
+		return nil, err
+	}
+	systemPrompt := assembled.StablePrefix
 
 	result, runErr := subagent.Run(subCtx, subagent.RunRequest{
 		ParentSessionID:   sessionID,

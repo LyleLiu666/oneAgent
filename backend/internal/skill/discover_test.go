@@ -24,6 +24,11 @@ description: Expert in translation
 tags:
   - translation
 keywords: i18n
+tool_ids:
+  - RG
+  - read_file
+  - skill.read
+  - rg
 ---
 
 # Translator
@@ -55,6 +60,9 @@ Body.
 	}
 	if len(got.Keywords) != 1 || got.Keywords[0] != "i18n" {
 		t.Fatalf("unexpected keywords: %+v", got.Keywords)
+	}
+	if len(got.ToolIDs) != 3 || got.ToolIDs[0] != "rg" || got.ToolIDs[1] != "read_file" || got.ToolIDs[2] != "skill.read" {
+		t.Fatalf("unexpected tool_ids: %+v", got.ToolIDs)
 	}
 }
 

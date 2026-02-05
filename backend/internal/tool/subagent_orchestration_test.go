@@ -65,6 +65,7 @@ func TestSubagent_ContextSlicing_Step3OnlyCarriesSummariesAndReferences(t *testi
 	base = ContextWithRuntimeLayout(base, layout)
 	base = ContextWithLLMClient(base, client)
 	base = ContextWithSystemPrompt(base, "sys")
+	base = ContextWithMountedToolIDs(base, []string{ToolIDSubagent, ToolIDReadFile})
 	base = ContextWithWorkspace(base, WorkspaceConfig{Enabled: true, Root: workspaceRoot})
 
 	step1Any, err := runSubagentTool(base, json.RawMessage(`{"task":"step1","k_skills":0}`))
@@ -132,4 +133,3 @@ func jsonString(value string) string {
 	b, _ := json.Marshal(value)
 	return string(b)
 }
-

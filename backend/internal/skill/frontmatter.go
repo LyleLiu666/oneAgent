@@ -9,12 +9,13 @@ import (
 )
 
 type frontmatter struct {
-	Name        string     `yaml:"name"`
-	Description string     `yaml:"description"`
-	Tags        stringList `yaml:"tags"`
-	Keywords    stringList `yaml:"keywords"`
-	Requires    *requiresFrontmatter      `yaml:"requires"`
-	Install     []installSpecFrontmatter  `yaml:"install"`
+	Name        string                   `yaml:"name"`
+	Description string                   `yaml:"description"`
+	Tags        stringList               `yaml:"tags"`
+	Keywords    stringList               `yaml:"keywords"`
+	ToolIDs     stringList               `yaml:"tool_ids"`
+	Requires    *requiresFrontmatter     `yaml:"requires"`
+	Install     []installSpecFrontmatter `yaml:"install"`
 }
 
 type stringList []string

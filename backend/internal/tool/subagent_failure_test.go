@@ -42,6 +42,7 @@ func TestSubagentTool_Failure_ReturnsErrorAndArtifacts(t *testing.T) {
 	base = ContextWithRuntimeLayout(base, layout)
 	base = ContextWithLLMClient(base, &failingToolClient{})
 	base = ContextWithSystemPrompt(base, "sys")
+	base = ContextWithMountedToolIDs(base, []string{ToolIDSubagent, ToolIDReadFile})
 	base = ContextWithWorkspace(base, WorkspaceConfig{Enabled: true, Root: workspaceRoot})
 
 	anyOut, err := runSubagentTool(base, json.RawMessage(`{"task":"step1","k_skills":0}`))

@@ -102,6 +102,22 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **WHEN** 系统构建本轮 TurnContext（volatile）的“技能建议”注入消息
 - **THEN** 系统不得把 skill A 作为自动推荐技能
 
+### Requirement: Skill Toolkit Metadata (tool_ids)
+系统必须 (MUST) 支持在 `SKILL.md` 的 YAML frontmatter 中声明可选的 `tool_ids` 元数据，用于将某个 skill 作为“工具包技能（toolkit skill）”：
+- `tool_ids`: 推荐的工具 ID 列表（用于 subagent 挂载）
+
+注意：`tool_ids` 仅表达“建议工具集合”，不代表权限；最终是否可挂载仍受 tool policy/approval gate 约束（fail-closed）。
+
+#### Scenario: Skill frontmatter tool_ids is discoverable
+- **GIVEN** 某 skill 的 `SKILL.md` frontmatter 声明 `tool_ids=["rg","read_file"]`
+- **WHEN** 系统执行 skills discovery 并构建 skill catalog
+- **THEN** catalog 中该 skill 的元数据包含 `tool_ids=["rg","read_file"]`（best-effort）
+
+#### Scenario: Toolkit skill recommendation surfaces tool_ids in TurnContext
+- **GIVEN** 系统自动推荐的 Top-1 skill 是一个 toolkit skill（其 frontmatter 声明了 tool_ids）
+- **WHEN** 系统构建本轮 TurnContext（volatile）的“技能建议”注入消息
+- **THEN** TurnContext 中包含该 skill 的 `tool_ids` 摘要（best-effort）
+
 ### Requirement: Skill Status/Check CLI
 系统必须 (MUST) 提供 CLI 用于检查技能可用性，并展示缺失依赖与安装建议：
 - `oneagent skills status`：列出技能可用性信息
@@ -265,4 +281,3 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 - **THEN** 工具返回的错误信息包含 normalized id
 - **AND** 错误信息包含 ≤5 个相似候选（best-effort）
 - **AND** 错误信息包含可执行的 next steps（best-effort）
-

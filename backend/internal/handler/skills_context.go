@@ -10,7 +10,12 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/skillrecall"
 )
 
-func buildSkillSuggestionTurnContext(ctx context.Context, manager *skill.Manager, workspaceRoot string, userMessage string) string {
+type skillTurnContextCaps struct {
+	HasSkillRead bool
+	HasSubagent  bool
+}
+
+func buildSkillSuggestionTurnContext(ctx context.Context, manager *skill.Manager, workspaceRoot string, userMessage string, caps skillTurnContextCaps) string {
 	if manager == nil {
 		return ""
 	}
@@ -37,7 +42,7 @@ func buildSkillSuggestionTurnContext(ctx context.Context, manager *skill.Manager
 	}
 
 	if explicit, ok := skillrecall.ParseExplicitSkill(eligibleCatalog, userMessage); ok {
-		return formatSkillSuggestion(explicit)
+		return formatSkillSuggestion(explicit, caps)
 	}
 
 	result, err := skillrecall.Search(loadCtx, eligibleCatalog, userMessage, skillrecall.Options{MaxResults: 8, Timeout: 2 * time.Second}, nil)
@@ -50,10 +55,10 @@ func buildSkillSuggestionTurnContext(ctx context.Context, manager *skill.Manager
 		return ""
 	}
 
-	return formatSkillSuggestion(best.Skill)
+	return formatSkillSuggestion(best.Skill, caps)
 }
 
-func formatSkillSuggestion(s skill.Skill) string {
+func formatSkillSuggestion(s skill.Skill, caps skillTurnContextCaps) string {
 	name := strings.TrimSpace(s.Name)
 	desc := strings.TrimSpace(s.Description)
 	if name == "" {
@@ -74,7 +79,17 @@ func formatSkillSuggestion(s skill.Skill) string {
 	b.WriteString("  - 来源: ")
 	b.WriteString(string(s.Source))
 	b.WriteString("\n")
-	b.WriteString("  - 使用方式: 调用 `skill_read`（按技能名称）读取该技能的 `SKILL.md`，再遵循其中指令执行（兼容旧名：`skill.read`）\n")
+	if len(s.ToolIDs) > 0 {
+		b.WriteString("  - 工具包 (tool_ids): ")
+		b.WriteString(strings.Join(s.ToolIDs, ", "))
+		b.WriteString("\n")
+		if caps.HasSubagent {
+			b.WriteString("  - 工具包用法: 建议调用 `subagent` 并把该 skill 放入 `skill_ids`；`tool_ids` 可省略（系统会从 skill 元数据带上），或显式传入。\n")
+		}
+	}
+	if caps.HasSkillRead {
+		b.WriteString("  - 使用方式: 调用 `skill_read`（按技能名称）读取该技能的 `SKILL.md`，再遵循其中指令执行（兼容旧名：`skill.read`）\n")
+	}
 	return b.String()
 }
 

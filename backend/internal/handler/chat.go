@@ -334,11 +334,17 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 	// TurnContext (volatile): dynamic per-turn context MUST NOT be injected into the stable prefix.
 	// This is intentionally appended after persisted history and excluded from cache selection.
 	turnContext := ""
+	caps := skillTurnContextCaps{}
 	for _, def := range toolDefs {
-		if def.ID == tool.ToolIDSkillRead {
-			turnContext = strings.TrimSpace(buildSkillSuggestionTurnContext(c.Request.Context(), h.rt.Skills, workspaceRoot, req.Message))
-			break
+		switch def.ID {
+		case tool.ToolIDSkillRead:
+			caps.HasSkillRead = true
+		case tool.ToolIDSubagent:
+			caps.HasSubagent = true
 		}
+	}
+	if caps.HasSkillRead || caps.HasSubagent {
+		turnContext = strings.TrimSpace(buildSkillSuggestionTurnContext(c.Request.Context(), h.rt.Skills, workspaceRoot, req.Message, caps))
 	}
 	if msg, ok := llm.BuildTurnContextMessage(turnContext); ok {
 		messages = append(messages, msg)
@@ -636,6 +642,8 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			broadcaster.SetGenerationCancel(cancel)
 			ctx = tool.ContextWithSessionID(ctx, sessionID)
 			ctx = tool.ContextWithUserID(ctx, userID)
+			ctx = tool.ContextWithPromptBaseOverride(ctx, baseOverride)
+			ctx = tool.ContextWithMountedToolIDs(ctx, effectiveToolIDs)
 			ctx = tool.ContextWithPolicySnapshot(ctx, policySnap)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
