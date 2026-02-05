@@ -8,6 +8,7 @@
 
 - **秘书必须是 agent**：能自主调用工具、能自愈、能派工、能解释下一步；而不是“计数器/模板机/关键词路由器”。
 - **代码不应该做语义路由**：不要在 orchestrator 里写一堆 `strings.Contains(...)` 来判断“用户在问什么”。意图判断应交给 SW（Secretary(Work)）planning agent，通过结构化输出（tool-call / 宽松 tags）表达 `intent`。
+- **语义解析同样必须 LLM-first**：包括 `task_actions[].task_id` 这类“用户用自然语言指代某个任务”的引用解析；orchestrator 不要用 token 提取/UUID 前缀匹配等规则去替模型猜，应该把候选任务列表作为上下文交给 LLM 选，代码只做权限边界与结果校验（例如：返回的 task_id 必须来自 candidates）。
 - **结构化输出不靠纯文本 JSON**：优先 tool-call；fallback 用宽松 tags（XML-like，不要求 CDATA），避免 “invalid function arguments json” 这类脆弱失败。
 - **KV-cache 以稳定前缀为原则**：稳定 system prompt / tool schema 由 AgentFactory 装配；每轮变化信息只进入 TurnContext（volatile）或 append-only 的新消息，不重写历史。
 - **所有过程必须可追溯**：用户默认看到“像人一样的汇报”，但随时能展开 evidence（trace/findings/diff/test_report/llm_log_path）；并且 **秘书自己的 LLM 调用也要能定位**（否则 debug 只能靠猜）。
@@ -91,6 +92,10 @@ SW 的“内部 session”也遵守 append-only：压缩通过追加 summary 消
 正确方向：
 - 意图判断必须由 **SW planning agent** 统一完成（同一套输入：用户新消息 + 任务看板快照 + 可用工具）。
 - 代码层只保留 **安全边界与幂等性**：session module boundary、max tool steps、policy deny、幂等 cursor、append-only。
+
+一个容易被忽视的“语义路由”来源是：`task_actions[].task_id` 的引用解析（例如用户说“取消那个开发管理系统的任务”）。
+- 反模式：在代码里先做 token 提取、UUID/前缀匹配、括号清洗等规则，命中就直接执行；这会把“理解用户到底指哪个任务”从 LLM 手里夺走，系统会逐步退化为“规则系统 + LLM 补洞”。
+- 正解：LLM-first：把（同一用户、且对当前 action 可操作的）任务候选列表提供给模型，让它返回 `single/ambiguous/not_found`；代码只负责权限边界、幂等，以及校验输出必须命中候选（否则就追问/澄清），而不是替模型做决定。
 
 ### 4.2 工具挂载仍然“碎片化”：秘书 vs worker 的工具/权限不一致
 
