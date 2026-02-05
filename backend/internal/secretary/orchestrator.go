@@ -515,15 +515,15 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 			return ""
 		}
 
-		resolveByRef := func(ref string) (taskqueue.Task, bool, string) {
-			ref = strings.TrimSpace(ref)
-			if ref == "" {
-				return taskqueue.Task{}, false, ""
+		resolveByRef := func(ref string, action string) (taskqueue.Task, bool, string, []taskqueue.Task) {
+			rawRef := strings.TrimSpace(ref)
+			if rawRef == "" {
+				return taskqueue.Task{}, false, "", nil
 			}
 
-			// Accept common human/LLM wrappers: "（追踪号 abcd1234）", "task_id=...", etc.
-			// Extract a best-effort identifier token so users don't need to copy perfect strings.
-			extractRefToken := func(raw string) string {
+			// Extract a best-effort opaque ID token when present (users/LLMs may wrap it in brackets).
+			// For natural-language references, keep the original string so we can resolve semantically.
+			extractIDToken := func(raw string) string {
 				raw = strings.TrimSpace(raw)
 				if raw == "" {
 					return ""
@@ -568,6 +568,18 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 					return true
 				}
 
+				hasHexLetters := func(s string) bool {
+					for _, r := range s {
+						switch {
+						case r >= 'a' && r <= 'f':
+							return true
+						case r >= 'A' && r <= 'F':
+							return true
+						}
+					}
+					return false
+				}
+
 				score := func(tok string) int {
 					tok = strings.Trim(tok, "-_")
 					if tok == "" {
@@ -576,10 +588,11 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 					if _, err := uuid.Parse(tok); err == nil {
 						return 1000 + len(tok)
 					}
+					// UUID prefix / attempt prefix (common). Avoid treating pure numbers as IDs (e.g. "写2026文章").
 					if len(tok) >= 8 && isHex(tok) {
 						return 500 + len(tok)
 					}
-					if len(tok) >= 4 {
+					if len(tok) >= 4 && isHex(tok) && hasHexLetters(tok) {
 						return 100 + len(tok)
 					}
 					return 0
@@ -612,18 +625,16 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 					}
 				}
 
-				if best != "" {
-					return strings.Trim(best, "-_")
-				}
-				return strings.TrimSpace(trimmed)
+				return strings.Trim(best, "-_")
 			}
 
-			ref = extractRefToken(ref)
-			if ref == "" {
-				return taskqueue.Task{}, false, ""
+			idToken := extractIDToken(rawRef)
+			idRef := rawRef
+			if idToken != "" {
+				idRef = idToken
 			}
 
-			matchesByRef := func(tasks []taskqueue.Task, prefix bool) []taskqueue.Task {
+			matchesByRef := func(tasks []taskqueue.Task, needle string, prefix bool) []taskqueue.Task {
 				out := make([]taskqueue.Task, 0, 2)
 				seen := make(map[string]struct{}, 2)
 				for _, t := range tasks {
@@ -633,23 +644,23 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 					}
 					match := false
 					if prefix {
-						if strings.HasPrefix(id, ref) {
+						if strings.HasPrefix(id, needle) {
 							match = true
 						} else {
 							for _, a := range t.Attempts {
 								aid := strings.TrimSpace(a.ID)
-								if aid != "" && strings.HasPrefix(aid, ref) {
+								if aid != "" && strings.HasPrefix(aid, needle) {
 									match = true
 									break
 								}
 							}
 						}
 					} else {
-						if id == ref {
+						if id == needle {
 							match = true
 						} else {
 							for _, a := range t.Attempts {
-								if strings.TrimSpace(a.ID) == ref {
+								if strings.TrimSpace(a.ID) == needle {
 									match = true
 									break
 								}
@@ -669,33 +680,236 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 			}
 
 			// Exact match first (prefer session workspace scope).
-			if matches := matchesByRef(sessionTasks, false); len(matches) == 1 {
-				return matches[0], true, ""
+			if matches := matchesByRef(sessionTasks, idRef, false); len(matches) == 1 {
+				return matches[0], true, "", nil
 			} else if len(matches) > 1 {
-				return taskqueue.Task{}, false, "ambiguous"
+				return taskqueue.Task{}, false, "ambiguous", matches
 			}
-			if sessionScoped {
-				if matches := matchesByRef(allTasks, false); len(matches) == 1 {
-					return matches[0], true, ""
+			if sessionScoped && idToken != "" {
+				if matches := matchesByRef(allTasks, idRef, false); len(matches) == 1 {
+					return matches[0], true, "", nil
 				} else if len(matches) > 1 {
-					return taskqueue.Task{}, false, "ambiguous"
+					return taskqueue.Task{}, false, "ambiguous", matches
 				}
 			}
 
 			// Prefix match (best-effort; prefer session workspace scope).
-			if matches := matchesByRef(sessionTasks, true); len(matches) == 1 {
-				return matches[0], true, ""
+			if matches := matchesByRef(sessionTasks, idRef, true); len(matches) == 1 {
+				return matches[0], true, "", nil
 			} else if len(matches) > 1 {
-				return taskqueue.Task{}, false, "ambiguous"
+				return taskqueue.Task{}, false, "ambiguous", matches
 			}
-			if sessionScoped {
-				if matches := matchesByRef(allTasks, true); len(matches) == 1 {
-					return matches[0], true, ""
+			if sessionScoped && idToken != "" {
+				if matches := matchesByRef(allTasks, idRef, true); len(matches) == 1 {
+					return matches[0], true, "", nil
 				} else if len(matches) > 1 {
-					return taskqueue.Task{}, false, "ambiguous"
+					return taskqueue.Task{}, false, "ambiguous", matches
 				}
 			}
-			return taskqueue.Task{}, false, "not_found"
+
+			// Agentic resolution: let the model map natural-language references to known tasks.
+			// Scope: prefer session workspace when bound.
+			scopeTasks := sessionTasks
+			if scopeTasks == nil {
+				scopeTasks = []taskqueue.Task{}
+			}
+
+			isRelevantForAction := func(t taskqueue.Task, action string) bool {
+				a := t.LatestAttempt()
+				if a == nil {
+					return false
+				}
+				switch strings.ToLower(strings.TrimSpace(action)) {
+				case "cancel":
+					switch a.Status {
+					case taskqueue.AttemptQueued, taskqueue.AttemptRunning,
+						taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
+						return true
+					default:
+						return false
+					}
+				case "resume":
+					switch a.Status {
+					case taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
+						return true
+					default:
+						return false
+					}
+				default:
+					return true
+				}
+			}
+
+			relevant := make([]taskqueue.Task, 0, len(scopeTasks))
+			for _, t := range scopeTasks {
+				if isRelevantForAction(t, action) {
+					relevant = append(relevant, t)
+				}
+			}
+			sort.Slice(relevant, func(i, j int) bool {
+				return relevant[i].UpdatedAt.After(relevant[j].UpdatedAt)
+			})
+			if len(relevant) > 40 {
+				relevant = relevant[:40]
+			}
+
+			suggestions := relevant
+			if len(suggestions) > 5 {
+				suggestions = suggestions[:5]
+			}
+
+			if o.ResolveModel == nil || len(relevant) == 0 {
+				return taskqueue.Task{}, false, "not_found", suggestions
+			}
+
+			client, _, err := o.ResolveModel(ctx, userID, "")
+			if err != nil || client == nil {
+				return taskqueue.Task{}, false, "not_found", suggestions
+			}
+
+			type cand struct {
+				ID        string `json:"id"`
+				Title     string `json:"title"`
+				Prompt    string `json:"prompt,omitempty"`
+				Status    string `json:"status"`
+				Error     string `json:"error,omitempty"`
+				UpdatedAt string `json:"updated_at,omitempty"`
+			}
+
+			deriveTitle := func(t taskqueue.Task) string {
+				title := strings.TrimSpace(t.Title)
+				if title != "" {
+					return title
+				}
+				return deriveTaskTitle(t.Prompt)
+			}
+			snippet := func(s string, maxRunes int) string {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					return ""
+				}
+				r := []rune(s)
+				if len(r) <= maxRunes {
+					return s
+				}
+				return string(r[:maxRunes]) + "…"
+			}
+
+			candidates := make([]cand, 0, len(relevant))
+			byID := make(map[string]taskqueue.Task, len(relevant))
+			for _, t := range relevant {
+				a := t.LatestAttempt()
+				if a == nil {
+					continue
+				}
+				id := strings.TrimSpace(t.ID)
+				if id == "" {
+					continue
+				}
+				byID[id] = t
+				errMsg := strings.TrimSpace(a.Error)
+				if errMsg == "" && a.Observer != nil {
+					errMsg = strings.TrimSpace(a.Observer.Reason)
+				}
+				candidates = append(candidates, cand{
+					ID:        id,
+					Title:     snippet(deriveTitle(t), 80),
+					Prompt:    snippet(t.Prompt, 120),
+					Status:    string(a.Status),
+					Error:     snippet(errMsg, 120),
+					UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
+				})
+			}
+
+			type resolution struct {
+				Match      string   `json:"match"`
+				TaskID     string   `json:"task_id,omitempty"`
+				Candidates []string `json:"candidates,omitempty"`
+			}
+
+			sys := strings.TrimSpace(`
+ONEAGENT_SECRETARY_TASK_REF_RESOLVER
+You resolve a user's natural-language task reference to a task id.
+Return ONLY a JSON object with:
+- match: "single" | "ambiguous" | "not_found"
+- task_id: string (when match="single")
+- candidates: string[] of task ids (when match="ambiguous")
+Rules:
+- Use ONLY ids from the provided candidates list.
+- If unsure, return match="ambiguous" with up to 3 candidate ids.
+`)
+
+			var ub strings.Builder
+			ub.WriteString("action: " + strings.ToLower(strings.TrimSpace(action)) + "\n")
+			ub.WriteString("ref: " + strings.TrimSpace(rawRef) + "\n")
+			ub.WriteString("candidates:\n")
+			for i, c := range candidates {
+				line, _ := json.Marshal(c)
+				ub.WriteString(fmt.Sprintf("%d) %s\n", i+1, string(line)))
+			}
+
+			temp := 0.0
+			maxTokens := 350
+			innerCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+
+			out, err := client.ChatCompletion(innerCtx, []llm.ChatMessage{
+				llm.BuildSystemMessage(sys),
+				llm.BuildUserMessage(strings.TrimSpace(ub.String())),
+			}, &llm.ChatCompletionOptions{
+				Temperature: &temp,
+				MaxTokens:   &maxTokens,
+			})
+			if err != nil {
+				return taskqueue.Task{}, false, "not_found", suggestions
+			}
+
+			obj, err := extractJSONObject(out)
+			if err != nil {
+				return taskqueue.Task{}, false, "not_found", suggestions
+			}
+
+			var res resolution
+			if err := json.Unmarshal([]byte(obj), &res); err != nil {
+				return taskqueue.Task{}, false, "not_found", suggestions
+			}
+
+			switch strings.ToLower(strings.TrimSpace(res.Match)) {
+			case "single":
+				id := strings.TrimSpace(res.TaskID)
+				if id == "" {
+					return taskqueue.Task{}, false, "not_found", suggestions
+				}
+				if t, ok := byID[id]; ok {
+					return t, true, "", nil
+				}
+				return taskqueue.Task{}, false, "not_found", suggestions
+			case "ambiguous":
+				var matches []taskqueue.Task
+				seen := make(map[string]struct{}, 4)
+				for _, id := range res.Candidates {
+					id = strings.TrimSpace(id)
+					if id == "" {
+						continue
+					}
+					if _, ok := seen[id]; ok {
+						continue
+					}
+					seen[id] = struct{}{}
+					if t, ok := byID[id]; ok {
+						matches = append(matches, t)
+					}
+					if len(matches) >= 3 {
+						break
+					}
+				}
+				if len(matches) == 0 {
+					return taskqueue.Task{}, false, "not_found", suggestions
+				}
+				return taskqueue.Task{}, false, "ambiguous", matches
+			default:
+				return taskqueue.Task{}, false, "not_found", suggestions
+			}
 		}
 
 		selectBulk := func(action string) ([]taskqueue.Task, string) {
@@ -749,14 +963,53 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 
 			var targets []taskqueue.Task
 			if ref != "" {
-				if t, ok, why := resolveByRef(ref); ok {
+				if t, ok, why, matches := resolveByRef(ref, act); ok {
 					targets = []taskqueue.Task{t}
 				} else {
+					label := func(t taskqueue.Task) string {
+						title := strings.TrimSpace(t.Title)
+						if title == "" {
+							title = deriveTaskTitle(t.Prompt)
+						}
+						id := strings.TrimSpace(t.ID)
+						if len(id) > 8 {
+							id = id[:8]
+						}
+						if id == "" {
+							return title
+						}
+						return fmt.Sprintf("%s（追踪号 %s）", title, id)
+					}
+
 					switch why {
 					case "ambiguous":
-						questions = append(questions, fmt.Sprintf("追踪号前缀「%s」匹配到多个任务，请发我更完整的追踪号。", ref))
+						var b strings.Builder
+						b.WriteString(fmt.Sprintf("「%s」匹配到多个任务，你指的是哪一个？\n", strings.TrimSpace(ref)))
+						limit := len(matches)
+						if limit > 3 {
+							limit = 3
+						}
+						for i := 0; i < limit; i++ {
+							b.WriteString(fmt.Sprintf("%d) %s\n", i+1, label(matches[i])))
+						}
+						b.WriteString("回复 1/2/3，或再补一句更具体的描述。")
+						questions = append(questions, strings.TrimSpace(b.String()))
 					default:
-						questions = append(questions, fmt.Sprintf("我没找到追踪号「%s」对应的任务，请确认追踪号（或发我更完整的 ID）。", ref))
+						var b strings.Builder
+						b.WriteString(fmt.Sprintf("我没法确定你说的「%s」是哪一个任务。\n", strings.TrimSpace(ref)))
+						if len(matches) > 0 {
+							limit := len(matches)
+							if limit > 3 {
+								limit = 3
+							}
+							for i := 0; i < limit; i++ {
+								b.WriteString(fmt.Sprintf("%d) %s\n", i+1, label(matches[i])))
+							}
+							b.WriteString("回复 1/2/3，或再补一句更具体的描述。")
+						} else {
+							b.WriteString("你可以再描述一下任务的标题/目的（例如“写 XX 文章的那个”），我就能帮你取消/继续。")
+						}
+						questions = append(questions, strings.TrimSpace(b.String()))
 					}
 					continue
 				}
@@ -1092,7 +1345,7 @@ func buildSecretaryTriagePlanTool() llm.Tool {
 								"action": map[string]any{"type": "string", "enum": []string{"cancel", "resume"}},
 								"task_id": map[string]any{
 									"type":        "string",
-									"description": "Optional. Full task id or short prefix. When omitted, apply to relevant tasks (prefer session workspace when bound; otherwise apply across all workspaces, best-effort).",
+									"description": "Optional. Full task id, short prefix, or a natural-language reference (e.g. '写XX文章的任务'). When omitted, apply to relevant tasks (prefer session workspace when bound; otherwise apply across all workspaces, best-effort).",
 								},
 								"review_notes": map[string]any{"type": "string"},
 							},

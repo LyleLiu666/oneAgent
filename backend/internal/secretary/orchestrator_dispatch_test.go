@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 )
@@ -557,5 +558,176 @@ func TestDispatchPlanAsSW_TaskActions_CancelByAttemptIDPrefix(t *testing.T) {
 	}
 	if len(got.CanceledTaskIDs) != 1 || got.CanceledTaskIDs[0] != created.ID {
 		t.Fatalf("expected canceled_task_ids [%q], got %+v (questions=%+v)", created.ID, got.CanceledTaskIDs, got.Questions)
+	}
+}
+
+type fakeLLMClient struct {
+	Respond func(messages []llm.ChatMessage) (string, error)
+	Calls   int
+}
+
+func (f *fakeLLMClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, _ *llm.ChatCompletionOptions) (string, error) {
+	_ = ctx
+	f.Calls++
+	if f.Respond == nil {
+		return "", nil
+	}
+	return f.Respond(messages)
+}
+
+func (f *fakeLLMClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, callback llm.StreamCallback) error {
+	out, err := f.ChatCompletion(ctx, messages, opts)
+	if err != nil {
+		return err
+	}
+	return callback(out)
+}
+
+func TestDispatchPlanAsSW_TaskActions_CancelByNaturalRef_UsesLLMResolver(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot: %v", err)
+	}
+
+	created, err := store.CreateTask("local", ws, "开发管理系统", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	client := &fakeLLMClient{
+		Respond: func(_ []llm.ChatMessage) (string, error) {
+			return fmt.Sprintf(`{"match":"single","task_id":%q}`, created.ID), nil
+		},
+	}
+	o := &Orchestrator{
+		Tasks:  store,
+		Runner: &taskqueue.TaskRunner{Store: store},
+		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
+			_, _, _ = ctx, userID, modelID
+			return client, "mock", nil
+		},
+	}
+	plan := triagePlan{
+		TaskActions: []triageTaskAction{{
+			Action: "cancel",
+			TaskID: "那个开发管理系统的任务",
+		}},
+	}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", ws, plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 1 || got.CanceledTaskIDs[0] != created.ID {
+		t.Fatalf("expected canceled_task_ids [%q], got %+v (questions=%+v)", created.ID, got.CanceledTaskIDs, got.Questions)
+	}
+	if client.Calls != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", client.Calls)
+	}
+}
+
+func TestDispatchPlanAsSW_TaskActions_CancelByNaturalRef_WithDigits_PreservesFullRef(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot: %v", err)
+	}
+
+	created, err := store.CreateTask("local", ws, "写2026文章", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	client := &fakeLLMClient{
+		Respond: func(messages []llm.ChatMessage) (string, error) {
+			lastUser := ""
+			for i := len(messages) - 1; i >= 0; i-- {
+				if messages[i].Role == "user" {
+					lastUser = messages[i].Content
+					break
+				}
+			}
+			if !strings.Contains(lastUser, "写2026文章的任务") {
+				return `{"match":"not_found"}`, nil
+			}
+			return fmt.Sprintf(`{"match":"single","task_id":%q}`, created.ID), nil
+		},
+	}
+	o := &Orchestrator{
+		Tasks:  store,
+		Runner: &taskqueue.TaskRunner{Store: store},
+		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
+			_, _, _ = ctx, userID, modelID
+			return client, "mock", nil
+		},
+	}
+	plan := triagePlan{TaskActions: []triageTaskAction{{Action: "cancel", TaskID: "写2026文章的任务"}}}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", ws, plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 1 || got.CanceledTaskIDs[0] != created.ID {
+		t.Fatalf("expected canceled_task_ids [%q], got %+v (questions=%+v)", created.ID, got.CanceledTaskIDs, got.Questions)
+	}
+}
+
+func TestDispatchPlanAsSW_TaskActions_AmbiguousNaturalRef_YieldsDisambiguationQuestion(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot: %v", err)
+	}
+
+	t1, err := store.CreateTask("local", ws, "开发管理系统 - backend", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	t2, err := store.CreateTask("local", ws, "开发管理系统 - frontend", "p2", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	client := &fakeLLMClient{
+		Respond: func(_ []llm.ChatMessage) (string, error) {
+			return fmt.Sprintf(`{"match":"ambiguous","candidates":[%q,%q]}`, t1.ID, t2.ID), nil
+		},
+	}
+	o := &Orchestrator{
+		Tasks:  store,
+		Runner: &taskqueue.TaskRunner{Store: store},
+		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
+			_, _, _ = ctx, userID, modelID
+			return client, "mock", nil
+		},
+	}
+	plan := triagePlan{TaskActions: []triageTaskAction{{Action: "cancel", TaskID: "那个开发管理系统的任务"}}}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", ws, plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 0 {
+		t.Fatalf("expected no canceled_task_ids, got %+v", got.CanceledTaskIDs)
+	}
+	joined := strings.Join(got.Questions, "\n")
+	if !strings.Contains(joined, "匹配到多个任务") {
+		t.Fatalf("expected ambiguous question, got %+v", got.Questions)
+	}
+	if !strings.Contains(joined, "backend") || !strings.Contains(joined, "frontend") {
+		t.Fatalf("expected candidate hints in question, got %+v", got.Questions)
 	}
 }
