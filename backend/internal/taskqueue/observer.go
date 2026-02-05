@@ -159,7 +159,7 @@ Return ONLY an XML block:
 	}
 
 	var temp float64 = 0
-	maxTokens := 600
+	maxTokens := 1200
 	opts := &llm.ChatCompletionOptions{
 		Model:       strings.TrimSpace(o.Model),
 		Temperature: &temp,
@@ -172,6 +172,54 @@ Return ONLY an XML block:
 	}
 	if maxParseRetries < 0 {
 		maxParseRetries = 0
+	}
+
+	// Prefer tool-calling structured output when supported by the client.
+	if client, ok := o.Client.(interface {
+		ChatCompletionWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error)
+	}); ok {
+		toolSpec := llm.Tool{
+			Type: "function",
+			Function: llm.ToolFunction{
+				Name:        "observer_decision",
+				Description: "Return the observer decision (pass/reason/evidence/next_steps/questions_for_user).",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"pass":   map[string]any{"type": "boolean"},
+						"reason": map[string]any{"type": "string"},
+						"evidence": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+						"next_steps": map[string]any{"type": "string"},
+						"questions_for_user": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+					},
+					"required": []string{"pass", "reason", "evidence", "next_steps", "questions_for_user"},
+				},
+			},
+		}
+
+		toolMsgs := append([]llm.ChatMessage(nil), messages...)
+		toolMsgs = append(toolMsgs, llm.BuildUserMessage(strings.TrimSpace(`
+请立刻调用 tool：observer_decision。
+要求：
+- 只通过 tool arguments 返回结构化字段，不要输出任何额外文本
+- 字段必须齐全：pass/reason/evidence/next_steps/questions_for_user
+`)))
+
+		toolOpts := *opts
+		toolOpts.Tools = []llm.Tool{toolSpec}
+
+		result, err := client.ChatCompletionWithTools(ctx, toolMsgs, &toolOpts)
+		if err == nil {
+			if decision, ok := parseObserverDecisionFromToolCalls(result.ToolCalls); ok {
+				return decision, nil
+			}
+		}
 	}
 
 	var lastErr error
@@ -218,6 +266,36 @@ Return ONLY a single XML block that matches exactly this schema (no code fences,
 	return ObserverDecision{}, lastErr
 }
 
+func parseObserverDecisionFromToolCalls(calls []llm.ToolCall) (ObserverDecision, bool) {
+	if len(calls) == 0 {
+		return ObserverDecision{}, false
+	}
+
+	for _, call := range calls {
+		name := strings.TrimSpace(call.Function.Name)
+		if name != "observer_decision" {
+			continue
+		}
+
+		raw := strings.TrimSpace(call.Function.Arguments)
+		if raw == "" {
+			continue
+		}
+
+		var d ObserverDecision
+		if err := json.Unmarshal([]byte(raw), &d); err == nil {
+			return d, true
+		}
+
+		if candidate := extractFirstJSONObject(raw); candidate != "" {
+			if err := json.Unmarshal([]byte(candidate), &d); err == nil {
+				return d, true
+			}
+		}
+	}
+	return ObserverDecision{}, false
+}
+
 func parseObserverDecision(out string) (ObserverDecision, error) {
 	raw := strings.TrimSpace(out)
 	var d ObserverDecision
@@ -254,6 +332,53 @@ func parseObserverDecision(out string) (ObserverDecision, error) {
 	}
 
 	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected XML or JSON): %q", truncateString(raw, 300))
+}
+
+func parseObserverPassValue(passText string) (bool, bool) {
+	passText = strings.TrimSpace(passText)
+	if passText == "" {
+		return false, false
+	}
+
+	lower := strings.ToLower(strings.TrimSpace(passText))
+	lower = strings.Trim(lower, "\"'`")
+	lower = strings.Trim(lower, " \t\r\n.,;:!?，。；：！？")
+	if lower == "" {
+		return false, false
+	}
+
+	switch lower {
+	case "true", "1", "yes", "y", "是", "pass", "passed", "ok", "success", "succeeded", "通过", "成功":
+		return true, true
+	case "false", "0", "no", "n", "否", "fail", "failed", "ng", "error", "不通过", "失败":
+		return false, true
+	}
+
+	// Tolerate truncated values when the model output is cut off mid-token.
+	if len(lower) >= 2 {
+		if strings.HasPrefix("true", lower) {
+			return true, true
+		}
+		if strings.HasPrefix("false", lower) {
+			return false, true
+		}
+		if strings.HasPrefix("pass", lower) {
+			return true, true
+		}
+		if strings.HasPrefix("fail", lower) {
+			return false, true
+		}
+	}
+
+	// Last resort: accept contains() to handle mild formatting noise (e.g. "true." or "fail (missing)").
+	if strings.Contains(lower, "true") || strings.Contains(lower, "pass") || strings.Contains(lower, "通过") || strings.Contains(lower, "成功") {
+		return true, true
+	}
+	if strings.Contains(lower, "false") || strings.Contains(lower, "fail") || strings.Contains(lower, "不通过") || strings.Contains(lower, "失败") {
+		return false, true
+	}
+
+	return false, false
 }
 
 func repairObserverDecisionXML(raw string) (string, bool) {
@@ -453,13 +578,8 @@ func parseObserverDecisionFromXML(raw string) (ObserverDecision, bool) {
 		return ObserverDecision{}, false
 	}
 
-	pass := false
-	switch strings.ToLower(passText) {
-	case "true", "1", "yes", "y", "是":
-		pass = true
-	case "false", "0", "no", "n", "否":
-		pass = false
-	default:
+	pass, ok := parseObserverPassValue(passText)
+	if !ok {
 		return ObserverDecision{}, false
 	}
 
@@ -507,13 +627,8 @@ func parseObserverDecisionFromTags(raw string) (ObserverDecision, bool) {
 		return ObserverDecision{}, false
 	}
 
-	pass := false
-	switch strings.ToLower(passText) {
-	case "true", "1", "yes", "y", "是":
-		pass = true
-	case "false", "0", "no", "n", "否":
-		pass = false
-	default:
+	pass, ok := parseObserverPassValue(passText)
+	if !ok {
 		return ObserverDecision{}, false
 	}
 
@@ -560,7 +675,7 @@ func parseObserverDecisionItems(raw string) []string {
 	return out
 }
 
-var reObserverPass = regexp.MustCompile(`(?im)\bpass\b\s*[:：]\s*(true|false)\b`)
+var reObserverPass = regexp.MustCompile(`(?im)\bpass\b\s*[:：]\s*(true|false|pass|fail|passed|failed|yes|no)\b`)
 var reMarkdownOrderedListPrefix = regexp.MustCompile(`^\s*\d+\s*[.)]\s+`)
 
 func parseObserverDecisionFromText(raw string) (ObserverDecision, bool) {
@@ -574,7 +689,10 @@ func parseObserverDecisionFromText(raw string) (ObserverDecision, bool) {
 		return ObserverDecision{}, false
 	}
 
-	pass := strings.EqualFold(strings.TrimSpace(match[1]), "true")
+	pass, ok := parseObserverPassValue(match[1])
+	if !ok {
+		return ObserverDecision{}, false
+	}
 	decision := ObserverDecision{Pass: pass}
 
 	decision.Reason = extractMarkdownSection(raw, []string{"理由", "Reason", "原因"})

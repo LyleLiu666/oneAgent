@@ -381,6 +381,48 @@ func TestTaskRunner_CancelRunning(t *testing.T) {
 	waitForStatus(t, store, taskA.ID, AttemptCanceled, 2*time.Second)
 }
 
+func TestTaskRunner_CancelFailedMarksCanceled(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	exec := &execStub{
+		t:              t,
+		artifactsDir:   t.TempDir(),
+		failIfNoResume: true,
+	}
+
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+		ExecuteAttempt: exec.Execute,
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	_ = runner.Enqueue(task.ID)
+	waitForStatus(t, store, task.ID, AttemptFailed, 2*time.Second)
+
+	updated, err := runner.Cancel(task.ID)
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if updated.LatestAttempt() == nil || updated.LatestAttempt().Status != AttemptCanceled {
+		t.Fatalf("expected canceled status after canceling failed attempt, got %+v", updated.LatestAttempt())
+	}
+}
+
 func TestTaskRunner_ResumeCreatesNewAttempt(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {

@@ -609,6 +609,11 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 		opts.Trace.OnStart(ctx, messages)
 	}
 
+	toolIndex := map[string]Tool{}
+	if opts != nil && len(opts.Tools) > 0 {
+		toolIndex = toolByName(opts.Tools)
+	}
+
 	var resp *http.Response
 	for attempt := 0; attempt < defaultAPIRetryAttempts; attempt++ {
 		reqMessages := messages
@@ -766,7 +771,7 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 
 		finalCalls := make([]ToolCall, 0, len(parsed.ToolCalls))
 		for _, call := range parsed.ToolCalls {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], call.Function.Arguments)
 			finalCalls = append(finalCalls, call)
 		}
 
@@ -947,9 +952,9 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			continue
 		}
 		if builder, ok := toolArgs[idx]; ok {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], builder.String())
 		} else {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], call.Function.Arguments)
 		}
 		finalCalls = append(finalCalls, *call)
 	}

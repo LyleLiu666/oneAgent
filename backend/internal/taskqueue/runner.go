@@ -211,8 +211,9 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 		return Task{}, errors.New("task has no attempts")
 	}
 	attemptID := latest.ID
+	latestStatus := latest.Status
 
-	switch latest.Status {
+	switch latestStatus {
 	case AttemptQueued:
 		now := Now()
 		updated, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
@@ -248,6 +249,30 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 			Message:   "Cancel requested",
 		})
 		return task, nil
+
+	case AttemptFailed, AttemptLimitExceeded, AttemptTimedOut, AttemptInterrupted:
+		now := Now()
+		updated, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
+			a := tk.LatestAttempt()
+			if a == nil || a.ID != attemptID || a.Status != latestStatus {
+				return nil
+			}
+			a.Status = AttemptCanceled
+			if a.FinishedAt == nil {
+				a.FinishedAt = &now
+			}
+			return nil
+		})
+		if err != nil {
+			return Task{}, err
+		}
+		_ = r.Store.AppendEvent(Event{
+			TaskID:    taskID,
+			AttemptID: attemptID,
+			Type:      "attempt.canceled",
+			Message:   "Attempt canceled after failure",
+		})
+		return updated, nil
 
 	default:
 		return task, nil

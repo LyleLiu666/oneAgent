@@ -246,6 +246,85 @@ func TestDispatchPlanAsSW_TaskActions_ResumeBulkInSessionWorkspace(t *testing.T)
 	}
 }
 
+func TestDispatchPlanAsSW_TaskActions_CancelBulk_InferWorkspaceWhenUnset(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot: %v", err)
+	}
+	_, err = store.UpdateGovernance(func(g *taskqueue.QueueGovernance) error {
+		if g.Workspaces == nil {
+			g.Workspaces = map[string]taskqueue.WorkspacePolicy{}
+		}
+		p := g.Workspaces[ws]
+		p.Paused = true
+		g.Workspaces[ws] = p
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateGovernance: %v", err)
+	}
+
+	runner := &taskqueue.TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true}, nil
+		},
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, resumedFrom *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("runner.Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	t1, err := store.CreateTask("local", ws, "t1", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask(t1): %v", err)
+	}
+	t2, err := store.CreateTask("local", ws, "t2", "p2", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask(t2): %v", err)
+	}
+
+	o := &Orchestrator{Tasks: store, Runner: runner}
+	plan := triagePlan{
+		TaskActions: []triageTaskAction{{Action: "cancel"}},
+	}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", "", plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 2 {
+		t.Fatalf("expected 2 canceled_task_ids, got %+v", got.CanceledTaskIDs)
+	}
+	joined := strings.Join(got.CanceledTaskIDs, ",")
+	if !strings.Contains(joined, t1.ID) || !strings.Contains(joined, t2.ID) {
+		t.Fatalf("expected canceled_task_ids to include %q and %q, got %+v", t1.ID, t2.ID, got.CanceledTaskIDs)
+	}
+
+	updated1, err := store.GetTask(t1.ID)
+	if err != nil {
+		t.Fatalf("GetTask(t1): %v", err)
+	}
+	updated2, err := store.GetTask(t2.ID)
+	if err != nil {
+		t.Fatalf("GetTask(t2): %v", err)
+	}
+	if updated1.LatestAttempt() == nil || updated1.LatestAttempt().Status != taskqueue.AttemptCanceled {
+		t.Fatalf("expected t1 canceled, got %+v", updated1.LatestAttempt())
+	}
+	if updated2.LatestAttempt() == nil || updated2.LatestAttempt().Status != taskqueue.AttemptCanceled {
+		t.Fatalf("expected t2 canceled, got %+v", updated2.LatestAttempt())
+	}
+}
+
 func TestDispatchPlanAsSW_TaskActions_CancelDoesNotReportNonCancelableTask(t *testing.T) {
 	store, err := taskqueue.NewStore(t.TempDir())
 	if err != nil {

@@ -59,6 +59,28 @@ func (c *sequenceLLMClient) ChatCompletionStream(ctx context.Context, messages [
 	return errors.New("streaming not implemented in sequenceLLMClient")
 }
 
+type stubToolLLMClient struct {
+	result llm.ChatCompletionResult
+	err    error
+
+	lastMessages []llm.ChatMessage
+	lastOpts     *llm.ChatCompletionOptions
+}
+
+func (c *stubToolLLMClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	return "", errors.New("ChatCompletion not implemented in stubToolLLMClient")
+}
+
+func (c *stubToolLLMClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, callback llm.StreamCallback) error {
+	return errors.New("streaming not implemented in stubToolLLMClient")
+}
+
+func (c *stubToolLLMClient) ChatCompletionWithTools(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+	c.lastMessages = messages
+	c.lastOpts = opts
+	return c.result, c.err
+}
+
 func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	dir := t.TempDir()
 	findings := filepath.Join(dir, "FINDINGS.md")
@@ -308,5 +330,70 @@ func TestOutcomeObserver_Decide_RetriesWhenObserverOutputInvalid(t *testing.T) {
 	}
 	if client.callCount != 2 {
 		t.Fatalf("expected 2 ChatCompletion calls, got %d", client.callCount)
+	}
+}
+
+func TestOutcomeObserver_Decide_ParsesToolCallDecision(t *testing.T) {
+	client := &stubToolLLMClient{
+		result: llm.ChatCompletionResult{
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "observer_decision",
+						Arguments: `{"pass":true,"reason":"done","evidence":["FINDINGS.md"],"next_steps":"","questions_for_user":[]}`,
+					},
+				},
+			},
+		},
+	}
+
+	obs := &OutcomeObserver{Client: client}
+	got, err := obs.Decide(context.Background(), ObserveInput{
+		TaskID:        "task-1",
+		AttemptID:     "attempt-1",
+		WorkspaceRoot: "/tmp/ws",
+		Prompt:        "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if !got.Pass || got.Reason != "done" || len(got.Evidence) != 1 {
+		t.Fatalf("unexpected decision: %+v", got)
+	}
+	if client.lastOpts == nil || len(client.lastOpts.Tools) == 0 {
+		t.Fatalf("expected tool calling options to be provided")
+	}
+}
+
+func TestParseObserverDecision_AcceptsPassFailSynonyms(t *testing.T) {
+	raw := "<observer_decision><pass>fail</pass><reason>missing evidence</reason><next_steps>run tests</next_steps></observer_decision>"
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+
+	raw = "<observer_decision><pass>passed</pass><reason>ok</reason><next_steps></next_steps></observer_decision>"
+	got, err = parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if !got.Pass {
+		t.Fatalf("expected pass=true, got %+v", got)
+	}
+}
+
+func TestParseObserverDecision_ToleratesTruncatedPassValue(t *testing.T) {
+	raw := "<observer_decision><pass>fa</pass><reason>x</reason><next_steps>y</next_steps></observer_decision>"
+	got, err := parseObserverDecision(raw)
+	if err != nil {
+		t.Fatalf("parseObserverDecision: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
 	}
 }

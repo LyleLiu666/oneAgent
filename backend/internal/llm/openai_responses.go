@@ -301,6 +301,11 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 		opts.Trace.OnStart(ctx, messages)
 	}
 
+	toolIndex := map[string]Tool{}
+	if opts != nil && len(opts.Tools) > 0 {
+		toolIndex = toolByName(opts.Tools)
+	}
+
 	defaultMaxTokens := 8192
 	instructions, input := buildResponsesInstructionsAndInput(messages)
 	reqBody := responsesRequest{
@@ -614,9 +619,9 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 			continue
 		}
 		if builder, ok := toolArgsByID[callID]; ok && builder != nil {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], builder.String())
 		} else {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], call.Function.Arguments)
 		}
 		finalCalls = append(finalCalls, *call)
 	}

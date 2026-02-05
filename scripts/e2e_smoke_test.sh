@@ -24,6 +24,10 @@ cleanup() {
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
     wait "${SERVER_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${MOCK_LLM_PID:-}" ]]; then
+    kill "${MOCK_LLM_PID}" >/dev/null 2>&1 || true
+    wait "${MOCK_LLM_PID}" >/dev/null 2>&1 || true
+  fi
   rm -rf "${HOME_DIR}"
 }
 trap cleanup EXIT
@@ -151,5 +155,168 @@ assert isinstance(gen, list), gen
 print("[e2e] POST /api/ledger/sop_suggestions/generate OK")
 PY
 curl -sSf "http://127.0.0.1:${PORT}/" | head -n 2 >/dev/null
+
+echo "[e2e] start mock llm (for secretary triage)"
+MOCK_LLM_PORT_FILE="${HOME_DIR}/mock_llm_port"
+MOCK_LLM_LOG="${HOME_DIR}/mock_llm.log"
+MOCK_LLM_PORT_FILE="${MOCK_LLM_PORT_FILE}" python3 - <<'PY' >"${MOCK_LLM_LOG}" 2>&1 &
+import json
+import os
+import re
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+port_file = os.environ["MOCK_LLM_PORT_FILE"]
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        return
+
+    def do_POST(self):
+        if self.path != "/chat/completions":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        try:
+            req = json.loads(body.decode("utf-8"))
+        except Exception:
+            self.send_response(400)
+            self.end_headers()
+            return
+
+        messages = req.get("messages") or []
+        system = ""
+        combined = []
+        for m in messages:
+            if (m.get("role") == "system") and not system:
+                system = str(m.get("content") or "")
+            combined.append(str(m.get("content") or ""))
+        combined_text = "\n".join(combined)
+
+        if "ONEAGENT_SECRETARY_ACK" in system:
+            self.send_response(400)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"unexpected ack request (quick-ack is disabled)")
+            return
+
+        if "ONEAGENT_SECRETARY_TRIAGE" not in system:
+            self.send_response(400)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"unexpected system prompt")
+            return
+
+        # Use bulk cancel (no task_id) so we don't depend on short IDs being unique.
+        task_actions = [{"action": "cancel"}]
+        summary = "我已经把当前这条线上的任务都关掉了（相当于取消，不删证据）。"
+
+        args = {
+            "intent": "dispatch",
+            "summary_message": summary,
+            "tasks": [],
+            "task_actions": task_actions,
+            "questions": [],
+        }
+
+        resp = {
+            "id": "cmpl-test",
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "secretary_triage_plan",
+                                    "arguments": json.dumps(args, ensure_ascii=False),
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+
+        payload = json.dumps(resp, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+httpd = HTTPServer(("127.0.0.1", 0), Handler)
+with open(port_file, "w", encoding="utf-8") as f:
+    f.write(str(httpd.server_port))
+httpd.serve_forever()
+PY
+MOCK_LLM_PID=$!
+
+for _ in $(seq 1 50); do
+  if [[ -s "${MOCK_LLM_PORT_FILE}" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+MOCK_LLM_PORT="$(cat "${MOCK_LLM_PORT_FILE}")"
+
+PORT="${PORT}" MOCK_LLM_PORT="${MOCK_LLM_PORT}" python3 - <<'PY'
+import json
+import os
+import urllib.request
+
+port = os.environ["PORT"]
+mock_port = os.environ["MOCK_LLM_PORT"]
+base = f"http://127.0.0.1:{port}"
+
+def post(path, obj):
+    req = urllib.request.Request(
+        base + path,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+        data=json.dumps(obj).encode("utf-8"),
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+provider = post(
+    "/api/llm/providers",
+    {
+        "name": "mock-e2e",
+        "provider_type": "openai",
+        "base_url": f"http://127.0.0.1:{mock_port}",
+        "api_key": "sk-test",
+    },
+)
+post(
+    "/api/llm/models",
+    {
+        "provider_id": provider.get("id"),
+        "name": "mock-model",
+        "model": "gpt-test",
+        "is_default": True,
+    },
+)
+print("[e2e] secretary LLM configured")
+PY
+
+echo "[e2e] ui smoke (playwright)"
+cd "${ROOT_DIR}/frontend"
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+  npx playwright install --with-deps chromium >/dev/null
+else
+  npx playwright install chromium >/dev/null
+fi
+
+PLAYWRIGHT_BASE_URL="http://127.0.0.1:${PORT}" \
+  ONEAGENT_E2E_WORKSPACE="${WS_DIR}" \
+  npm run test:e2e -- --project=chromium --grep smoke
 
 echo "[e2e] OK"

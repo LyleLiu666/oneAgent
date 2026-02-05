@@ -387,6 +387,99 @@ func TestServer_SecretaryTriage_ProgressQuery_ReturnsWorkspaceStats(t *testing.T
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
+	// Mock OpenAI-compatible endpoint and configure a default model, since secretary triage must be LLM-driven.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		system := ""
+		all := strings.Builder{}
+		for _, m := range req.Messages {
+			if m.Role == "system" && system == "" {
+				system = m.Content
+			}
+			all.WriteString(m.Content)
+			all.WriteString("\n")
+		}
+
+		switch {
+		case strings.Contains(system, "ONEAGENT_SECRETARY_ACK"):
+			http.Error(w, "unexpected ack request (quick-ack is disabled)", http.StatusBadRequest)
+			return
+		case strings.Contains(system, "ONEAGENT_SECRETARY_TRIAGE"):
+			combined := all.String()
+			if !strings.Contains(combined, "排队 1") {
+				http.Error(w, "missing queued-count snapshot", http.StatusBadRequest)
+				return
+			}
+			if !strings.Contains(combined, "一共有") || !strings.Contains(combined, "文件") || !strings.Contains(combined, "字") {
+				http.Error(w, "missing workspace stats snapshot", http.StatusBadRequest)
+				return
+			}
+
+			args := `{"intent":"progress","summary_message":"排队 1。这个文件夹一共有 1 个文件，约 12000 字。","tasks":[],"task_actions":[],"questions":[]}`
+			resp := map[string]any{
+				"id": "cmpl-test",
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role":    "assistant",
+							"content": "",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "call_1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "secretary_triage_plan",
+										"arguments": args,
+									},
+								},
+							},
+						},
+						"finish_reason": "stop",
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		default:
+			http.Error(w, "unexpected system prompt", http.StatusBadRequest)
+			return
+		}
+	}))
+	t.Cleanup(mock.Close)
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
+
 	var inboxResp struct {
 		SessionID string `json:"session_id"`
 	}
@@ -478,6 +571,99 @@ func TestServer_SecretaryTriage_ProgressQuery_NoWorkspace_StillReturnsStats(t *t
 	}
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
+
+	// Mock OpenAI-compatible endpoint and configure a default model, since secretary triage must be LLM-driven.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		system := ""
+		all := strings.Builder{}
+		for _, m := range req.Messages {
+			if m.Role == "system" && system == "" {
+				system = m.Content
+			}
+			all.WriteString(m.Content)
+			all.WriteString("\n")
+		}
+
+		switch {
+		case strings.Contains(system, "ONEAGENT_SECRETARY_ACK"):
+			http.Error(w, "unexpected ack request (quick-ack is disabled)", http.StatusBadRequest)
+			return
+		case strings.Contains(system, "ONEAGENT_SECRETARY_TRIAGE"):
+			combined := all.String()
+			if !strings.Contains(combined, "排队 1") {
+				http.Error(w, "missing queued-count snapshot", http.StatusBadRequest)
+				return
+			}
+			if !strings.Contains(combined, "一共有") || !strings.Contains(combined, "文件") || !strings.Contains(combined, "字") {
+				http.Error(w, "missing workspace stats snapshot", http.StatusBadRequest)
+				return
+			}
+
+			args := `{"intent":"progress","summary_message":"排队 1。这个文件夹一共有 1 个文件，约 12000 字。","tasks":[],"task_actions":[],"questions":[]}`
+			resp := map[string]any{
+				"id": "cmpl-test",
+				"choices": []any{
+					map[string]any{
+						"message": map[string]any{
+							"role":    "assistant",
+							"content": "",
+							"tool_calls": []any{
+								map[string]any{
+									"id":   "call_1",
+									"type": "function",
+									"function": map[string]any{
+										"name":      "secretary_triage_plan",
+										"arguments": args,
+									},
+								},
+							},
+						},
+						"finish_reason": "stop",
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		default:
+			http.Error(w, "unexpected system prompt", http.StatusBadRequest)
+			return
+		}
+	}))
+	t.Cleanup(mock.Close)
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
 
 	var inboxResp struct {
 		SessionID string `json:"session_id"`

@@ -87,7 +87,7 @@ func (c *promptAssertingClient) ChatCompletionStream(ctx context.Context, messag
 	return errors.New("not implemented")
 }
 
-func TestTriage_ProgressQuestion_UsesTaskSnapshot_AndReturnsDeterministicProgressReply(t *testing.T) {
+func TestTriage_ProgressQuestion_UsesTaskSnapshot_AndUsesLLMSummary(t *testing.T) {
 	sessions, err := sessionstore.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("new sessionstore: %v", err)
@@ -148,18 +148,15 @@ func TestTriage_ProgressQuestion_UsesTaskSnapshot_AndReturnsDeterministicProgres
 	if got := strings.TrimSpace(triaged.SummaryMessage); got == "" {
 		t.Fatalf("expected triage summary to be non-empty")
 	}
-	if !strings.Contains(triaged.SummaryMessage, "我查了下：运行") {
-		t.Fatalf("expected deterministic progress reply, got %q", triaged.SummaryMessage)
-	}
-	if !strings.Contains(triaged.SummaryMessage, running.Title) {
-		t.Fatalf("expected progress reply to include running task title, got %q", triaged.SummaryMessage)
+	if !strings.Contains(triaged.SummaryMessage, "ok") {
+		t.Fatalf("expected triage summary to come from LLM plan, got %q", triaged.SummaryMessage)
 	}
 	if !client.called {
 		t.Fatalf("expected SW client to be called")
 	}
 }
 
-func TestTriage_WhenLLMUnavailable_ReturnsProgressSnapshot(t *testing.T) {
+func TestTriage_WhenLLMUnavailable_ReturnsError(t *testing.T) {
 	sessions, err := sessionstore.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("new sessionstore: %v", err)
@@ -196,17 +193,11 @@ func TestTriage_WhenLLMUnavailable_ReturnsProgressSnapshot(t *testing.T) {
 	}
 
 	triaged, err := o.Triage(context.Background(), "local", "session-1", nil)
-	if err != nil {
-		t.Fatalf("Triage: %v", err)
+	if err == nil {
+		t.Fatalf("expected triage to fail without ResolveModel/LLM")
 	}
-	if got := strings.TrimSpace(triaged.SummaryMessage); got == "" {
-		t.Fatalf("expected triage summary to be non-empty")
-	}
-	if !strings.Contains(triaged.SummaryMessage, "我查了下：运行") {
-		t.Fatalf("expected progress snapshot reply, got %q", triaged.SummaryMessage)
-	}
-	if !strings.Contains(triaged.SummaryMessage, running.Title) {
-		t.Fatalf("expected progress snapshot to include running task title, got %q", triaged.SummaryMessage)
+	if triaged.SummaryMessage != "" {
+		t.Fatalf("expected no summary message on error, got %q", triaged.SummaryMessage)
 	}
 }
 

@@ -315,6 +315,11 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 		opts.Trace.OnStart(ctx, messages)
 	}
 
+	toolIndex := map[string]Tool{}
+	if opts != nil && len(opts.Tools) > 0 {
+		toolIndex = toolByName(opts.Tools)
+	}
+
 	system, anthropicMessages := buildAnthropicPayload(messages, opts != nil && opts.EnablePromptCache)
 	maxTokens := 8192
 	if opts != nil && opts.MaxTokens != nil {
@@ -535,9 +540,9 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 			continue
 		}
 		if builder, ok := toolArgs[idx]; ok {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(builder.String()))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], builder.String())
 		} else {
-			call.Function.Arguments = SanitizeToolArgumentsJSON(normalizeToolArguments(call.Function.Arguments))
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], call.Function.Arguments)
 		}
 		finalCalls = append(finalCalls, *call)
 	}

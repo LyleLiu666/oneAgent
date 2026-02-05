@@ -47,7 +47,10 @@ func TestSecretaryDispatchSystemPromptSW_QuestionsAreHardBlockersAndLimited(t *t
 	if !strings.Contains(prompt, "task_actions") {
 		t.Fatalf("expected SW prompt to mention task_actions, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "不允许 delete") && !strings.Contains(prompt, "绝不 delete") {
-		t.Fatalf("expected SW prompt to disallow delete, got %q", prompt)
+	if !strings.Contains(prompt, "delete") {
+		t.Fatalf("expected SW prompt to mention delete guidance, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "不允许 delete") && !strings.Contains(prompt, "绝不 delete") && !strings.Contains(prompt, "不做物理 delete") {
+		t.Fatalf("expected SW prompt to disallow physical delete, got %q", prompt)
 	}
 }

@@ -327,62 +327,6 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	// SW: dispatch planning + worker coordination (best-effort).
 	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
 	if err != nil {
-		// Best-effort fallback: some deployments/tests may not have an LLM configured for secretary triage.
-		// If we have a non-empty progress snapshot, answer with it instead of failing hard.
-		if progressSnapshotHasWork(progressSnapshot) {
-			summaryMsg, persistErr := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
-				Role:    model.MessageRoleAssistant,
-				Type:    model.MessageTypeText,
-				Content: progressSnapshot,
-			})
-			if persistErr != nil {
-				return TriageResult{}, persistErr
-			}
-
-			state.CursorMessageID = toID
-			state.TriageRuns = append(state.TriageRuns, TriageRun{
-				FromCursor:        cursor,
-				ToMessageID:       toID,
-				InputMessageIDs:   messageIDs(newUserMsgs),
-				SummaryMessageID:  summaryMsg.ID,
-				SummaryMessage:    progressSnapshot,
-				CreatedTaskIDs:    []string{},
-				CanceledTaskIDs:   []string{},
-				ResumedTaskIDs:    []string{},
-				Questions:         []string{},
-				WorkspacesCreated: []string{},
-				CreatedAt:         time.Now().UTC(),
-			})
-			if len(state.TriageRuns) > 20 {
-				state.TriageRuns = state.TriageRuns[len(state.TriageRuns)-20:]
-			}
-
-			meta := upsertState(session.Metadata, state)
-			_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
-
-			if o.Memory != nil {
-				_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
-					PrincipalID: userID,
-					Writer:      "SU",
-					Type:        "findings",
-					Workspace:   sessionWorkspace,
-					Title:       "progress_reply_fallback",
-					Content:     progressSnapshot,
-				})
-			}
-
-			return TriageResult{
-				SummaryMessage:    progressSnapshot,
-				SummaryMessageID:  summaryMsg.ID,
-				CursorMessageID:   state.CursorMessageID,
-				CreatedTaskIDs:    []string{},
-				CanceledTaskIDs:   []string{},
-				ResumedTaskIDs:    []string{},
-				Questions:         []string{},
-				WorkspacesCreated: []string{},
-			}, nil
-		}
-
 		return TriageResult{}, err
 	}
 
@@ -409,17 +353,11 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	questions := dispatch.Questions
 	workspacesCreated := dispatch.WorkspacesCreated
 
-	summary := ""
-	intent := strings.ToLower(strings.TrimSpace(plan.Intent))
-	if intent == "progress" && progressSnapshotHasWork(progressSnapshot) {
-		summary = progressSnapshot
-	} else {
-		summary = buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
-		if len(createdTaskIDs) > 0 || len(canceledTaskIDs) > 0 || len(resumedTaskIDs) > 0 || len(questions) > 0 {
-			if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
-				if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
-					summary = trimmed
-				}
+	summary := buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
+	if len(createdTaskIDs) > 0 || len(canceledTaskIDs) > 0 || len(resumedTaskIDs) > 0 || len(questions) > 0 {
+		if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
+			if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
+				summary = trimmed
 			}
 		}
 	}
@@ -533,6 +471,50 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 			sessionScoped = true
 		}
 
+		inferBulkWorkspace := func(action string) string {
+			action = strings.ToLower(strings.TrimSpace(action))
+			if action == "" {
+				return ""
+			}
+
+			uniq := make(map[string]struct{}, 2)
+			for _, t := range allTasks {
+				ws := strings.TrimSpace(t.Workspace)
+				if ws == "" {
+					continue
+				}
+				a := t.LatestAttempt()
+				if a == nil {
+					continue
+				}
+
+				switch action {
+				case "cancel":
+					switch a.Status {
+					case taskqueue.AttemptQueued, taskqueue.AttemptRunning,
+						taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
+						uniq[ws] = struct{}{}
+					}
+				case "resume":
+					switch a.Status {
+					case taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded, taskqueue.AttemptTimedOut, taskqueue.AttemptInterrupted:
+						uniq[ws] = struct{}{}
+					}
+				}
+
+				if len(uniq) > 1 {
+					return ""
+				}
+			}
+			if len(uniq) != 1 {
+				return ""
+			}
+			for ws := range uniq {
+				return ws
+			}
+			return ""
+		}
+
 		resolveByRef := func(ref string) (taskqueue.Task, bool, string) {
 			ref = strings.TrimSpace(ref)
 			if ref == "" {
@@ -580,6 +562,15 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 
 		selectBulk := func(action string) ([]taskqueue.Task, string) {
 			if strings.TrimSpace(sessionWorkspace) == "" {
+				if inferred := inferBulkWorkspace(action); inferred != "" {
+					if inWS, err := o.Tasks.ListTasks(userID, inferred); err == nil {
+						sessionWorkspace = inferred
+						sessionTasks = inWS
+						sessionScoped = true
+					}
+				}
+			}
+			if strings.TrimSpace(sessionWorkspace) == "" {
 				return nil, "missing_workspace"
 			}
 			if sessionTasks == nil {
@@ -594,7 +585,8 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 				}
 				switch strings.ToLower(strings.TrimSpace(action)) {
 				case "cancel":
-					if a.Status == taskqueue.AttemptQueued || a.Status == taskqueue.AttemptRunning {
+					if a.Status == taskqueue.AttemptQueued || a.Status == taskqueue.AttemptRunning ||
+						a.Status == taskqueue.AttemptFailed || a.Status == taskqueue.AttemptLimitExceeded || a.Status == taskqueue.AttemptTimedOut || a.Status == taskqueue.AttemptInterrupted {
 						out = append(out, t)
 					}
 				case "resume":
@@ -669,7 +661,7 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 						continue
 					}
 					if latest.Status != taskqueue.AttemptCanceled && latest.Status != taskqueue.AttemptRunning {
-						questions = append(questions, fmt.Sprintf("任务「%s」当前状态为 %q，取消未生效（仅 queued/running 可取消）。", strings.TrimSpace(t.ID), latest.Status))
+						questions = append(questions, fmt.Sprintf("任务「%s」当前状态为 %q，取消未生效（仅 queued/running 及失败态可取消）。", strings.TrimSpace(t.ID), latest.Status))
 						continue
 					}
 					canceledTaskIDs = append(canceledTaskIDs, t.ID)
@@ -2253,7 +2245,7 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 	case running > 0 || queued > 0:
 		b.WriteString("我会继续盯着，有更新再告诉你。")
 	case needsAttention > 0:
-		b.WriteString("你也可以点「查看 Trace」看看卡在哪一步，然后把报错贴给我，我帮你继续处理。")
+		b.WriteString("你也可以点「查看 Trace」看看卡在哪一步，然后把报错贴给我，我帮你继续处理。要是这些都不要了，也可以告诉我你想取消哪些任务（或全部取消），我会把它们关掉（相当于取消，不删证据）。")
 	case succeeded > 0:
 		b.WriteString("你也可以点「查看 Trace」或打开 findings/diff 看产出细节。")
 	default:
@@ -2328,7 +2320,7 @@ ONEAGENT_SECRETARY_TRIAGE
 # Output Protocol (最高优先级)
 - 绝对禁止输出任何自然语言闲聊或 Markdown 正文。
 - 必须且只能通过 Tool Call（secretary_triage_plan）或 XML Tags（<secretary_triage_plan>）返回结构化数据。
-- 结构包含：intent（意图归类）、summary_message（给用户看的话）、tasks（后台工单，包含每个 task 的 workspace_strategy）、task_actions（对已有任务的 cancel/resume；绝不 delete）、questions（阻塞问题）。
+- 结构包含：intent（意图归类）、summary_message（给用户看的话）、tasks（后台工单，包含每个 task 的 workspace_strategy）、task_actions（对已有任务的 cancel/resume；不做物理 delete，用户说“删掉”默认用 cancel 关闭任务）、questions（阻塞问题）。
 
 # Core Operating Rules (8条核心硬规则)
 
@@ -2343,7 +2335,7 @@ ONEAGENT_SECRETARY_TRIAGE
 3. 读写分权 (Read/Write Separation)
    - 你只读：用工具看代码、查日志、读文档。
    - Worker 写：任何涉及新建文件、修改代码、删除资源、跑耗时测试的操作，必须封装进 tasks[]。
-   - 你可以调整任务队列：仅允许在 task_actions[] 里发起 cancel/resume；不允许 delete。
+   - 你可以调整任务队列：仅允许在 task_actions[] 里发起 cancel/resume；不做物理 delete，用户说“删掉”默认用 cancel 关闭任务。
 
 4. 创作交付分级 (Creation Delivery)
    - 短内容（<300字/大纲/小样）：直接在 summary_message 中输出，给用户即时反馈。

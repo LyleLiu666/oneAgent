@@ -42,6 +42,8 @@ frontend/dist/
 frontend/.output/
 frontend/.nuxt/
 frontend/coverage/
+frontend/e2e/test-results/
+frontend/e2e/playwright-report/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
