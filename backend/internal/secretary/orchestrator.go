@@ -513,13 +513,25 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 				return ws
 			}
 			return ""
-		}
-
-		resolveByRef := func(ref string, action string) (taskqueue.Task, bool, string, []taskqueue.Task) {
-			rawRef := strings.TrimSpace(ref)
-			if rawRef == "" {
-				return taskqueue.Task{}, false, "", nil
 			}
+
+			// Design principle (Secretary agentic): LLM-first semantics.
+			//
+			// `task_actions[].task_id` may be a natural-language reference (e.g. "取消那个开发管理系统的任务").
+			// Orchestrator code should avoid rules-first heuristics that "guess" what the user meant.
+			// Instead: build a candidate set within hard safety boundaries (same user/workspace, action-relevant),
+			// ask the LLM to resolve single/ambiguous/not_found, and only do validation/permission checks here.
+			//
+			// See docs/secretary-agentic-design-review.md ("语义解析同样必须 LLM-first").
+			//
+			// NOTE: The current implementation still contains deterministic ID/prefix matching fast-paths
+			// (token extraction, exact/prefix match). These convenience heuristics are kept for now, but
+			// they are not aligned with the LLM-first principle.
+			resolveByRef := func(ref string, action string) (taskqueue.Task, bool, string, []taskqueue.Task) {
+				rawRef := strings.TrimSpace(ref)
+				if rawRef == "" {
+					return taskqueue.Task{}, false, "", nil
+				}
 
 			// Extract a best-effort opaque ID token when present (users/LLMs may wrap it in brackets).
 			// For natural-language references, keep the original string so we can resolve semantically.
