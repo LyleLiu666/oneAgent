@@ -138,6 +138,8 @@ func (h *SecretaryHandler) Triage(c *gin.Context) {
 		"summary_message_id": res.SummaryMessageID,
 		"cursor_message_id":  res.CursorMessageID,
 		"created_task_ids":   res.CreatedTaskIDs,
+		"canceled_task_ids":  res.CanceledTaskIDs,
+		"resumed_task_ids":   res.ResumedTaskIDs,
 		"questions":          res.Questions,
 		"workspaces_created": res.WorkspacesCreated,
 	})

@@ -43,7 +43,7 @@ func (c contextAssertingClient) ChatCompletionWithTools(ctx context.Context, mes
 					Type: "function",
 					Function: llm.ToolCallFunction{
 						Name:      "secretary_triage_plan",
-						Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"questions":[]}`,
+						Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"task_actions":[],"questions":[]}`,
 					},
 				},
 			},

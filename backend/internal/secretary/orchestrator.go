@@ -291,6 +291,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 			SummaryMessageID:  0,
 			CursorMessageID:   cursor,
 			CreatedTaskIDs:    []string{},
+			CanceledTaskIDs:   []string{},
+			ResumedTaskIDs:    []string{},
 			Questions:         []string{},
 			WorkspacesCreated: []string{},
 		}, nil
@@ -303,6 +305,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 			SummaryMessageID:  run.SummaryMessageID,
 			CursorMessageID:   state.CursorMessageID,
 			CreatedTaskIDs:    append([]string{}, run.CreatedTaskIDs...),
+			CanceledTaskIDs:   append([]string{}, run.CanceledTaskIDs...),
+			ResumedTaskIDs:    append([]string{}, run.ResumedTaskIDs...),
 			Questions:         append([]string{}, run.Questions...),
 			WorkspacesCreated: append([]string{}, run.WorkspacesCreated...),
 		}, nil
@@ -343,6 +347,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 				SummaryMessageID:  summaryMsg.ID,
 				SummaryMessage:    progressSnapshot,
 				CreatedTaskIDs:    []string{},
+				CanceledTaskIDs:   []string{},
+				ResumedTaskIDs:    []string{},
 				Questions:         []string{},
 				WorkspacesCreated: []string{},
 				CreatedAt:         time.Now().UTC(),
@@ -370,6 +376,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 				SummaryMessageID:  summaryMsg.ID,
 				CursorMessageID:   state.CursorMessageID,
 				CreatedTaskIDs:    []string{},
+				CanceledTaskIDs:   []string{},
+				ResumedTaskIDs:    []string{},
 				Questions:         []string{},
 				WorkspacesCreated: []string{},
 			}, nil
@@ -396,6 +404,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		return TriageResult{}, err
 	}
 	createdTaskIDs := dispatch.CreatedTaskIDs
+	canceledTaskIDs := dispatch.CanceledTaskIDs
+	resumedTaskIDs := dispatch.ResumedTaskIDs
 	questions := dispatch.Questions
 	workspacesCreated := dispatch.WorkspacesCreated
 
@@ -405,7 +415,7 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		summary = progressSnapshot
 	} else {
 		summary = buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
-		if len(createdTaskIDs) > 0 || len(questions) > 0 {
+		if len(createdTaskIDs) > 0 || len(canceledTaskIDs) > 0 || len(resumedTaskIDs) > 0 || len(questions) > 0 {
 			if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
 				if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
 					summary = trimmed
@@ -431,6 +441,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		SummaryMessageID:  summaryMsg.ID,
 		SummaryMessage:    summary,
 		CreatedTaskIDs:    append([]string{}, createdTaskIDs...),
+		CanceledTaskIDs:   append([]string{}, canceledTaskIDs...),
+		ResumedTaskIDs:    append([]string{}, resumedTaskIDs...),
 		Questions:         append([]string{}, questions...),
 		WorkspacesCreated: append([]string{}, workspacesCreated...),
 		CreatedAt:         time.Now().UTC(),
@@ -458,6 +470,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		SummaryMessageID:  summaryMsg.ID,
 		CursorMessageID:   state.CursorMessageID,
 		CreatedTaskIDs:    createdTaskIDs,
+		CanceledTaskIDs:   canceledTaskIDs,
+		ResumedTaskIDs:    resumedTaskIDs,
 		Questions:         questions,
 		WorkspacesCreated: workspacesCreated,
 	}, nil
@@ -465,6 +479,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 
 type dispatchResult struct {
 	CreatedTaskIDs    []string
+	CanceledTaskIDs   []string
+	ResumedTaskIDs    []string
 	Questions         []string
 	WorkspacesCreated []string
 }
@@ -490,9 +506,186 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
 
 	createdTaskIDs := make([]string, 0, len(plan.Tasks))
+	canceledTaskIDs := make([]string, 0, len(plan.TaskActions))
+	resumedTaskIDs := make([]string, 0, len(plan.TaskActions))
 	questions := append([]string{}, plan.Questions...)
 	workspacesCreated := make([]string, 0, 2)
 	skippedNeedWorkspace := make([]string, 0, 2)
+
+	// Best-effort: handle task queue adjustments (cancel/resume). These are user-facing controls
+	// and SHOULD NOT delete any task data/evidence.
+	if len(plan.TaskActions) > 0 {
+		const maxBulkTargets = 20
+
+		allTasks, err := o.Tasks.ListTasks(userID, "")
+		if err != nil {
+			return dispatchResult{}, err
+		}
+
+		sessionTasks := allTasks
+		sessionScoped := false
+		if sessionWorkspace != "" {
+			inWS, err := o.Tasks.ListTasks(userID, sessionWorkspace)
+			if err != nil {
+				return dispatchResult{}, err
+			}
+			sessionTasks = inWS
+			sessionScoped = true
+		}
+
+		resolveByRef := func(ref string) (taskqueue.Task, bool, string) {
+			ref = strings.TrimSpace(ref)
+			if ref == "" {
+				return taskqueue.Task{}, false, ""
+			}
+
+			// Exact match first (prefer session workspace scope).
+			for _, t := range sessionTasks {
+				if strings.TrimSpace(t.ID) == ref {
+					return t, true, ""
+				}
+			}
+			if sessionScoped {
+				for _, t := range allTasks {
+					if strings.TrimSpace(t.ID) == ref {
+						return t, true, ""
+					}
+				}
+			}
+
+			// Prefix match (best-effort; prefer session workspace scope).
+			var matches []taskqueue.Task
+			for _, t := range sessionTasks {
+				id := strings.TrimSpace(t.ID)
+				if id != "" && strings.HasPrefix(id, ref) {
+					matches = append(matches, t)
+				}
+			}
+			if len(matches) == 0 && sessionScoped {
+				for _, t := range allTasks {
+					id := strings.TrimSpace(t.ID)
+					if id != "" && strings.HasPrefix(id, ref) {
+						matches = append(matches, t)
+					}
+				}
+			}
+			if len(matches) == 1 {
+				return matches[0], true, ""
+			}
+			if len(matches) > 1 {
+				return taskqueue.Task{}, false, "ambiguous"
+			}
+			return taskqueue.Task{}, false, "not_found"
+		}
+
+		selectBulk := func(action string) ([]taskqueue.Task, string) {
+			if strings.TrimSpace(sessionWorkspace) == "" {
+				return nil, "missing_workspace"
+			}
+			if sessionTasks == nil {
+				return nil, "no_tasks"
+			}
+
+			out := make([]taskqueue.Task, 0, 8)
+			for _, t := range sessionTasks {
+				a := t.LatestAttempt()
+				if a == nil {
+					continue
+				}
+				switch strings.ToLower(strings.TrimSpace(action)) {
+				case "cancel":
+					if a.Status == taskqueue.AttemptQueued || a.Status == taskqueue.AttemptRunning {
+						out = append(out, t)
+					}
+				case "resume":
+					if a.Status == taskqueue.AttemptFailed || a.Status == taskqueue.AttemptLimitExceeded || a.Status == taskqueue.AttemptTimedOut || a.Status == taskqueue.AttemptInterrupted {
+						out = append(out, t)
+					}
+				}
+			}
+			if len(out) > maxBulkTargets {
+				out = out[:maxBulkTargets]
+				return out, "truncated"
+			}
+			return out, ""
+		}
+
+		for _, a := range plan.TaskActions {
+			act := strings.ToLower(strings.TrimSpace(a.Action))
+			ref := strings.TrimSpace(a.TaskID)
+			notes := strings.TrimSpace(a.ReviewNotes)
+
+			if act != "cancel" && act != "resume" {
+				questions = append(questions, fmt.Sprintf("不支持的任务操作：%q（只支持 cancel/resume；不支持 delete）。", strings.TrimSpace(a.Action)))
+				continue
+			}
+
+			var targets []taskqueue.Task
+			if ref != "" {
+				if t, ok, why := resolveByRef(ref); ok {
+					targets = []taskqueue.Task{t}
+				} else {
+					switch why {
+					case "ambiguous":
+						questions = append(questions, fmt.Sprintf("追踪号前缀「%s」匹配到多个任务，请发我更完整的追踪号。", ref))
+					default:
+						questions = append(questions, fmt.Sprintf("我没找到追踪号「%s」对应的任务，请确认追踪号（或发我更完整的 ID）。", ref))
+					}
+					continue
+				}
+			} else {
+				bulk, why := selectBulk(act)
+				if why == "missing_workspace" {
+					verb := act
+					switch act {
+					case "cancel":
+						verb = "取消"
+					case "resume":
+						verb = "继续"
+					}
+					questions = append(questions, fmt.Sprintf("要%s哪些任务？请发我该任务的追踪号，或先绑定会话 workspace。", verb))
+					continue
+				}
+				if why == "truncated" {
+					questions = append(questions, "任务较多：我这次先处理前 20 个，其余的你再说一声我继续。")
+				}
+				targets = bulk
+			}
+
+			for _, t := range targets {
+				if strings.TrimSpace(t.UserID) != userID {
+					continue
+				}
+				switch act {
+				case "cancel":
+					updated, err := o.Runner.Cancel(t.ID)
+					if err != nil {
+						questions = append(questions, fmt.Sprintf("我没法取消任务「%s」：%v", strings.TrimSpace(t.ID), err))
+						continue
+					}
+					latest := updated.LatestAttempt()
+					if latest == nil {
+						questions = append(questions, fmt.Sprintf("我没法取消任务「%s」：任务没有 attempt 记录", strings.TrimSpace(t.ID)))
+						continue
+					}
+					if latest.Status != taskqueue.AttemptCanceled && latest.Status != taskqueue.AttemptRunning {
+						questions = append(questions, fmt.Sprintf("任务「%s」当前状态为 %q，取消未生效（仅 queued/running 可取消）。", strings.TrimSpace(t.ID), latest.Status))
+						continue
+					}
+					canceledTaskIDs = append(canceledTaskIDs, t.ID)
+				case "resume":
+					if _, err := o.Runner.ResumeWithSource(t.ID, notes, "secretary"); err != nil {
+						questions = append(questions, fmt.Sprintf("我没法继续任务「%s」：%v", strings.TrimSpace(t.ID), err))
+						continue
+					}
+					resumedTaskIDs = append(resumedTaskIDs, t.ID)
+				default:
+					// defensive: should have been filtered above.
+					questions = append(questions, fmt.Sprintf("不支持的任务操作：%q（只支持 cancel/resume；不支持 delete）。", strings.TrimSpace(a.Action)))
+				}
+			}
+		}
+	}
 
 	for _, task := range plan.Tasks {
 		title := strings.TrimSpace(task.Title)
@@ -555,11 +748,23 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 	}
 
 	// Best-effort: record SW dispatch worklog for SU sync later.
-	if o.Memory != nil && (len(createdTaskIDs) > 0 || len(questions) > 0 || len(workspacesCreated) > 0) {
+	if o.Memory != nil && (len(createdTaskIDs) > 0 || len(canceledTaskIDs) > 0 || len(resumedTaskIDs) > 0 || len(questions) > 0 || len(workspacesCreated) > 0) {
 		var b strings.Builder
 		if len(createdTaskIDs) > 0 {
 			b.WriteString("created_task_ids:\n")
 			for _, id := range createdTaskIDs {
+				b.WriteString("- " + strings.TrimSpace(id) + "\n")
+			}
+		}
+		if len(canceledTaskIDs) > 0 {
+			b.WriteString("canceled_task_ids:\n")
+			for _, id := range canceledTaskIDs {
+				b.WriteString("- " + strings.TrimSpace(id) + "\n")
+			}
+		}
+		if len(resumedTaskIDs) > 0 {
+			b.WriteString("resumed_task_ids:\n")
+			for _, id := range resumedTaskIDs {
 				b.WriteString("- " + strings.TrimSpace(id) + "\n")
 			}
 		}
@@ -594,6 +799,8 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 
 	return dispatchResult{
 		CreatedTaskIDs:    createdTaskIDs,
+		CanceledTaskIDs:   canceledTaskIDs,
+		ResumedTaskIDs:    resumedTaskIDs,
 		Questions:         questions,
 		WorkspacesCreated: workspacesCreated,
 	}, nil
@@ -668,16 +875,23 @@ func (o *Orchestrator) SetRecoveryFocus(_ context.Context, userID, sessionID, ta
 }
 
 type triagePlan struct {
-	Intent         string       `json:"intent,omitempty"`
-	SummaryMessage string       `json:"summary_message"`
-	Tasks          []triageTask `json:"tasks,omitempty"`
-	Questions      []string     `json:"questions,omitempty"`
+	Intent         string             `json:"intent,omitempty"`
+	SummaryMessage string             `json:"summary_message"`
+	Tasks          []triageTask       `json:"tasks,omitempty"`
+	TaskActions    []triageTaskAction `json:"task_actions,omitempty"`
+	Questions      []string           `json:"questions,omitempty"`
 }
 
 type triageTask struct {
 	Title             string `json:"title"`
 	Prompt            string `json:"prompt"`
 	WorkspaceStrategy string `json:"workspace_strategy"`
+}
+
+type triageTaskAction struct {
+	Action      string `json:"action"`
+	TaskID      string `json:"task_id,omitempty"`
+	ReviewNotes string `json:"review_notes,omitempty"`
 }
 
 func normalizeTriagePlan(plan *triagePlan) {
@@ -701,6 +915,20 @@ func normalizeTriagePlan(plan *triagePlan) {
 		plan.Tasks = out
 	}
 
+	if len(plan.TaskActions) > 0 {
+		out := make([]triageTaskAction, 0, len(plan.TaskActions))
+		for _, a := range plan.TaskActions {
+			a.Action = strings.TrimSpace(a.Action)
+			a.TaskID = strings.TrimSpace(a.TaskID)
+			a.ReviewNotes = strings.TrimSpace(a.ReviewNotes)
+			if a.Action == "" && a.TaskID == "" && a.ReviewNotes == "" {
+				continue
+			}
+			out = append(out, a)
+		}
+		plan.TaskActions = out
+	}
+
 	if len(plan.Questions) > 0 {
 		out := make([]string, 0, len(plan.Questions))
 		for _, q := range plan.Questions {
@@ -719,7 +947,7 @@ func buildSecretaryTriagePlanTool() llm.Tool {
 		Type: "function",
 		Function: llm.ToolFunction{
 			Name:        "secretary_triage_plan",
-			Description: "Return the secretary triage plan (intent + summary_message + tasks + questions).",
+			Description: "Return the secretary triage plan (intent + summary_message + tasks + task_actions + questions).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -740,12 +968,27 @@ func buildSecretaryTriagePlanTool() llm.Tool {
 							"required": []string{"title", "prompt", "workspace_strategy"},
 						},
 					},
+					"task_actions": map[string]any{
+						"type": "array",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"action": map[string]any{"type": "string", "enum": []string{"cancel", "resume"}},
+								"task_id": map[string]any{
+									"type":        "string",
+									"description": "Optional. Full id or short prefix. When omitted, apply to relevant tasks within session workspace (best-effort).",
+								},
+								"review_notes": map[string]any{"type": "string"},
+							},
+							"required": []string{"action"},
+						},
+					},
 					"questions": map[string]any{
 						"type":  "array",
 						"items": map[string]any{"type": "string"},
 					},
 				},
-				"required": []string{"intent", "summary_message", "tasks", "questions"},
+				"required": []string{"intent", "summary_message", "tasks", "task_actions", "questions"},
 			},
 		},
 	}
@@ -753,12 +996,12 @@ func buildSecretaryTriagePlanTool() llm.Tool {
 
 func buildSecretaryTriagePlanToolInstruction() string {
 	return strings.TrimSpace(`
-请立刻调用 tool：secretary_triage_plan。
-要求：
-- 只通过 tool arguments 返回结构化字段，不要输出任何额外文本
-- intent 只能是：progress | dispatch | clarify
-- tasks/questions 允许为空，但字段必须存在（为空则用 []）
-`)
+	请立刻调用 tool：secretary_triage_plan。
+	要求：
+	- 只通过 tool arguments 返回结构化字段，不要输出任何额外文本
+	- intent 只能是：progress | dispatch | clarify
+	- tasks/task_actions/questions 允许为空，但字段必须存在（为空则用 []）
+	`)
 }
 
 func buildSecretaryTriagePlanTagsInstruction() string {
@@ -768,16 +1011,23 @@ func buildSecretaryTriagePlanTagsInstruction() string {
 <secretary_triage_plan>
   <intent>progress|dispatch|clarify</intent>
   <summary_message>...</summary_message>
-  <tasks>
-    <task>
-      <title>...</title>
-      <prompt>...</prompt>
-      <workspace_strategy>new|session|ask</workspace_strategy>
-    </task>
-  </tasks>
-  <questions>
-    <item>...</item>
-  </questions>
+	<tasks>
+	  <task>
+	    <title>...</title>
+	    <prompt>...</prompt>
+	    <workspace_strategy>new|session|ask</workspace_strategy>
+	</task>
+	</tasks>
+	<task_actions>
+	  <task_action>
+	    <action>cancel|resume</action>
+	    <task_id>...</task_id>
+	    <review_notes>...</review_notes>
+	  </task_action>
+	</task_actions>
+	<questions>
+	  <item>...</item>
+	</questions>
 </secretary_triage_plan>
 `)
 }
@@ -798,9 +1048,10 @@ func parseSecretaryTriagePlanTags(text string) (triagePlan, bool) {
 
 	// NOTE: For container tags (tasks/questions), avoid using nested tag names as stop-tags.
 	// Otherwise missing closing tags (common in model output) could truncate the inner payload.
-	intent, _ := agent.ExtractTagValue(block, "intent", []string{"summary_message", "tasks", "questions"})
-	summary, _ := agent.ExtractTagValue(block, "summary_message", []string{"tasks", "questions"})
-	tasksRaw, _ := agent.ExtractTagValue(block, "tasks", []string{"questions"})
+	intent, _ := agent.ExtractTagValue(block, "intent", []string{"summary_message", "tasks", "task_actions", "questions"})
+	summary, _ := agent.ExtractTagValue(block, "summary_message", []string{"tasks", "task_actions", "questions"})
+	tasksRaw, _ := agent.ExtractTagValue(block, "tasks", []string{"task_actions", "questions"})
+	actionsRaw, _ := agent.ExtractTagValue(block, "task_actions", []string{"questions"})
 	questionsRaw, _ := agent.ExtractTagValue(block, "questions", nil)
 
 	plan := triagePlan{
@@ -821,6 +1072,21 @@ func parseSecretaryTriagePlanTags(text string) (triagePlan, bool) {
 			continue
 		}
 		plan.Tasks = append(plan.Tasks, t)
+	}
+
+	for _, actionBlock := range extractAllTagBlocks(actionsRaw, "task_action") {
+		act, _ := agent.ExtractTagValue(actionBlock, "action", []string{"task_id", "review_notes"})
+		taskID, _ := agent.ExtractTagValue(actionBlock, "task_id", []string{"action", "review_notes"})
+		reviewNotes, _ := agent.ExtractTagValue(actionBlock, "review_notes", []string{"action", "task_id"})
+		a := triageTaskAction{
+			Action:      strings.TrimSpace(act),
+			TaskID:      strings.TrimSpace(taskID),
+			ReviewNotes: strings.TrimSpace(reviewNotes),
+		}
+		if a.Action == "" && a.TaskID == "" && a.ReviewNotes == "" {
+			continue
+		}
+		plan.TaskActions = append(plan.TaskActions, a)
 	}
 
 	for _, item := range extractAllTagBlocks(questionsRaw, "item") {
@@ -1254,8 +1520,30 @@ func (o *Orchestrator) generateSUReport(ctx context.Context, userID, sessionID, 
 			}
 		}
 	}
+	if len(plan.TaskActions) > 0 {
+		b.WriteString("task_actions:\n")
+		for _, a := range plan.TaskActions {
+			act := strings.TrimSpace(a.Action)
+			id := strings.TrimSpace(a.TaskID)
+			notes := strings.TrimSpace(a.ReviewNotes)
+			line := "- action: " + act
+			if id != "" {
+				line += ", task_id: " + id
+			}
+			b.WriteString(line + "\n")
+			if notes != "" {
+				b.WriteString("  review_notes: " + notes + "\n")
+			}
+		}
+	}
 	if len(dispatch.CreatedTaskIDs) > 0 {
 		b.WriteString(fmt.Sprintf("created_task_count: %d\n", len(dispatch.CreatedTaskIDs)))
+	}
+	if len(dispatch.CanceledTaskIDs) > 0 {
+		b.WriteString(fmt.Sprintf("canceled_task_count: %d\n", len(dispatch.CanceledTaskIDs)))
+	}
+	if len(dispatch.ResumedTaskIDs) > 0 {
+		b.WriteString(fmt.Sprintf("resumed_task_count: %d\n", len(dispatch.ResumedTaskIDs)))
 	}
 	if len(dispatch.Questions) > 0 {
 		b.WriteString("questions:\n")
@@ -1674,6 +1962,20 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 			}
 			created[id] = true
 		}
+		for _, id := range run.CanceledTaskIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			created[id] = true
+		}
+		for _, id := range run.ResumedTaskIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			created[id] = true
+		}
 	}
 
 	running := 0
@@ -2026,7 +2328,7 @@ ONEAGENT_SECRETARY_TRIAGE
 # Output Protocol (最高优先级)
 - 绝对禁止输出任何自然语言闲聊或 Markdown 正文。
 - 必须且只能通过 Tool Call（secretary_triage_plan）或 XML Tags（<secretary_triage_plan>）返回结构化数据。
-- 结构包含：intent（意图归类）、summary_message（给用户看的话）、tasks（后台工单，包含每个 task 的 workspace_strategy）、questions（阻塞问题）。
+- 结构包含：intent（意图归类）、summary_message（给用户看的话）、tasks（后台工单，包含每个 task 的 workspace_strategy）、task_actions（对已有任务的 cancel/resume；绝不 delete）、questions（阻塞问题）。
 
 # Core Operating Rules (8条核心硬规则)
 
@@ -2041,6 +2343,7 @@ ONEAGENT_SECRETARY_TRIAGE
 3. 读写分权 (Read/Write Separation)
    - 你只读：用工具看代码、查日志、读文档。
    - Worker 写：任何涉及新建文件、修改代码、删除资源、跑耗时测试的操作，必须封装进 tasks[]。
+   - 你可以调整任务队列：仅允许在 task_actions[] 里发起 cancel/resume；不允许 delete。
 
 4. 创作交付分级 (Creation Delivery)
    - 短内容（<300字/大纲/小样）：直接在 summary_message 中输出，给用户即时反馈。

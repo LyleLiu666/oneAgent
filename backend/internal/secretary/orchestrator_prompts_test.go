@@ -44,4 +44,10 @@ func TestSecretaryDispatchSystemPromptSW_QuestionsAreHardBlockersAndLimited(t *t
 	if !strings.Contains(prompt, "严禁编造进度") {
 		t.Fatalf("expected SW prompt to include anti-hallucination guardrail, got %q", prompt)
 	}
+	if !strings.Contains(prompt, "task_actions") {
+		t.Fatalf("expected SW prompt to mention task_actions, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "不允许 delete") && !strings.Contains(prompt, "绝不 delete") {
+		t.Fatalf("expected SW prompt to disallow delete, got %q", prompt)
+	}
 }

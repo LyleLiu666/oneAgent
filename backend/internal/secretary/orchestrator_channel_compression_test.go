@@ -53,7 +53,7 @@ func (c scriptedClient) ChatCompletionWithTools(ctx context.Context, messages []
 					Type: "function",
 					Function: llm.ToolCallFunction{
 						Name:      "secretary_triage_plan",
-						Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"questions":[]}`,
+						Arguments: `{"intent":"dispatch","summary_message":"ok","tasks":[],"task_actions":[],"questions":[]}`,
 					},
 				},
 			},

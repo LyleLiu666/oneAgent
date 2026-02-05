@@ -21,6 +21,8 @@ type TriageRun struct {
 	SummaryMessageID  uint      `json:"summary_message_id,omitempty"`
 	SummaryMessage    string    `json:"summary_message,omitempty"`
 	CreatedTaskIDs    []string  `json:"created_task_ids,omitempty"`
+	CanceledTaskIDs   []string  `json:"canceled_task_ids,omitempty"`
+	ResumedTaskIDs    []string  `json:"resumed_task_ids,omitempty"`
 	Questions         []string  `json:"questions,omitempty"`
 	WorkspacesCreated []string  `json:"workspaces_created,omitempty"`
 	CreatedAt         time.Time `json:"created_at,omitempty"`
@@ -38,6 +40,8 @@ type TriageResult struct {
 	SummaryMessageID  uint
 	CursorMessageID   uint
 	CreatedTaskIDs    []string
+	CanceledTaskIDs   []string
+	ResumedTaskIDs    []string
 	Questions         []string
 	WorkspacesCreated []string
 }
