@@ -266,6 +266,53 @@ it('shows in-flight tool call progress in secretary mode', async () => {
   wrapper.unmount()
 })
 
+it('does not render chat retry controls in secretary mode (prevents /api/chat + /truncate calls)', async () => {
+  stubLocalStorage()
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: {
+      initialMode: 'secretary',
+    },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+
+  const chatStore = useSecretaryChatStore()
+  chatStore.setMessages([
+    {
+      id: 1,
+      role: 'user',
+      type: 'text',
+      content: 'hi',
+      createdAt: new Date(),
+      isStreaming: false,
+    },
+    {
+      id: 2,
+      role: 'assistant',
+      type: 'text',
+      content: 'ok',
+      createdAt: new Date(),
+      isStreaming: false,
+    },
+  ])
+
+  await flushPromises()
+
+  expect(wrapper.find('button[title="重试"]').exists()).toBe(false)
+  expect(apiClient.truncateSession).not.toHaveBeenCalled()
+  expect(apiClient.streamChat).not.toHaveBeenCalled()
+
+  wrapper.unmount()
+})
+
 it('does not override assistant chat session when chatting with secretary', async () => {
   vi.useFakeTimers()
 

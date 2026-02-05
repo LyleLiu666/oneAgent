@@ -384,6 +384,10 @@ const acceptTaskHandoffSuggest = async () => {
 }
 
 const sendChatFromSuggest = async () => {
+  if (isSecretaryMode.value) {
+    closeTaskHandoffSuggest()
+    return
+  }
   const message = inputMessage.value.trim()
   if (!message) {
     closeTaskHandoffSuggest()
@@ -1970,6 +1974,7 @@ const sendMessage = async () => {
 }
 
 const retryMessage = async (assistantMessageIndex: number) => {
+  if (isSecretaryMode.value) return
   if (chatStore.isLoading || loadingHistory.value) return
 
   const assistantMessage = chatStore.messages[assistantMessageIndex]
@@ -2610,7 +2615,7 @@ onUnmounted(() => {
                   <Copy v-else class="w-4 h-4" />
                 </button>
                 <button
-                  v-if="!message.isStreaming"
+                  v-if="!isSecretaryMode && !message.isStreaming"
                   @click="retryMessage(index)"
                   class="p-1.5 rounded-lg text-surface-500 hover:text-surface-300 hover:bg-surface-800 transition-colors"
                   title="重试"
@@ -2790,6 +2795,7 @@ onUnmounted(() => {
       </div>
       <div class="p-5 flex flex-wrap items-center justify-end gap-2">
         <button
+          v-if="!isSecretaryMode"
           type="button"
           data-testid="chat-handoff-suggest-send-chat"
           class="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm text-surface-100 hover:bg-surface-800"

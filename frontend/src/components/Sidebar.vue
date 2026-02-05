@@ -35,7 +35,7 @@ const isMobileOpen = ref(false)
 
 // Navigation items
 const navItems = [
-  { name: '首页', path: '/', icon: Home },
+  { name: '首页', path: '/secretary', icon: Home },
   { name: '聊天', path: '/chat', icon: MessageSquare },
   { name: '任务', path: '/tasks', icon: ListTodo },
   { name: '工作流', path: '/workflows', icon: GitBranch },
