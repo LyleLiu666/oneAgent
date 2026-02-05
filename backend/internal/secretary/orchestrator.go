@@ -521,41 +521,179 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 				return taskqueue.Task{}, false, ""
 			}
 
-			// Exact match first (prefer session workspace scope).
-			for _, t := range sessionTasks {
-				if strings.TrimSpace(t.ID) == ref {
-					return t, true, ""
+			// Accept common human/LLM wrappers: "（追踪号 abcd1234）", "task_id=...", etc.
+			// Extract a best-effort identifier token so users don't need to copy perfect strings.
+			extractRefToken := func(raw string) string {
+				raw = strings.TrimSpace(raw)
+				if raw == "" {
+					return ""
 				}
+
+				trimmed := strings.Trim(raw, " \t\r\n()（）[]【】{}<>《》\"'“”‘’.,，。;；:：#")
+				if trimmed == "" {
+					trimmed = raw
+				}
+
+				isIDChar := func(r rune) bool {
+					switch {
+					case r >= 'a' && r <= 'z':
+						return true
+					case r >= 'A' && r <= 'Z':
+						return true
+					case r >= '0' && r <= '9':
+						return true
+					case r == '-' || r == '_':
+						return true
+					default:
+						return false
+					}
+				}
+
+				isHex := func(s string) bool {
+					if s == "" {
+						return false
+					}
+					for _, r := range s {
+						switch {
+						case r >= '0' && r <= '9':
+							// ok
+						case r >= 'a' && r <= 'f':
+							// ok
+						case r >= 'A' && r <= 'F':
+							// ok
+						default:
+							return false
+						}
+					}
+					return true
+				}
+
+				score := func(tok string) int {
+					tok = strings.Trim(tok, "-_")
+					if tok == "" {
+						return 0
+					}
+					if _, err := uuid.Parse(tok); err == nil {
+						return 1000 + len(tok)
+					}
+					if len(tok) >= 8 && isHex(tok) {
+						return 500 + len(tok)
+					}
+					if len(tok) >= 4 {
+						return 100 + len(tok)
+					}
+					return 0
+				}
+
+				best := ""
+				bestScore := 0
+				start := -1
+				for i, r := range trimmed {
+					if isIDChar(r) {
+						if start == -1 {
+							start = i
+						}
+						continue
+					}
+					if start != -1 {
+						tok := trimmed[start:i]
+						if s := score(tok); s > bestScore {
+							best = tok
+							bestScore = s
+						}
+						start = -1
+					}
+				}
+				if start != -1 {
+					tok := trimmed[start:]
+					if s := score(tok); s > bestScore {
+						best = tok
+						bestScore = s
+					}
+				}
+
+				if best != "" {
+					return strings.Trim(best, "-_")
+				}
+				return strings.TrimSpace(trimmed)
+			}
+
+			ref = extractRefToken(ref)
+			if ref == "" {
+				return taskqueue.Task{}, false, ""
+			}
+
+			matchesByRef := func(tasks []taskqueue.Task, prefix bool) []taskqueue.Task {
+				out := make([]taskqueue.Task, 0, 2)
+				seen := make(map[string]struct{}, 2)
+				for _, t := range tasks {
+					id := strings.TrimSpace(t.ID)
+					if id == "" {
+						continue
+					}
+					match := false
+					if prefix {
+						if strings.HasPrefix(id, ref) {
+							match = true
+						} else {
+							for _, a := range t.Attempts {
+								aid := strings.TrimSpace(a.ID)
+								if aid != "" && strings.HasPrefix(aid, ref) {
+									match = true
+									break
+								}
+							}
+						}
+					} else {
+						if id == ref {
+							match = true
+						} else {
+							for _, a := range t.Attempts {
+								if strings.TrimSpace(a.ID) == ref {
+									match = true
+									break
+								}
+							}
+						}
+					}
+					if !match {
+						continue
+					}
+					if _, ok := seen[id]; ok {
+						continue
+					}
+					seen[id] = struct{}{}
+					out = append(out, t)
+				}
+				return out
+			}
+
+			// Exact match first (prefer session workspace scope).
+			if matches := matchesByRef(sessionTasks, false); len(matches) == 1 {
+				return matches[0], true, ""
+			} else if len(matches) > 1 {
+				return taskqueue.Task{}, false, "ambiguous"
 			}
 			if sessionScoped {
-				for _, t := range allTasks {
-					if strings.TrimSpace(t.ID) == ref {
-						return t, true, ""
-					}
+				if matches := matchesByRef(allTasks, false); len(matches) == 1 {
+					return matches[0], true, ""
+				} else if len(matches) > 1 {
+					return taskqueue.Task{}, false, "ambiguous"
 				}
 			}
 
 			// Prefix match (best-effort; prefer session workspace scope).
-			var matches []taskqueue.Task
-			for _, t := range sessionTasks {
-				id := strings.TrimSpace(t.ID)
-				if id != "" && strings.HasPrefix(id, ref) {
-					matches = append(matches, t)
-				}
-			}
-			if len(matches) == 0 && sessionScoped {
-				for _, t := range allTasks {
-					id := strings.TrimSpace(t.ID)
-					if id != "" && strings.HasPrefix(id, ref) {
-						matches = append(matches, t)
-					}
-				}
-			}
-			if len(matches) == 1 {
+			if matches := matchesByRef(sessionTasks, true); len(matches) == 1 {
 				return matches[0], true, ""
-			}
-			if len(matches) > 1 {
+			} else if len(matches) > 1 {
 				return taskqueue.Task{}, false, "ambiguous"
+			}
+			if sessionScoped {
+				if matches := matchesByRef(allTasks, true); len(matches) == 1 {
+					return matches[0], true, ""
+				} else if len(matches) > 1 {
+					return taskqueue.Task{}, false, "ambiguous"
+				}
 			}
 			return taskqueue.Task{}, false, "not_found"
 		}
@@ -569,9 +707,6 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 						sessionScoped = true
 					}
 				}
-			}
-			if strings.TrimSpace(sessionWorkspace) == "" {
-				return nil, "missing_workspace"
 			}
 			if sessionTasks == nil {
 				return nil, "no_tasks"
@@ -627,17 +762,6 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 				}
 			} else {
 				bulk, why := selectBulk(act)
-				if why == "missing_workspace" {
-					verb := act
-					switch act {
-					case "cancel":
-						verb = "取消"
-					case "resume":
-						verb = "继续"
-					}
-					questions = append(questions, fmt.Sprintf("要%s哪些任务？请发我该任务的追踪号，或先绑定会话 workspace。", verb))
-					continue
-				}
 				if why == "truncated" {
 					questions = append(questions, "任务较多：我这次先处理前 20 个，其余的你再说一声我继续。")
 				}
@@ -968,7 +1092,7 @@ func buildSecretaryTriagePlanTool() llm.Tool {
 								"action": map[string]any{"type": "string", "enum": []string{"cancel", "resume"}},
 								"task_id": map[string]any{
 									"type":        "string",
-									"description": "Optional. Full id or short prefix. When omitted, apply to relevant tasks within session workspace (best-effort).",
+									"description": "Optional. Full task id or short prefix. When omitted, apply to relevant tasks (prefer session workspace when bound; otherwise apply across all workspaces, best-effort).",
 								},
 								"review_notes": map[string]any{"type": "string"},
 							},

@@ -2,6 +2,7 @@ package secretary
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -431,5 +432,130 @@ func TestDispatchPlanAsSW_TaskActions_UnsupportedAction_YieldsQuestion(t *testin
 	}
 	if !strings.Contains(strings.Join(got.Questions, "\n"), "不支持的任务操作") {
 		t.Fatalf("unexpected questions: %+v", got.Questions)
+	}
+}
+
+func TestDispatchPlanAsSW_TaskActions_CancelBulk_GlobalWhenMultipleWorkspacesAndUnset(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws1, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot(ws1): %v", err)
+	}
+	ws2, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot(ws2): %v", err)
+	}
+
+	t1, err := store.CreateTask("local", ws1, "t1", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask(t1): %v", err)
+	}
+	t2, err := store.CreateTask("local", ws2, "t2", "p2", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask(t2): %v", err)
+	}
+
+	o := &Orchestrator{Tasks: store, Runner: &taskqueue.TaskRunner{Store: store}}
+	plan := triagePlan{TaskActions: []triageTaskAction{{Action: "cancel"}}}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", "", plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 2 {
+		t.Fatalf("expected 2 canceled_task_ids, got %+v (questions=%+v)", got.CanceledTaskIDs, got.Questions)
+	}
+	joined := strings.Join(got.CanceledTaskIDs, ",")
+	if !strings.Contains(joined, t1.ID) || !strings.Contains(joined, t2.ID) {
+		t.Fatalf("expected canceled_task_ids to include %q and %q, got %+v", t1.ID, t2.ID, got.CanceledTaskIDs)
+	}
+
+	ut1, err := store.GetTask(t1.ID)
+	if err != nil {
+		t.Fatalf("GetTask(t1): %v", err)
+	}
+	ut2, err := store.GetTask(t2.ID)
+	if err != nil {
+		t.Fatalf("GetTask(t2): %v", err)
+	}
+	if ut1.LatestAttempt() == nil || ut1.LatestAttempt().Status != taskqueue.AttemptCanceled {
+		t.Fatalf("expected t1 canceled, got %+v", ut1.LatestAttempt())
+	}
+	if ut2.LatestAttempt() == nil || ut2.LatestAttempt().Status != taskqueue.AttemptCanceled {
+		t.Fatalf("expected t2 canceled, got %+v", ut2.LatestAttempt())
+	}
+}
+
+func TestDispatchPlanAsSW_TaskActions_CancelByWrappedIDPrefix(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot: %v", err)
+	}
+
+	created, err := store.CreateTask("local", ws, "t1", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	o := &Orchestrator{Tasks: store, Runner: &taskqueue.TaskRunner{Store: store}}
+	plan := triagePlan{
+		TaskActions: []triageTaskAction{{
+			Action: "cancel",
+			TaskID: fmt.Sprintf("（追踪号 %s）", created.ID[:8]),
+		}},
+	}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", ws, plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 1 || got.CanceledTaskIDs[0] != created.ID {
+		t.Fatalf("expected canceled_task_ids [%q], got %+v (questions=%+v)", created.ID, got.CanceledTaskIDs, got.Questions)
+	}
+}
+
+func TestDispatchPlanAsSW_TaskActions_CancelByAttemptIDPrefix(t *testing.T) {
+	store, err := taskqueue.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ws, err := scope.NormalizeWorkspaceRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("NormalizeWorkspaceRoot: %v", err)
+	}
+
+	created, err := store.CreateTask("local", ws, "t1", "p1", "", taskqueue.Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	latest := created.LatestAttempt()
+	if latest == nil {
+		t.Fatalf("expected created task to have an attempt")
+	}
+
+	o := &Orchestrator{Tasks: store, Runner: &taskqueue.TaskRunner{Store: store}}
+	plan := triagePlan{
+		TaskActions: []triageTaskAction{{
+			Action: "cancel",
+			TaskID: latest.ID[:8],
+		}},
+	}
+
+	got, err := o.dispatchPlanAsSW(context.Background(), "local", "s", ws, plan)
+	if err != nil {
+		t.Fatalf("dispatchPlanAsSW: %v", err)
+	}
+	if len(got.CanceledTaskIDs) != 1 || got.CanceledTaskIDs[0] != created.ID {
+		t.Fatalf("expected canceled_task_ids [%q], got %+v (questions=%+v)", created.ID, got.CanceledTaskIDs, got.Questions)
 	}
 }
