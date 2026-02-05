@@ -120,3 +120,57 @@ TBD - created by archiving change update-tool-protocol-boundaries. Update Purpos
 - **WHEN** XML 模式下模型在每个 step 都输出 `<tool_data>...</tool_data>`（导致 loop 继续）
 - **THEN** 系统在第 3 个 step 后终止并返回明确错误（best-effort）
 
+### Requirement: Structured outputs MUST NOT rely on plain-text JSON as the only channel (best-effort)
+当系统需要模型产出结构化结果（例如“triage plan / decision / report payload”）时，系统必须 (MUST) 提供可靠的结构化返回通道（best-effort），并不得 (MUST NOT) 仅依赖“要求模型只输出纯文本 JSON”作为唯一方式。
+
+系统必须 (MUST) 优先使用：
+1) tool-call（原生 function calling；best-effort），或
+2) 宽松 tags（XML-like；best-effort）
+来承载结构化字段。
+
+原因（best-effort）：
+- 强制纯文本 JSON 往往会牺牲内容质量（模型把注意力放在格式合规上）
+- 即使使用原生 tools，仍可能出现 arguments JSON string 轻微不合法导致 400 的情况；需要可恢复的 fallback
+
+#### Scenario: Invalid tool arguments fall back to tags-based structured output (best-effort)
+- **GIVEN** 系统优先使用原生 tools 获取结构化输出（best-effort）
+- **AND** provider 返回 “invalid function arguments json” 类错误（best-effort）
+- **WHEN** 系统进入 best-effort 恢复流程（best-effort）
+- **THEN** 系统切换到宽松 tags 协议让模型重试输出结构化字段（best-effort）
+- **AND** 若仍失败，系统返回明确错误与可操作建议（best-effort）
+
+### Requirement: XML-like tags for structured output MUST NOT require CDATA (best-effort)
+当系统使用 XML-like tags 承载结构化输出（best-effort）时，系统不得 (MUST NOT) 要求模型必须使用 `<![CDATA[...]]>` 才算“合规”；默认应允许 tag 内容为普通文本（best-effort）。
+
+系统可以 (MAY) 保留对 CDATA 的兼容解析（best-effort），用于长文本或包含大量特殊字符的场景，但不应强迫模型每次都输出 CDATA（best-effort）。
+
+#### Scenario: Plain tag content is accepted without CDATA (best-effort)
+- **GIVEN** 模型输出结构化字段时使用 `<summary_message>...</summary_message>`（无 CDATA；best-effort）
+- **WHEN** 系统解析该 tags payload（best-effort）
+- **THEN** 系统成功提取字段并继续流程（best-effort）
+
+### Requirement: Tool errors MUST be fed back into the agent loop for self-heal (best-effort)
+系统必须 (MUST) 将“工具调用错误”视为 agent loop 的一等输入：当工具执行失败（包含参数不合法、权限拒绝、provider 400 等）时，系统必须 (MUST) 将失败结果写回 message list（append-only）并继续让 LLM 决策下一步（best-effort），而不是直接把工程错误暴露给用户并卡住。
+
+约束：
+- 自愈重试必须受 max steps / retry budget 约束（best-effort）
+- 达到上限后，系统必须 (MUST) 才将最终失败以“用户可行动”的方式呈现（包含下一步建议 + 证据指针）
+
+#### Scenario: Invalid tool arguments triggers self-heal retry instead of failing the task
+- **GIVEN** 当前启用了工具调用（JSON 或 XML 协议均可，best-effort）
+- **WHEN** 模型输出的 tool arguments 不是合法 JSON，导致 provider 返回 400（best-effort）
+- **THEN** 系统将该错误作为 tool_result 写回（append-only）（best-effort）
+- **AND** 系统继续下一轮 LLM 调用，让模型修复参数并重试或选择替代工具（best-effort）
+
+### Requirement: Tool protocol selection MUST be configurable per agent (best-effort)
+系统必须 (MUST) 支持按 agent 配置 tool protocol（best-effort），以避免“为兼容某个角色而全局改默认协议”：
+- Worker Chat / Worker Task 可使用默认协议策略（best-effort）
+- Secretary 可以配置为更稳健的协议/提示（best-effort），但不得破坏系统的稳定前缀缓存原则（见 `system-llm-prompt-caching`）
+
+#### Scenario: Secretary forces XML tool protocol while Worker uses native tools
+- **GIVEN** provider 支持原生 tools
+- **AND** Secretary agent 配置 `tool_protocol=xml`（best-effort）
+- **WHEN** Secretary 进入工具 loop
+- **THEN** 系统使用 XML tool protocol 执行（best-effort）
+- **AND** Worker Chat 仍可继续使用原生 JSON tools（best-effort）
+

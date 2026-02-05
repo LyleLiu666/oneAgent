@@ -32,7 +32,7 @@
 - **WHEN** 用户再切换回完整模式
 - **THEN** UI 恢复到先前的 assistant session（best-effort）
 
-### Requirement: Secretary mode MUST support multi-message sending with batched triage replies (best-effort)
+### Requirement: Secretary mode MUST support multi-message sending with quick acks and batched triage replies (best-effort)
 系统必须 (MUST) 在秘书模式下支持“微信式连续发送”：用户可以连续发送多条消息，而不被“assistant 正在生成中”的状态阻塞；系统应该 (SHOULD) 在短暂静默窗口后对“自上次归并以来的消息集合”输出一条低噪声的秘书式汇报（best-effort），而不是逐条进行完整分析回复。
 
 系统可以 (MAY) 提供 quick ack（best-effort），但不得 (MUST NOT) 输出机械的计数式/空洞式回执（例如仅“收到/我继续推进/有 N 个问题”等），且 quick ack 缺失不应阻塞 triage（best-effort）。
@@ -48,4 +48,3 @@
 - **WHEN** 用户停止输入并产生短暂静默窗口（best-effort）
 - **THEN** 系统输出一条秘书式汇报，覆盖这批消息的归并理解（best-effort）
 - **AND** 汇报必须明确下一步（继续推进什么 / 用户需要回复什么）（best-effort）
-

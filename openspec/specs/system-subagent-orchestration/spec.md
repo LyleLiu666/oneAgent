@@ -81,7 +81,7 @@ TBD - created by archiving change enable-subagent-orchestration. Update Purpose 
 - **THEN** 稳定 system prompt 不得被回写（避免破坏 KV cache）
 
 ### Requirement: Toolkit-as-skill 选择子 Agent 工具集 (Toolkits via Skills)
-系统应该 (SHOULD) 支持将 skill 作为“工具包技能（toolkit skill）”来决定子 Agent 的工具集合，以避免主上下文频繁变更 tool_ids 破坏 KV-cache，同时也避免子 Agent 默认挂载全量工具导致的上下文爆炸。
+系统必须 (MUST) 支持将 skill 作为“工具包技能（toolkit skill）”来决定子 Agent 的工具集合，以避免主上下文频繁变更 tool_ids 破坏 KV-cache，同时也避免子 Agent 默认挂载全量工具导致的上下文爆炸。
 
 工具集选择顺序（best-effort）：
 1) **显式 tool_ids**：若调用方提供 `tool_ids`，系统按其挂载（受 policy/approval gate 限制）。

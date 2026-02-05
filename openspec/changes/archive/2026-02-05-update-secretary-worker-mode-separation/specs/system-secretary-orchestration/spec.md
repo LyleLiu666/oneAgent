@@ -1,8 +1,12 @@
 # system-secretary-orchestration Spec Delta
 
+## RENAMED Requirements
+- FROM: `### Requirement: Triage MUST NOT execute tools; it only plans and dispatches (best-effort)`
+- TO: `### Requirement: Secretary triage MAY use tools but MUST be read-only to user workspace (best-effort)`
+
 ## MODIFIED Requirements
 
-### Requirement: The system MUST provide an append-only secretary inbox API (no tools)
+### Requirement: The system MUST provide an append-only secretary inbox API with LLM quick acks (no tools)
 系统必须 (MUST) 提供一种“收件箱（inbox）”消息写入机制，用于在秘书模式下追加用户消息；该过程不得触发工具执行（tool calling）（best-effort）。
 
 系统可以 (MAY) 返回 quick ack（best-effort），但 quick ack 不得是机械回执/空洞回执，并且 quick ack 的缺失不得阻塞后续 triage（best-effort）。

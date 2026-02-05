@@ -4,63 +4,51 @@
 TBD - created by archiving change add-secretary-mode-chat. Update Purpose after archive.
 ## Requirements
 ### Requirement: Chat UI MUST provide “Secretary Mode” (low-noise)
-系统必须 (MUST) 在 Chat UI 中提供一种“秘书模式”以降低默认信息噪声：当用户只想与助手对话时，界面仅保留对话所需的最小要素，其余低频/高级内容默认折叠但可恢复。
+系统必须 (MUST) 在 Chat UI 中提供一种“秘书模式”以降低默认信息噪声，并明确其语义为：**用户在秘书模式下与秘书对话（归并/解释/派工/进度汇报），而非与 worker（tool-calling 主 agent）直接对话**。
 
 秘书模式至少满足：
-- 仍可正常发送消息并接收回复
+- 仍可正常发送消息并接收秘书汇报（best-effort）
 - 默认隐藏低频/高级区域（例如历史侧栏、模型/工具选择、trace/工具细节、任务面板等，best-effort）
 - 提供可发现的一键入口切换回完整模式
-- 支持通过独立路由直接进入秘书模式（例如 `/secretary`，best-effort），且完整模式仍可从全局菜单进入（best-effort）
+- 支持通过独立路由直接进入秘书模式（例如 `/secretary`，best-effort）
+- **会话分离**：秘书模式使用 secretary session；完整模式使用 assistant session；两者 message list 不得互相污染（best-effort）
 
-#### Scenario: Secretary mode remains usable for chat
-- **GIVEN** 用户已进入 Chat 的秘书模式
+#### Scenario: Secretary mode routes messages to the secretary backend
+- **GIVEN** 用户已进入秘书模式（例如访问 `/secretary`）
 - **WHEN** 用户发送一条消息
-- **THEN** 系统返回助手回复（best-effort）
-- **AND** 发送流程不依赖任何高级区域处于展开状态
+- **THEN** 前端将消息写入 secretary inbox API（best-effort）
+- **AND** 后端在短暂静默窗口后产出一条 batched 的秘书汇报（best-effort）
+- **AND** 该过程不应调用 worker chat API（best-effort）
 
-#### Scenario: User can switch between secretary mode and full mode
-- **GIVEN** 用户在秘书模式中
-- **WHEN** 用户选择切换到完整模式
-- **THEN** 之前被折叠的低频/高级区域变为可见（best-effort）
-- **WHEN** 用户再次切换回秘书模式
-- **THEN** 低频/高级区域再次折叠（best-effort）
+#### Scenario: Full mode routes messages to the worker backend
+- **GIVEN** 用户处于完整模式（例如访问 `/chat`）
+- **WHEN** 用户发送一条消息
+- **THEN** 前端使用 worker chat API 获取流式回复（best-effort）
+- **AND** 该过程不应写入 secretary inbox（best-effort）
 
-#### Scenario: Secretary mode choice persists across reload
-- **GIVEN** 用户已开启秘书模式
-- **WHEN** 用户刷新页面或重新打开应用
-- **THEN** Chat 仍以秘书模式呈现（best-effort）
-
-#### Scenario: Secretary mode can be entered via dedicated route
-- **GIVEN** 系统提供秘书模式独立路由（例如 `/secretary`）
-- **WHEN** 用户访问该路由
-- **THEN** 页面以秘书模式呈现（best-effort）
-- **AND** 用户仍能通过全局菜单进入完整模式（best-effort）
+#### Scenario: Switching modes does not mix sessions
+- **GIVEN** 用户在完整模式下已有一个 assistant chat session（best-effort）
+- **WHEN** 用户切换到秘书模式
+- **THEN** UI 切换到 secretary session 的消息流（best-effort）
+- **WHEN** 用户再切换回完整模式
+- **THEN** UI 恢复到先前的 assistant session（best-effort）
 
 ### Requirement: Secretary mode MUST support multi-message sending with quick acks and batched triage replies (best-effort)
-系统必须 (MUST) 在 Chat 的秘书模式下支持“微信式连续发送”：用户可以连续发送多条消息，而不被“assistant 正在生成中”的状态阻塞；系统应该 (SHOULD) 在用户每次发送后尽快给出一个低噪声的快速确认（quick ack，**由 LLM 生成的短句**，best-effort）；系统应该 (SHOULD) 在短暂静默窗口后对“自上次归并以来的消息集合”输出一条低噪声的秘书式汇报（best-effort），而不是逐条进行完整分析回复。
+系统必须 (MUST) 在秘书模式下支持“微信式连续发送”：用户可以连续发送多条消息，而不被“assistant 正在生成中”的状态阻塞；系统应该 (SHOULD) 在短暂静默窗口后对“自上次归并以来的消息集合”输出一条低噪声的秘书式汇报（best-effort），而不是逐条进行完整分析回复。
+
+系统可以 (MAY) 提供 quick ack（best-effort），但不得 (MUST NOT) 输出机械的计数式/空洞式回执（例如仅“收到/我继续推进/有 N 个问题”等），且 quick ack 缺失不应阻塞 triage（best-effort）。
 
 #### Scenario: User can send multiple messages without being blocked
 - **GIVEN** 用户处于秘书模式（best-effort）
 - **WHEN** 用户在短时间内连续发送多条消息
 - **THEN** UI 允许每条消息都被发送并显示在对话中（best-effort）
-- **AND** 系统不会因为 assistant 正在生成而阻止用户继续发送（best-effort）
-
-#### Scenario: Each message gets a quick ack before triage
-- **GIVEN** 用户处于秘书模式（best-effort）
-- **WHEN** 用户发送一条消息
-- **THEN** UI 在短时间内展示一条 quick ack（由 LLM 生成的短句，best-effort）
-- **AND** 该确认不要求等待后续 triage 汇总完成（best-effort）
-
-#### Scenario: Quick ack is replayable after refresh (traceable)
-- **GIVEN** 用户在秘书模式下发送了一条消息并收到 quick ack（best-effort）
-- **WHEN** 用户刷新页面或重新进入会话（best-effort）
-- **THEN** 对话中仍可看到同样的 quick ack 内容（best-effort）
+- **AND** 系统不会因为正在生成而阻止用户继续发送（best-effort）
 
 #### Scenario: Secretary produces a single batched reply for a message burst
 - **GIVEN** 用户处于秘书模式并连续发送了多条消息（best-effort）
 - **WHEN** 用户停止输入并产生短暂静默窗口（best-effort）
 - **THEN** 系统输出一条秘书式汇报，覆盖这批消息的归并理解（best-effort）
-- **AND** 汇报可包含“正在推进的工作线/已派发的后台任务/需要用户确认的问题”（best-effort）
+- **AND** 汇报必须明确下一步（继续推进什么 / 用户需要回复什么）（best-effort）
 
 ### Requirement: Secretary mode MUST notify in chat when a background task completes (best-effort)
 系统必须 (MUST) 在 Chat 的秘书模式下，在后台任务完成/失败时以低噪声方式通知用户（best-effort），以强化“微信心智”的确定性，并减少用户去任务工作台查看的心智负担。
@@ -104,21 +92,49 @@ TBD - created by archiving change add-secretary-mode-chat. Update Purpose after 
 
 至少包括（best-effort）：
 - 失败任务的提示（基于 Task Queue 中终态且非 `succeeded` 的 attempt）
-- 一键继续（`POST /api/tasks/:id/resume`）
-- 一键进入完全模式排障（例如跳转任务工作台）
+- **秘书转达**：在对话区转达“发生了什么 + 下一步 + 需要用户确认的问题（若有）”，并附可追溯引用（findings/trace/diff，best-effort）
+- 一键继续（`POST /api/tasks/:id/resume`；支持携带 `review_notes`，best-effort）
+- 排障入口（优先在秘书模式内打开 trace；无 trace 时再进入完全模式排障，best-effort）
+- **直通入口折叠**：findings/diff/trace 等细节入口不得默认显式展示；应放在“更多/展开”中（progressive disclosure，best-effort）
+- **具体而非报数**：当同一时间存在多个待处理事项时，系统不得只报数量；必须给出每个事项的具体“原因/下一步/需要你确认什么”（best-effort）
 
 #### Scenario: Failed task is surfaced in secretary mode
 - **GIVEN** `GET /api/tasks` 返回至少 1 个任务，其 latest attempt 处于失败终态（非 `queued/running` 且非 `succeeded`）
 - **WHEN** 用户处于秘书模式并停留在对话主界面
 - **THEN** 页面展示该任务的低噪声“需要处理”提示（best-effort）
 
-#### Scenario: User can resume a failed task from secretary mode
-- **GIVEN** 失败任务提示已展示（best-effort）
-- **WHEN** 用户点击“继续”
-- **THEN** 系统调用 `POST /api/tasks/:id/resume` 并将该任务重新入队（best-effort）
+#### Scenario: Secretary relays failure reason and next steps in chat (best-effort)
+- **GIVEN** 某任务 latest attempt 从 `queued/running` 跃迁到“需要处理终态”（例如 `failed/limit_exceeded/timed_out/interrupted`，best-effort）
+- **AND** 用户处于秘书模式且该跃迁发生在本次进入页面之后（不回放历史，best-effort）
+- **WHEN** UI 刷新任务列表并检测到该跃迁（best-effort）
+- **THEN** 对话区追加一条低噪声 assistant 消息用于“秘书转达”（best-effort）
+- **AND** 该消息包含用户可读的原因与下一步（优先使用 `attempt.summary` 与 `attempt.observer.next_steps`，best-effort）
+- **AND** 该消息包含可追溯引用入口（例如 findings/trace/diff），但这些入口必须默认折叠（best-effort）
 
-#### Scenario: User can enter full mode troubleshooting from secretary mode
+#### Scenario: User can reply to resume a failed task with review_notes (best-effort)
+- **GIVEN** 对话区存在一条与 task T 绑定的“秘书转达”消息（best-effort）
+- **WHEN** 用户在对话区回复一条消息作为补充信息/决策（best-effort）
+- **THEN** 系统调用 `POST /api/tasks/:id/resume` 且 `id=T`（best-effort）
+- **AND** 系统将用户回复注入该次 resume 的 `review_notes`（best-effort）
+- **AND** 对话区追加一条低噪声回执消息，留痕“已继续推进 + 绑定的 task/attempt”（best-effort）
+
+#### Scenario: Multiple failed tasks are surfaced with a focused current item (best-effort)
+- **GIVEN** 用户处于秘书模式（best-effort）
+- **AND** 同一时间存在 N 个“需要处理”的任务（N>=2，best-effort）
+- **WHEN** UI 检测到这些任务需要用户介入（best-effort）
+- **THEN** 对话区至少追加 1 条“秘书转达”消息，且每个事项包含原因/下一步/问题（best-effort）
+- **AND** UI 默认聚焦到一个当前事项（例如最新/最相关，best-effort），并允许用户切换要处理的事项（best-effort）
+
+#### Scenario: Troubleshoot opens trace inline when available (best-effort)
 - **GIVEN** 失败任务提示已展示（best-effort）
+- **AND** 该 attempt 存在 `trace_log_path`（best-effort）
+- **WHEN** 用户点击“排障”
+- **THEN** UI 在秘书模式内打开 trace 预览（best-effort）
+- **AND** 不切换到完全模式（best-effort）
+
+#### Scenario: Troubleshoot enters full mode when no trace is available (best-effort)
+- **GIVEN** 失败任务提示已展示（best-effort）
+- **AND** 该 attempt 不存在 `trace_log_path`（best-effort）
 - **WHEN** 用户点击“排障”
 - **THEN** 系统切换到完全模式（best-effort）
 - **AND** 跳转到任务工作台页面（例如 `/tasks`，best-effort）
@@ -245,4 +261,37 @@ When a tool call is running, Chat UI MUST show a compact “working” indicator
 - **GIVEN** 系统正在流式返回 assistant 消息
 - **WHEN** 前端收到 response token 统计
 - **THEN** “执行中”提示应展示 token 计数（best-effort）
+
+### Requirement: Secretary UI MUST behave as a permanent single conversation (no session switching) (best-effort)
+系统必须 (MUST) 将 `/secretary`（或等价入口）的用户心智固定为“永久单会话”：秘书与用户之间只有一个对话，不创建/不切换会话（best-effort）。
+
+秘书模式下的 UI 必须 (MUST) 满足（best-effort）：
+- 默认不展示会话列表/新建会话/切换会话等入口
+- 刷新页面后仍回到同一个秘书对话（best-effort）
+- 发送消息时不要求用户感知 `session_id`（best-effort）
+
+#### Scenario: Reload keeps the same secretary conversation (best-effort)
+- **GIVEN** 用户通过 `/secretary` 进入秘书对话并发送过消息（best-effort）
+- **WHEN** 用户刷新页面或重新打开应用（best-effort）
+- **THEN** UI 仍呈现同一个秘书对话历史（best-effort）
+- **AND** UI 不要求用户选择或创建新的会话（best-effort）
+
+### Requirement: Secretary mode MUST surface pending triage questions as a low-noise, replayable UI affordance (best-effort)
+当秘书模式下 triage 产生 `questions[]` 时，Chat UI 必须 (MUST) 以低噪声方式让用户发现并查看这些待确认问题（best-effort），避免对话中只留下模糊提示导致用户无法继续。
+
+至少包括（best-effort）：
+- 一个可发现的“待确认”提示入口（例如 badge）
+- 打开后可查看 `questions[]` 的具体内容（例如弹窗/侧边面板）
+- 刷新/重进会话后仍能恢复并展示同一批待确认问题（replayable，best-effort）
+
+#### Scenario: Pending triage questions are discoverable in secretary mode (best-effort)
+- **GIVEN** triage 响应包含 `questions[]` 且非空（best-effort）
+- **WHEN** 用户处于秘书模式（best-effort）
+- **THEN** UI 展示一个低噪声“待确认”入口（best-effort）
+- **AND** 用户可以打开并看到每条问题内容（best-effort）
+
+#### Scenario: Pending triage questions are replayable after refresh (best-effort)
+- **GIVEN** 某 session 存在未解决的 `questions[]`（best-effort）
+- **WHEN** 用户刷新页面或重新进入秘书模式（best-effort）
+- **THEN** UI 通过恢复 secretary state 再次显示这些待确认问题（best-effort）
 
