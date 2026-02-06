@@ -68,6 +68,7 @@ type TaskRunner struct {
 
 	queues            map[string][]string
 	runningWorkspaces map[string]bool
+	workspaceAges     map[string]int
 
 	running sync.Map // map[string]context.CancelFunc (key=task_id)
 }
@@ -94,6 +95,7 @@ func (r *TaskRunner) Start() error {
 	r.notify = make(chan struct{}, 1)
 	r.queues = make(map[string][]string)
 	r.runningWorkspaces = make(map[string]bool)
+	r.workspaceAges = make(map[string]int)
 
 	r.wg.Add(1)
 	go func() {
@@ -555,10 +557,13 @@ func (r *TaskRunner) pickNextRunnable() (string, string) {
 		}
 	}
 
+	var eligible []string
+
 	bestWS := ""
-	bestPriority := -1 << 30
+	bestScore := -1 << 30
 	for ws, q := range r.queues {
 		if len(q) == 0 {
+			delete(r.workspaceAges, ws)
 			continue
 		}
 		if r.runningWorkspaces[ws] {
@@ -566,17 +571,33 @@ func (r *TaskRunner) pickNextRunnable() (string, string) {
 		}
 		p := g.Workspaces[ws]
 		if p.Paused {
+			r.workspaceAges[ws] = 0
 			continue
 		}
 
-		pri := p.Priority
-		if bestWS == "" || pri > bestPriority || (pri == bestPriority && ws < bestWS) {
+		eligible = append(eligible, ws)
+
+		age := r.workspaceAges[ws]
+		score := p.Priority + age
+		if bestWS == "" || score > bestScore || (score == bestScore && ws < bestWS) {
 			bestWS = ws
-			bestPriority = pri
+			bestScore = score
 		}
 	}
 	if bestWS == "" {
 		return "", ""
+	}
+
+	for _, ws := range eligible {
+		if ws == bestWS {
+			r.workspaceAges[ws] = 0
+			continue
+		}
+		age := r.workspaceAges[ws]
+		if age < 1_000_000 {
+			age++
+		}
+		r.workspaceAges[ws] = age
 	}
 
 	taskID := r.queues[bestWS][0]

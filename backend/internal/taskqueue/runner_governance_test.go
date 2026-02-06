@@ -147,6 +147,87 @@ func TestTaskRunner_Governance_PausedWorkspace(t *testing.T) {
 	waitForN(t, started, 1, 2*time.Second)
 }
 
+func TestTaskRunner_Governance_FairnessPreventsStarvation(t *testing.T) {
+	base := t.TempDir()
+	store, err := NewStore(filepath.Join(base, "tasks"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	// Global cap forces contention so fairness matters.
+	_, err = store.UpdateGovernance(func(g *QueueGovernance) error {
+		g.Global.MaxRunningWorkspaces = 1
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateGovernance(global): %v", err)
+	}
+
+	wsHigh := filepath.Join(base, "ws-high")
+	wsLow := filepath.Join(base, "ws-low")
+	mustMkdir(t, wsHigh)
+	mustMkdir(t, wsLow)
+
+	_, err = store.UpdateGovernance(func(g *QueueGovernance) error {
+		g.Workspaces[wsHigh] = WorkspacePolicy{Paused: false, Priority: 3}
+		g.Workspaces[wsLow] = WorkspacePolicy{Paused: false, Priority: 0}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateGovernance(workspaces): %v", err)
+	}
+
+	// Seed enough high-priority work to keep its queue non-empty for a while.
+	for i := 0; i < 12; i++ {
+		if _, err := store.CreateTask("local", wsHigh, "high", "do high", "", ResolveLimits(Limits{})); err != nil {
+			t.Fatalf("CreateTask(high %d): %v", i, err)
+		}
+	}
+	if _, err := store.CreateTask("local", wsLow, "low", "do low", "", ResolveLimits(Limits{})); err != nil {
+		t.Fatalf("CreateTask(low): %v", err)
+	}
+
+	started := make(chan string, 64)
+	r := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{Pass: true}, nil
+		},
+		ExecuteAttempt: func(ctx context.Context, task Task, attempt Attempt, resumedFrom *Attempt) (AttemptResult, error) {
+			started <- filepath.Base(task.Workspace)
+			findings := filepath.Join(base, "findings-"+task.ID+".md")
+			trace := filepath.Join(base, "trace-"+task.ID+".jsonl")
+			mustWrite(t, findings, "ok")
+			mustWrite(t, trace, "{}\n")
+			return AttemptResult{Summary: "ok", FindingsPath: findings, TraceLogPath: trace}, nil
+		},
+	}
+	if err := r.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(r.Stop)
+
+	// With fairness enabled, lower-priority workspaces should still eventually get a run slot
+	// even if a higher-priority workspace remains continuously backlogged.
+	got := collectStrings(t, started, 10, 4*time.Second)
+	sawLow := false
+	sawHigh := false
+	for _, ws := range got {
+		if ws == "ws-low" {
+			sawLow = true
+		}
+		if ws == "ws-high" {
+			sawHigh = true
+		}
+	}
+	if !sawHigh {
+		t.Fatalf("expected high-priority workspace to start at least once; got=%v", got)
+	}
+	if !sawLow {
+		t.Fatalf("expected fairness to eventually start low-priority workspace; got=%v", got)
+	}
+}
+
 func TestTaskRunner_Governance_ScheduleTriggersEnqueue(t *testing.T) {
 	base := t.TempDir()
 	store, err := NewStore(filepath.Join(base, "tasks"))
@@ -232,4 +313,21 @@ func waitForN(t *testing.T, ch <-chan string, n int, timeout time.Duration) {
 			got++
 		}
 	}
+}
+
+func collectStrings(t *testing.T, ch <-chan string, n int, timeout time.Duration) []string {
+	t.Helper()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+
+	out := make([]string, 0, n)
+	for len(out) < n {
+		select {
+		case <-deadline.C:
+			t.Fatalf("timeout waiting for %d items, got %d", n, len(out))
+		case s := <-ch:
+			out = append(out, s)
+		}
+	}
+	return out
 }
