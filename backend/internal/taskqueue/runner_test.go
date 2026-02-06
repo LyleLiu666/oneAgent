@@ -319,6 +319,15 @@ func TestTaskRunner_CancelQueued(t *testing.T) {
 	if canceled.LatestAttempt() == nil || canceled.LatestAttempt().Status != AttemptCanceled {
 		t.Fatalf("expected canceled status, got %+v", canceled.LatestAttempt())
 	}
+	if strings.TrimSpace(canceled.LatestAttempt().ArtifactManifestVersion) != ArtifactManifestVersionV1 {
+		t.Fatalf("expected artifact_manifest_version=%q, got %q", ArtifactManifestVersionV1, canceled.LatestAttempt().ArtifactManifestVersion)
+	}
+	if strings.TrimSpace(canceled.LatestAttempt().ArtifactManifestPath) == "" {
+		t.Fatalf("expected artifact_manifest_path to be set")
+	}
+	if _, err := os.Stat(canceled.LatestAttempt().ArtifactManifestPath); err != nil {
+		t.Fatalf("artifact_manifest_path missing: %v", err)
+	}
 
 	close(blockA)
 	waitForStatus(t, store, taskA.ID, AttemptSucceeded, 2*time.Second)
@@ -379,6 +388,24 @@ func TestTaskRunner_CancelRunning(t *testing.T) {
 	}
 
 	waitForStatus(t, store, taskA.ID, AttemptCanceled, 2*time.Second)
+
+	final, err := store.GetTask(taskA.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	a := final.LatestAttempt()
+	if a == nil || a.Status != AttemptCanceled {
+		t.Fatalf("expected canceled attempt, got %+v", a)
+	}
+	if strings.TrimSpace(a.ArtifactManifestVersion) != ArtifactManifestVersionV1 {
+		t.Fatalf("expected artifact_manifest_version=%q, got %q", ArtifactManifestVersionV1, a.ArtifactManifestVersion)
+	}
+	if strings.TrimSpace(a.ArtifactManifestPath) == "" {
+		t.Fatalf("expected artifact_manifest_path to be set")
+	}
+	if _, err := os.Stat(a.ArtifactManifestPath); err != nil {
+		t.Fatalf("artifact_manifest_path missing: %v", err)
+	}
 }
 
 func TestTaskRunner_CancelFailedMarksCanceled(t *testing.T) {
@@ -420,6 +447,15 @@ func TestTaskRunner_CancelFailedMarksCanceled(t *testing.T) {
 	}
 	if updated.LatestAttempt() == nil || updated.LatestAttempt().Status != AttemptCanceled {
 		t.Fatalf("expected canceled status after canceling failed attempt, got %+v", updated.LatestAttempt())
+	}
+	if strings.TrimSpace(updated.LatestAttempt().ArtifactManifestVersion) != ArtifactManifestVersionV1 {
+		t.Fatalf("expected artifact_manifest_version=%q, got %q", ArtifactManifestVersionV1, updated.LatestAttempt().ArtifactManifestVersion)
+	}
+	if strings.TrimSpace(updated.LatestAttempt().ArtifactManifestPath) == "" {
+		t.Fatalf("expected artifact_manifest_path to be set")
+	}
+	if _, err := os.Stat(updated.LatestAttempt().ArtifactManifestPath); err != nil {
+		t.Fatalf("artifact_manifest_path missing: %v", err)
 	}
 }
 
@@ -917,6 +953,15 @@ func TestTaskRunner_Start_MarksRunningAsInterrupted(t *testing.T) {
 	}
 	if got.LatestAttempt() == nil || got.LatestAttempt().Status != AttemptInterrupted {
 		t.Fatalf("expected interrupted after start recovery, got %+v", got.LatestAttempt())
+	}
+	if strings.TrimSpace(got.LatestAttempt().ArtifactManifestVersion) != ArtifactManifestVersionV1 {
+		t.Fatalf("expected artifact_manifest_version=%q, got %q", ArtifactManifestVersionV1, got.LatestAttempt().ArtifactManifestVersion)
+	}
+	if strings.TrimSpace(got.LatestAttempt().ArtifactManifestPath) == "" {
+		t.Fatalf("expected artifact_manifest_path to be set")
+	}
+	if _, err := os.Stat(got.LatestAttempt().ArtifactManifestPath); err != nil {
+		t.Fatalf("artifact_manifest_path missing: %v", err)
 	}
 
 	select {

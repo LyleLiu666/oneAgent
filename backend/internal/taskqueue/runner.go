@@ -120,7 +120,7 @@ func (r *TaskRunner) Start() error {
 		case AttemptRunning:
 			attemptID := latest.ID
 			now := Now()
-			_, err := r.Store.UpdateTask(task.ID, func(tk *Task) error {
+			updatedTask, err := r.Store.UpdateTask(task.ID, func(tk *Task) error {
 				a := tk.LatestAttempt()
 				if a == nil || a.ID != attemptID || a.Status != AttemptRunning {
 					return nil
@@ -139,6 +139,49 @@ func (r *TaskRunner) Start() error {
 					Type:      "attempt.interrupted",
 					Message:   "Server restarted; attempt marked interrupted",
 				})
+
+				finalAttempt := updatedTask.LatestAttempt()
+				if finalAttempt != nil && finalAttempt.ID == attemptID {
+					normalized := *finalAttempt
+					manifestErr := EnsureArtifactManifestV1(r.Store.TasksDir(), updatedTask, &normalized)
+					if manifestErr == nil {
+						updatedTask, _ = r.Store.UpdateTask(task.ID, func(tk *Task) error {
+							a := tk.LatestAttempt()
+							if a == nil || a.ID != attemptID || a.Status != AttemptInterrupted {
+								return nil
+							}
+							a.ArtifactManifestVersion = normalized.ArtifactManifestVersion
+							a.ArtifactManifestPath = normalized.ArtifactManifestPath
+							if strings.TrimSpace(a.ChangedFilesPath) == "" {
+								a.ChangedFilesPath = normalized.ChangedFilesPath
+							}
+							if strings.TrimSpace(a.DiffPatchPath) == "" {
+								a.DiffPatchPath = normalized.DiffPatchPath
+							}
+							if strings.TrimSpace(a.ReviewCommentsPath) == "" {
+								a.ReviewCommentsPath = normalized.ReviewCommentsPath
+							}
+							return nil
+						})
+					} else {
+						_ = r.Store.AppendEvent(Event{
+							TaskID:    task.ID,
+							AttemptID: attemptID,
+							Type:      "attempt.artifact_manifest.failed",
+							Message:   "artifact manifest write failed",
+							Data: map[string]any{
+								"error": manifestErr.Error(),
+							},
+						})
+					}
+
+					if r.OnAttemptFinished != nil {
+						func() {
+							defer func() { _ = recover() }()
+							r.OnAttemptFinished(context.Background(), updatedTask, normalized)
+						}()
+					}
+				}
 			}
 
 		case AttemptQueued:
@@ -234,6 +277,39 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 			Type:      "attempt.canceled",
 			Message:   "Attempt canceled while queued",
 		})
+
+		finalAttempt := updated.LatestAttempt()
+		if finalAttempt != nil && finalAttempt.ID == attemptID {
+			normalized := *finalAttempt
+			manifestErr := EnsureArtifactManifestV1(r.Store.TasksDir(), updated, &normalized)
+			if manifestErr == nil {
+				updated, _ = r.Store.UpdateTask(taskID, func(tk *Task) error {
+					a := tk.LatestAttempt()
+					if a == nil || a.ID != attemptID || a.Status != AttemptCanceled {
+						return nil
+					}
+					a.ArtifactManifestVersion = normalized.ArtifactManifestVersion
+					a.ArtifactManifestPath = normalized.ArtifactManifestPath
+					return nil
+				})
+			} else {
+				_ = r.Store.AppendEvent(Event{
+					TaskID:    taskID,
+					AttemptID: attemptID,
+					Type:      "attempt.artifact_manifest.failed",
+					Message:   "artifact manifest write failed",
+					Data: map[string]any{
+						"error": manifestErr.Error(),
+					},
+				})
+			}
+			if r.OnAttemptFinished != nil {
+				func() {
+					defer func() { _ = recover() }()
+					r.OnAttemptFinished(context.Background(), updated, normalized)
+				}()
+			}
+		}
 		return updated, nil
 
 	case AttemptRunning:
@@ -272,6 +348,48 @@ func (r *TaskRunner) Cancel(taskID string) (Task, error) {
 			Type:      "attempt.canceled",
 			Message:   "Attempt canceled after failure",
 		})
+
+		finalAttempt := updated.LatestAttempt()
+		if finalAttempt != nil && finalAttempt.ID == attemptID {
+			normalized := *finalAttempt
+			manifestErr := EnsureArtifactManifestV1(r.Store.TasksDir(), updated, &normalized)
+			if manifestErr == nil {
+				updated, _ = r.Store.UpdateTask(taskID, func(tk *Task) error {
+					a := tk.LatestAttempt()
+					if a == nil || a.ID != attemptID || a.Status != AttemptCanceled {
+						return nil
+					}
+					a.ArtifactManifestVersion = normalized.ArtifactManifestVersion
+					a.ArtifactManifestPath = normalized.ArtifactManifestPath
+					if strings.TrimSpace(a.ChangedFilesPath) == "" {
+						a.ChangedFilesPath = normalized.ChangedFilesPath
+					}
+					if strings.TrimSpace(a.DiffPatchPath) == "" {
+						a.DiffPatchPath = normalized.DiffPatchPath
+					}
+					if strings.TrimSpace(a.ReviewCommentsPath) == "" {
+						a.ReviewCommentsPath = normalized.ReviewCommentsPath
+					}
+					return nil
+				})
+			} else {
+				_ = r.Store.AppendEvent(Event{
+					TaskID:    taskID,
+					AttemptID: attemptID,
+					Type:      "attempt.artifact_manifest.failed",
+					Message:   "artifact manifest write failed",
+					Data: map[string]any{
+						"error": manifestErr.Error(),
+					},
+				})
+			}
+			if r.OnAttemptFinished != nil {
+				func() {
+					defer func() { _ = recover() }()
+					r.OnAttemptFinished(context.Background(), updated, normalized)
+				}()
+			}
+		}
 		return updated, nil
 
 	default:
