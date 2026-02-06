@@ -18,6 +18,7 @@ func main() {
 	outDir := fs.String("out", "", "output directory (default: <repo>/.oneagent/tmp/benchmarks/<run_id>/)")
 	baseline := fs.String("baseline", "", "baseline report.json path (best-effort)")
 	limit := fs.Int("limit", 0, "limit number of cases (0 = all)")
+	cases := fs.String("cases", "", "comma-separated case ids to run (overrides --limit when set)")
 	maxFirstPassDrop := fs.Float64("max-first-pass-drop", 0, "fail if first_pass_success_rate drops more than this vs baseline (requires --baseline; 0 disables)")
 	maxRecoveryDrop := fs.Float64("max-recovery-drop", 0, "fail if recovery_success_rate drops more than this vs baseline (requires --baseline; 0 disables)")
 	maxEvidenceDrop := fs.Float64("max-evidence-drop", 0, "fail if evidence_completeness_avg drops more than this vs baseline (requires --baseline; 0 disables)")
@@ -43,6 +44,7 @@ func main() {
 		OutDir:       strings.TrimSpace(*outDir),
 		BaselinePath: strings.TrimSpace(*baseline),
 		Limit:        *limit,
+		CaseIDs:      splitCSV(*cases),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "benchmark failed: %v\n", err)
@@ -75,4 +77,20 @@ func main() {
 			os.Exit(2)
 		}
 	}
+}
+
+func splitCSV(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
