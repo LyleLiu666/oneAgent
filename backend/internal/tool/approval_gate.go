@@ -110,6 +110,12 @@ func requireToolApprovalIfNeeded(ctx context.Context, toolID string, raw json.Ra
 	return &ApprovalRequiredError{ApprovalID: approvalID, ToolID: toolID, ScopeID: scopeID}
 }
 
+// RequireApprovalIfNeeded enforces policy-driven approval gates for a tool invocation.
+// It returns nil when no approval is required, or an ApprovalRequiredError / ApprovalDeniedError otherwise.
+func RequireApprovalIfNeeded(ctx context.Context, toolID string, raw json.RawMessage) error {
+	return requireToolApprovalIfNeeded(ctx, toolID, raw)
+}
+
 func toolArgsHash(raw json.RawMessage) string {
 	normalized := []byte(raw)
 	if len(raw) > 0 {
