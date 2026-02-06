@@ -1,0 +1,677 @@
+{
+  "id": "head2head-mvp",
+  "version": 1,
+  "title": "Head-to-head benchmark (MVP)",
+  "description": "Local-first delivery quality benchmark. Deterministic mock scripts validate task+acceptance+evidence end-to-end, including recovery via resume.",
+  "cases": [
+    {
+      "id": "001_docs_write_readme",
+      "title": "Write README.md (docs, short, single-step)",
+      "labels": ["docs", "short", "single-step"],
+      "prompt": "Create README.md with a title and a short usage section.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          { "path": "seed.txt", "content": "seed\n" }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_exists", "path": "README.md" },
+        { "type": "file_contains", "path": "README.md", "contains": "# " },
+        { "type": "changed_files_contains", "path": "README.md" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "write_file",
+                    "arguments": { "filePath": "README.md", "content": "# Project\\n\\n## Usage\\n\\n- Run locally\\n" }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff>\\n  <summary>wrote README</summary>\\n  <timeline>## 流水账\\n- write README.md</timeline>\\n  <findings>## Findings\\n- OK</findings>\\n  <changed_files>## 变更文件\\n- README.md</changed_files>\\n</subagent_handoff>\\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "002_coding_write_go_file",
+      "title": "Write main.go (coding, short, single-step)",
+      "labels": ["coding", "short", "single-step"],
+      "prompt": "Create main.go with a minimal Go program that prints a greeting.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          { "path": "seed.txt", "content": "seed\n" }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_exists", "path": "main.go" },
+        { "type": "file_contains", "path": "main.go", "contains": "package main" },
+        { "type": "changed_files_contains", "path": "main.go" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "write_file",
+                    "arguments": {
+                      "filePath": "main.go",
+                      "content": "package main\\n\\nimport \\\"fmt\\\"\\n\\nfunc main() {\\n\\tfmt.Println(\\\"hello\\\")\\n}\\n"
+                    }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>wrote main.go</summary><timeline>## 流水账\\n- write main.go</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- main.go</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "003_coding_edit_go_file",
+      "title": "Edit main.go (coding, short, single-step)",
+      "labels": ["coding", "short", "single-step"],
+      "prompt": "Update main.go to print 'hello world' instead of 'hello'.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          {
+            "path": "main.go",
+            "content": "package main\\n\\nimport \\\"fmt\\\"\\n\\nfunc main() {\\n\\tfmt.Println(\\\"hello\\\")\\n}\\n"
+          }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_contains", "path": "main.go", "contains": "hello world" },
+        { "type": "file_not_contains", "path": "main.go", "contains": "fmt.Println(\"hello\")" },
+        { "type": "changed_files_contains", "path": "main.go" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "edit",
+                    "arguments": {
+                      "edits": [
+                        {
+                          "filePath": "main.go",
+                          "oldString": "fmt.Println(\\\"hello\\\")",
+                          "newString": "fmt.Println(\\\"hello world\\\")"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff>\\n<summary>updated greeting</summary>\\n<timeline>## 流水账\\n- edit main.go</timeline>\\n<findings>## Findings\\n- OK</findings>\\n<changed_files>## 变更文件\\n- main.go</changed_files>\\n</subagent_handoff>\\n"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "004_ops_write_config_json",
+      "title": "Write config/app.json (ops, short, single-step)",
+      "labels": ["ops", "short", "single-step"],
+      "prompt": "Create config/app.json with keys {name, version, enabled}.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [{ "path": "seed.txt", "content": "seed\n" }]
+      },
+      "acceptance": [
+        { "type": "file_exists", "path": "config/app.json" },
+        { "type": "json_valid", "path": "config/app.json" },
+        { "type": "changed_files_contains", "path": "config/app.json" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "write_file",
+                    "arguments": {
+                      "filePath": "config/app.json",
+                      "content": "{\\n  \\\"name\\\": \\\"app\\\",\\n  \\\"version\\\": \\\"0.1.0\\\",\\n  \\\"enabled\\\": true\\n}\\n"
+                    }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>wrote config</summary><timeline>## 流水账\\n- write config/app.json</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- config/app.json</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "005_docs_multi_files",
+      "title": "Write docs/guide.md + docs/faq.md (docs, short, multi-step)",
+      "labels": ["docs", "short", "multi-step"],
+      "prompt": "Create docs/guide.md and docs/faq.md with simple content.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [{ "path": "seed.txt", "content": "seed\n" }]
+      },
+      "acceptance": [
+        { "type": "file_exists", "path": "docs/guide.md" },
+        { "type": "file_exists", "path": "docs/faq.md" },
+        { "type": "changed_files_contains", "path": "docs/guide.md" },
+        { "type": "changed_files_contains", "path": "docs/faq.md" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "write_file",
+                    "arguments": { "filePath": "docs/guide.md", "content": "# Guide\\n\\n- Step 1\\n" }
+                  },
+                  {
+                    "call_id": "call_2",
+                    "name": "write_file",
+                    "arguments": { "filePath": "docs/faq.md", "content": "# FAQ\\n\\nQ: ...\\nA: ...\\n" }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>wrote docs</summary><timeline>## 流水账\\n- write docs/guide.md\\n- write docs/faq.md</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- docs/guide.md\\n- docs/faq.md</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "006_research_notes",
+      "title": "Write research/notes.md (research, short, single-step)",
+      "labels": ["research", "short", "single-step"],
+      "prompt": "Create research/notes.md with 3 bullet points summarizing given facts.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "research/notes.md" },
+        { "type": "file_contains", "path": "research/notes.md", "contains": "- " },
+        { "type": "changed_files_contains", "path": "research/notes.md" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "write_file",
+                    "arguments": { "filePath": "research/notes.md", "content": "# Notes\\n\\n- Fact A\\n- Fact B\\n- Fact C\\n" }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>wrote notes</summary><timeline>## 流水账\\n- write research/notes.md</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- research/notes.md</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "007_ops_trash_file",
+      "title": "Trash obsolete.txt (ops, short, single-step)",
+      "labels": ["ops", "short", "single-step"],
+      "prompt": "Remove obsolete.txt by moving it to trash.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          { "path": "obsolete.txt", "content": "old\n" }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_not_exists", "path": "obsolete.txt" },
+        { "type": "changed_files_contains", "path": "obsolete.txt" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  { "call_id": "call_1", "name": "trash_file", "arguments": { "filePath": "obsolete.txt" } }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>trashed obsolete.txt</summary><timeline>## 流水账\\n- trash obsolete.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- obsolete.txt</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "008_coding_write_makefile",
+      "title": "Write Makefile (coding, short, single-step)",
+      "labels": ["coding", "short", "single-step"],
+      "prompt": "Create Makefile with a 'build' target that prints a message.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "Makefile" },
+        { "type": "file_contains", "path": "Makefile", "contains": "build:" },
+        { "type": "changed_files_contains", "path": "Makefile" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  { "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "Makefile", "content": ".PHONY: build\\n\\nbuild:\\n\\t@echo ok\\n" } }
+                ]
+              },
+              { "text": "<subagent_handoff><summary>wrote Makefile</summary><timeline>## 流水账\\n- write Makefile</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- Makefile</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "009_coding_write_gitignore",
+      "title": "Write .gitignore (coding, short, single-step)",
+      "labels": ["coding", "short", "single-step"],
+      "prompt": "Create .gitignore ignoring dist/ and node_modules/.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": ".gitignore" },
+        { "type": "file_contains", "path": ".gitignore", "contains": "node_modules/" },
+        { "type": "changed_files_contains", "path": ".gitignore" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": ".gitignore", "content": "dist/\\nnode_modules/\\n" } }] },
+              { "text": "<subagent_handoff><summary>wrote gitignore</summary><timeline>## 流水账\\n- write .gitignore</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- .gitignore</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "010_docs_write_changelog",
+      "title": "Write CHANGELOG.md (docs, short, single-step)",
+      "labels": ["docs", "short", "single-step"],
+      "prompt": "Create CHANGELOG.md with an Unreleased section.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "CHANGELOG.md" },
+        { "type": "file_contains", "path": "CHANGELOG.md", "contains": "## Unreleased" },
+        { "type": "changed_files_contains", "path": "CHANGELOG.md" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "CHANGELOG.md", "content": "# Changelog\\n\\n## Unreleased\\n- Added: ...\\n" } }] },
+              { "text": "<subagent_handoff><summary>wrote changelog</summary><timeline>## 流水账\\n- write CHANGELOG.md</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- CHANGELOG.md</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "011_coding_write_two_go_files",
+      "title": "Write pkg/util/util.go + pkg/util/doc.go (coding, short, multi-step)",
+      "labels": ["coding", "short", "multi-step"],
+      "prompt": "Create pkg/util/util.go and pkg/util/doc.go with minimal package docs.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "pkg/util/util.go" },
+        { "type": "file_exists", "path": "pkg/util/doc.go" },
+        { "type": "changed_files_contains", "path": "pkg/util/util.go" },
+        { "type": "changed_files_contains", "path": "pkg/util/doc.go" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  { "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "pkg/util/util.go", "content": "package util\\n\\nfunc Add(a, b int) int {\\n\\treturn a + b\\n}\\n" } },
+                  { "call_id": "call_2", "name": "write_file", "arguments": { "filePath": "pkg/util/doc.go", "content": "// Package util provides small helpers.\\npackage util\\n" } }
+                ]
+              },
+              { "text": "<subagent_handoff><summary>wrote util pkg</summary><timeline>## 流水账\\n- write pkg/util/util.go\\n- write pkg/util/doc.go</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- pkg/util/doc.go\\n- pkg/util/util.go</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "012_ops_write_yaml",
+      "title": "Write config/app.yaml (ops, short, single-step)",
+      "labels": ["ops", "short", "single-step"],
+      "prompt": "Create config/app.yaml with name/version/enabled keys.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "config/app.yaml" },
+        { "type": "file_contains", "path": "config/app.yaml", "contains": "name:" },
+        { "type": "changed_files_contains", "path": "config/app.yaml" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "config/app.yaml", "content": "name: app\\nversion: 0.1.0\\nenabled: true\\n" } }] },
+              { "text": "<subagent_handoff><summary>wrote yaml</summary><timeline>## 流水账\\n- write config/app.yaml</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- config/app.yaml</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "013_docs_edit_markdown",
+      "title": "Edit docs/guide.md (docs, short, single-step)",
+      "labels": ["docs", "short", "single-step"],
+      "prompt": "Add a Troubleshooting section to docs/guide.md.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          { "path": "docs/guide.md", "content": "# Guide\\n\\n## Install\\n- ...\\n" }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_contains", "path": "docs/guide.md", "contains": "## Troubleshooting" },
+        { "type": "changed_files_contains", "path": "docs/guide.md" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "edit",
+                    "arguments": {
+                      "edits": [
+                        {
+                          "filePath": "docs/guide.md",
+                          "oldString": "## Install\\n- ...\\n",
+                          "newString": "## Install\\n- ...\\n\\n## Troubleshooting\\n- Check logs\\n"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              { "text": "<subagent_handoff><summary>updated guide</summary><timeline>## 流水账\\n- edit docs/guide.md</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- docs/guide.md</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "014_coding_recovery_wrong_then_fix",
+      "title": "Recovery: wrong content then fix (coding, short, multi-step)",
+      "labels": ["coding", "short", "multi-step"],
+      "prompt": "Create hello.txt containing exactly 'hello world\\n'.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "hello.txt" },
+        { "type": "file_equals", "path": "hello.txt", "equals": "hello world\n" },
+        { "type": "changed_files_contains", "path": "hello.txt" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "hello.txt", "content": "hello\n" } }] },
+              { "text": "<subagent_handoff><summary>wrote hello.txt</summary><timeline>## 流水账\\n- write hello.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- hello.txt</changed_files></subagent_handoff>" }
+            ]
+          },
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "hello.txt", "content": "hello world\n" } }] },
+              { "text": "<subagent_handoff><summary>fixed hello.txt</summary><timeline>## 流水账\\n- overwrite hello.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- hello.txt</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "015_ops_recovery_trash_wrong_then_fix",
+      "title": "Recovery: trash wrong file then fix (ops, short, multi-step)",
+      "labels": ["ops", "short", "multi-step"],
+      "prompt": "Trash only a.txt (keep b.txt).",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          { "path": "a.txt", "content": "a\n" },
+          { "path": "b.txt", "content": "b\n" }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_not_exists", "path": "a.txt" },
+        { "type": "file_exists", "path": "b.txt" },
+        { "type": "changed_files_contains", "path": "a.txt" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "trash_file", "arguments": { "filePath": "b.txt" } }] },
+              { "text": "<subagent_handoff><summary>trashed a file</summary><timeline>## 流水账\\n- trash b.txt (mistake)</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- b.txt</changed_files></subagent_handoff>" }
+            ]
+          },
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "trash_file", "arguments": { "filePath": "a.txt" } }] },
+              { "text": "<subagent_handoff><summary>trashed a.txt</summary><timeline>## 流水账\\n- trash a.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- a.txt</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "016_docs_recovery_missing_then_fix",
+      "title": "Recovery: missing file then fix (docs, short, multi-step)",
+      "labels": ["docs", "short", "multi-step"],
+      "prompt": "Create docs/status.md with a Status header.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "docs/status.md" },
+        { "type": "file_contains", "path": "docs/status.md", "contains": "# Status" },
+        { "type": "changed_files_contains", "path": "docs/status.md" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "text": "<subagent_handoff><summary>no-op</summary><timeline>## 流水账\\n- forgot to write file</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- （无）</changed_files></subagent_handoff>" }
+            ]
+          },
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "docs/status.md", "content": "# Status\\n\\n- ok\\n" } }] },
+              { "text": "<subagent_handoff><summary>wrote status</summary><timeline>## 流水账\\n- write docs/status.md</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- docs/status.md</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "017_coding_write_two_text_files",
+      "title": "Write src/a.txt + src/b.txt (coding, short, multi-step)",
+      "labels": ["coding", "short", "multi-step"],
+      "prompt": "Create src/a.txt and src/b.txt with simple contents.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "src/a.txt" },
+        { "type": "file_exists", "path": "src/b.txt" },
+        { "type": "changed_files_contains", "path": "src/a.txt" },
+        { "type": "changed_files_contains", "path": "src/b.txt" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  { "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "src/a.txt", "content": "A\n" } },
+                  { "call_id": "call_2", "name": "write_file", "arguments": { "filePath": "src/b.txt", "content": "B\n" } }
+                ]
+              },
+              { "text": "<subagent_handoff><summary>wrote src files</summary><timeline>## 流水账\\n- write src/a.txt\\n- write src/b.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- src/a.txt\\n- src/b.txt</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "018_docs_write_template",
+      "title": "Write templates/email.txt (docs, short, single-step)",
+      "labels": ["docs", "short", "single-step"],
+      "prompt": "Create templates/email.txt with a placeholder line.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": "templates/email.txt" },
+        { "type": "file_contains", "path": "templates/email.txt", "contains": "{{name}}" },
+        { "type": "changed_files_contains", "path": "templates/email.txt" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              { "tool_calls": [{ "call_id": "call_1", "name": "write_file", "arguments": { "filePath": "templates/email.txt", "content": "Hello {{name}},\n\nWelcome!\n" } }] },
+              { "text": "<subagent_handoff><summary>wrote template</summary><timeline>## 流水账\\n- write templates/email.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- templates/email.txt</changed_files></subagent_handoff>" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "019_ops_create_project_config",
+      "title": "Write .oneagent/project.json (ops, short, single-step)",
+      "labels": ["ops", "short", "single-step"],
+      "prompt": "Create .oneagent/project.json with attempt_execution_mode=worktree.",
+      "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
+      "acceptance": [
+        { "type": "file_exists", "path": ".oneagent/project.json" },
+        { "type": "json_valid", "path": ".oneagent/project.json" },
+        { "type": "changed_files_contains", "path": ".oneagent/project.json" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "write_file",
+                    "arguments": {
+                      "filePath": ".oneagent/project.json",
+                      "content": "{\\n  \\\"attempt_execution_mode\\\": \\\"worktree\\\"\\n}\\n"
+                    }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>wrote project config</summary><timeline>## 流水账\\n- write .oneagent/project.json</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- .oneagent/project.json</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "020_coding_edit_two_files",
+      "title": "Edit two files (coding, short, multi-step)",
+      "labels": ["coding", "short", "multi-step"],
+      "prompt": "Update alpha.txt and beta.txt to replace TODO with DONE.",
+      "workspace": {
+        "git_init": true,
+        "seed_files": [
+          { "path": "alpha.txt", "content": "TODO\n" },
+          { "path": "beta.txt", "content": "TODO\n" }
+        ]
+      },
+      "acceptance": [
+        { "type": "file_contains", "path": "alpha.txt", "contains": "DONE" },
+        { "type": "file_contains", "path": "beta.txt", "contains": "DONE" },
+        { "type": "changed_files_contains", "path": "alpha.txt" },
+        { "type": "changed_files_contains", "path": "beta.txt" }
+      ],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "mock": {
+        "attempts": [
+          {
+            "responses": [
+              {
+                "tool_calls": [
+                  {
+                    "call_id": "call_1",
+                    "name": "edit",
+                    "arguments": {
+                      "edits": [
+                        { "filePath": "alpha.txt", "oldString": "TODO", "newString": "DONE" },
+                        { "filePath": "beta.txt", "oldString": "TODO", "newString": "DONE" }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "text": "<subagent_handoff><summary>updated two files</summary><timeline>## 流水账\\n- edit alpha.txt\\n- edit beta.txt</timeline><findings>## Findings\\n- OK</findings><changed_files>## 变更文件\\n- alpha.txt\\n- beta.txt</changed_files></subagent_handoff>"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
+
