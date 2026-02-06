@@ -86,6 +86,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/tasks/:id/resume", handler.ResumeTask)
 		api.GET("/tasks/:id/events", handler.GetTaskEvents)
 		api.GET("/tasks/governance", handler.GetTaskQueueGovernance)
+		api.GET("/tasks/governance/snapshot", handler.GetTaskQueueGovernanceSnapshot)
 		api.POST("/tasks/governance/global", handler.UpdateTaskQueueGlobalPolicy)
 		api.POST("/tasks/governance/workspace", handler.UpdateTaskQueueWorkspacePolicy)
 		api.POST("/tasks/governance/schedules", handler.CreateTaskQueueSchedule)

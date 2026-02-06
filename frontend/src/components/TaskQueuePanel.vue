@@ -10,6 +10,7 @@ import {
   getTask,
   getTaskEvents,
   getTaskQueueGovernance,
+  getTaskQueueGovernanceSnapshot,
   listTasks,
   resumeTask,
   updateTaskQueueWorkspacePolicy,
@@ -18,6 +19,7 @@ import {
   type TaskAttempt,
   type TaskEvent,
   type TaskQueueGovernance,
+  type TaskQueueGovernanceSnapshot,
 } from "@/api/client";
 import {
   diffTaskUpdates,
@@ -52,6 +54,9 @@ const governanceError = ref("");
 const governance = ref<TaskQueueGovernance | null>(null);
 const wsPausedDraft = ref(false);
 const wsPriorityDraft = ref(0);
+const governanceSnapshotLoading = ref(false);
+const governanceSnapshotError = ref("");
+const governanceSnapshot = ref<TaskQueueGovernanceSnapshot | null>(null);
 
 const scheduleTitle = ref("");
 const schedulePrompt = ref("");
@@ -67,6 +72,19 @@ const selectedLoading = ref(false);
 const selectedError = ref("");
 
 const effectiveWorkspace = computed(() => String(props.workspace || "").trim());
+
+const governanceSummaryText = computed(() => {
+  const snap = governanceSnapshot.value;
+  if (!snap) return "";
+  const running = Array.isArray(snap?.running_workspaces)
+    ? snap.running_workspaces.length
+    : 0;
+  const max = Number(snap?.global?.max_running_workspaces ?? 0);
+  const deferred = Number(snap?.deferred_workspaces ?? 0);
+  const paused = Number(snap?.paused_workspaces ?? 0);
+  const slots = max > 0 ? `${running}/${max}` : `${running}/不限`;
+  return `运行槽 ${slots} · 延迟 ${deferred} · 暂停 ${paused}`;
+});
 
 const sortTaskEventsNewestFirst = (events: TaskEvent[]) => {
   const safeEvents = Array.isArray(events) ? events : [];
@@ -202,6 +220,28 @@ const refreshGovernance = async () => {
   }
 };
 
+const refreshGovernanceSnapshot = async () => {
+  governanceSnapshotError.value = "";
+  const ws = effectiveWorkspace.value;
+  if (!ws) {
+    governanceSnapshot.value = null;
+    return;
+  }
+
+  governanceSnapshotLoading.value = true;
+  try {
+    const snap = await getTaskQueueGovernanceSnapshot();
+    governanceSnapshot.value = snap;
+  } catch (e: any) {
+    governanceSnapshotError.value = String(
+      e?.data?.error || e?.message || "Failed to load governance snapshot",
+    );
+    governanceSnapshot.value = null;
+  } finally {
+    governanceSnapshotLoading.value = false;
+  }
+};
+
 const saveWorkspacePolicy = async () => {
   governanceError.value = "";
   const ws = effectiveWorkspace.value;
@@ -324,6 +364,7 @@ watch(
     selectedEvents.value = [];
     await refreshTasks();
     await refreshGovernance();
+    await refreshGovernanceSnapshot();
   },
   { immediate: true },
 );
@@ -333,6 +374,7 @@ watch(
   async (v) => {
     if (v) {
       await refreshGovernance();
+      await refreshGovernanceSnapshot();
     }
   },
 );
@@ -348,6 +390,7 @@ let timer: number | undefined;
 onMounted(() => {
   timer = window.setInterval(() => {
     void refreshTasks();
+    void refreshGovernanceSnapshot();
     if (selectedTaskId.value) {
       void refreshSelected();
     }
@@ -377,6 +420,12 @@ onUnmounted(() => {
             class="text-xs text-surface-300 truncate"
           >
             工作区内 {{ tasks.length }} 个任务
+          </p>
+          <p
+            v-if="effectiveWorkspace && governanceSummaryText"
+            class="text-xs text-surface-500 truncate"
+          >
+            · {{ governanceSummaryText }}
           </p>
           <p v-else class="text-xs text-surface-500">
             选择工作区以使用任务队列
@@ -419,10 +468,19 @@ onUnmounted(() => {
             data-testid="governance-toggle"
           >
             队列治理（best-effort）
+            <span
+              v-if="governanceSummaryText"
+              class="ml-2 text-[11px] font-normal text-surface-400"
+            >
+              {{ governanceSummaryText }}
+            </span>
           </summary>
           <div class="mt-3 space-y-3">
             <div v-if="governanceError" class="text-xs text-red-400">
               {{ governanceError }}
+            </div>
+            <div v-if="governanceSnapshotError" class="text-xs text-red-400">
+              {{ governanceSnapshotError }}
             </div>
 
             <div class="text-xs text-surface-400">

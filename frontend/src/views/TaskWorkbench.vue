@@ -23,6 +23,7 @@ import {
   getTaskAttemptArtifact,
   getTaskAttemptChangedFiles,
   getTaskAttemptDiffPatch,
+  getTaskQueueGovernanceSnapshot,
   getTaskEvents,
   listTasks,
   listTaskAttemptReviewComments,
@@ -33,6 +34,7 @@ import {
   type TaskAttemptArtifactContent,
   type TaskAttemptReviewComment,
   type TaskEvent,
+  type TaskQueueGovernanceSnapshot,
 } from "@/api/client";
 import {
   diffTaskUpdates,
@@ -65,6 +67,10 @@ const tasksLoading = ref(false);
 const tasksError = ref<ParsedApiError | null>(null);
 const tasks = ref<Task[]>([]);
 let tasksRequestSeq = 0;
+
+const governanceSnapshot = ref<TaskQueueGovernanceSnapshot | null>(null);
+const governanceSnapshotLoading = ref(false);
+const governanceSnapshotError = ref<ParsedApiError | null>(null);
 
 const notifyInitialized = ref(false);
 const taskSnapshots = ref<Record<string, TaskSnapshot>>({});
@@ -170,6 +176,32 @@ const advancedArtifacts = computed<AttemptArtifactSummary[]>(() => {
   ];
   return items.filter((i) => i.path.trim());
 });
+
+const governanceSummaryText = computed(() => {
+  const snap = governanceSnapshot.value;
+  if (!snap) return "";
+  const running = Array.isArray(snap?.running_workspaces)
+    ? snap.running_workspaces.length
+    : 0;
+  const max = Number(snap?.global?.max_running_workspaces ?? 0);
+  const deferred = Number(snap?.deferred_workspaces ?? 0);
+  const paused = Number(snap?.paused_workspaces ?? 0);
+  const slots = max > 0 ? `${running}/${max}` : `${running}/不限`;
+  return `运行槽 ${slots} · 延迟 ${deferred} · 暂停 ${paused}`;
+});
+
+const refreshGovernanceSnapshot = async () => {
+  governanceSnapshotError.value = null;
+  governanceSnapshotLoading.value = true;
+  try {
+    governanceSnapshot.value = await getTaskQueueGovernanceSnapshot();
+  } catch (e: any) {
+    governanceSnapshotError.value = parseApiError(e, "加载队列治理快照失败");
+    governanceSnapshot.value = null;
+  } finally {
+    governanceSnapshotLoading.value = false;
+  }
+};
 
 const artifactModalOpen = ref(false);
 const artifactModalLoading = ref(false);
@@ -683,6 +715,7 @@ onMounted(async () => {
     workspaceSelected.value = persisted;
   }
   await refreshTasks();
+  await refreshGovernanceSnapshot();
   if (!workspaceSelected.value) {
     workspaceSelected.value = allWorkspaces.value[0] || "";
   }
@@ -693,6 +726,7 @@ let timer: number | undefined;
 onMounted(() => {
   timer = window.setInterval(() => {
     if (!tasksLoading.value) void refreshTasks();
+    if (!governanceSnapshotLoading.value) void refreshGovernanceSnapshot();
     if (selectedTaskId.value && !selectedLoading.value) {
       void refreshSelected();
     }
@@ -713,6 +747,17 @@ onUnmounted(() => {
         <div>
           <h1 class="text-2xl font-bold text-surface-100">任务工作台</h1>
           <p class="text-sm text-surface-500 mt-1">多工作区队列、进度与控制</p>
+          <p
+            v-if="governanceSummaryText"
+            class="text-xs text-surface-600 mt-2"
+          >
+            {{ governanceSummaryText }}
+          </p>
+          <ErrorBanner
+            v-if="governanceSnapshotError"
+            class="mt-3"
+            :error="governanceSnapshotError"
+          />
         </div>
         <button
           data-testid="task-workbench-refresh"

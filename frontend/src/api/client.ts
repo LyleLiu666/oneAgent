@@ -1212,6 +1212,11 @@ export interface TaskQueueGovernance {
     model_id?: string;
     every_seconds: number;
     next_run_at?: string;
+    misfire_policy?: string;
+    last_trigger_key?: string;
+    last_enqueue_at?: string;
+    last_enqueue_error?: string;
+    last_enqueue_error_at?: string;
     created_at?: string;
     updated_at?: string;
   }>;
@@ -1220,6 +1225,33 @@ export interface TaskQueueGovernance {
 
 export async function getTaskQueueGovernance(): Promise<TaskQueueGovernance> {
   return api("/api/tasks/governance");
+}
+
+export interface TaskQueueGovernanceSnapshotWorkspace {
+  queued_tasks?: number;
+  running?: boolean;
+  paused?: boolean;
+  priority?: number;
+  age?: number;
+  effective_priority?: number;
+  decision?: string;
+  reason_code?: string;
+  selected_task_id?: string;
+}
+
+export interface TaskQueueGovernanceSnapshot {
+  ts: string;
+  global: {
+    max_running_workspaces?: number;
+  };
+  running_workspaces?: string[];
+  deferred_workspaces?: number;
+  paused_workspaces?: number;
+  workspaces?: Record<string, TaskQueueGovernanceSnapshotWorkspace>;
+}
+
+export async function getTaskQueueGovernanceSnapshot(): Promise<TaskQueueGovernanceSnapshot> {
+  return api("/api/tasks/governance/snapshot");
 }
 
 export async function updateTaskQueueGlobalPolicy(payload: {
@@ -1244,6 +1276,7 @@ export async function createTaskQueueSchedule(payload: {
   title?: string;
   prompt: string;
   model_id?: string;
+  misfire_policy?: string;
   every_seconds: number;
   enabled: boolean;
   limits?: Record<string, any>;

@@ -27,6 +27,17 @@ func GetTaskQueueGovernance(c *gin.Context) {
 	c.JSON(http.StatusOK, g)
 }
 
+func GetTaskQueueGovernanceSnapshot(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.TaskRunner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "task runner not initialized"})
+		return
+	}
+
+	snap := rt.TaskRunner.GovernanceSnapshot(time.Now())
+	c.JSON(http.StatusOK, snap)
+}
+
 func UpdateTaskQueueGlobalPolicy(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Tasks == nil {

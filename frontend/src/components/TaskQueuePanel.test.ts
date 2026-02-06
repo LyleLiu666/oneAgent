@@ -13,6 +13,14 @@ vi.mock('@/api/client', () => ({
     cancelTask: vi.fn(),
     resumeTask: vi.fn(),
     getTaskQueueGovernance: vi.fn(async () => ({ global: { max_running_workspaces: 0 }, workspaces: {}, schedules: [] })),
+    getTaskQueueGovernanceSnapshot: vi.fn(async () => ({
+        ts: new Date().toISOString(),
+        global: { max_running_workspaces: 0 },
+        running_workspaces: [],
+        deferred_workspaces: 0,
+        paused_workspaces: 0,
+        workspaces: {},
+    })),
     updateTaskQueueWorkspacePolicy: vi.fn(async () => ({ global: { max_running_workspaces: 0 }, workspaces: {}, schedules: [] })),
     createTaskQueueSchedule: vi.fn(async () => ({ global: { max_running_workspaces: 0 }, workspaces: {}, schedules: [] })),
 }))

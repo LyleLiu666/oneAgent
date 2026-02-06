@@ -66,9 +66,11 @@ type TaskRunner struct {
 
 	notify chan struct{}
 
-	queues            map[string][]string
-	runningWorkspaces map[string]bool
-	workspaceAges     map[string]int
+	queues             map[string][]string
+	runningWorkspaces  map[string]bool
+	workspaceAges      map[string]int
+	deferEventLast     map[string]time.Time
+	lastDeferredScanAt time.Time
 
 	running sync.Map // map[string]context.CancelFunc (key=task_id)
 }
@@ -96,6 +98,7 @@ func (r *TaskRunner) Start() error {
 	r.queues = make(map[string][]string)
 	r.runningWorkspaces = make(map[string]bool)
 	r.workspaceAges = make(map[string]int)
+	r.deferEventLast = make(map[string]time.Time)
 
 	r.wg.Add(1)
 	go func() {
@@ -531,6 +534,87 @@ func (r *TaskRunner) runScheduler() {
 				r.signal()
 			}(workspace, taskID)
 		}
+
+		// Best-effort deferred events (low noise): record why a queued task isn't running.
+		r.emitDeferredEvents(Now())
+	}
+}
+
+func (r *TaskRunner) emitDeferredEvents(now time.Time) {
+	if r == nil || r.Store == nil {
+		return
+	}
+	now = now.UTC()
+
+	r.mu.Lock()
+	if !r.lastDeferredScanAt.IsZero() && now.Sub(r.lastDeferredScanAt) < 1*time.Second {
+		r.mu.Unlock()
+		return
+	}
+	r.lastDeferredScanAt = now
+	if r.deferEventLast == nil {
+		r.deferEventLast = make(map[string]time.Time)
+	}
+	r.mu.Unlock()
+
+	snap := r.GovernanceSnapshot(now)
+	runningCount := len(snap.RunningWorkspaces)
+
+	for ws, wsSnap := range snap.Workspaces {
+		if wsSnap.Decision != ScheduleDecisionDeferred || wsSnap.QueuedTasks == 0 {
+			continue
+		}
+
+		reason := wsSnap.ReasonCode
+		switch reason {
+		case ScheduleReasonGlobalCap, ScheduleReasonWorkspacePaused:
+			// ok
+		default:
+			continue
+		}
+
+		r.mu.Lock()
+		q := r.queues[ws]
+		taskID := ""
+		if len(q) > 0 {
+			taskID = q[0]
+		}
+		r.mu.Unlock()
+		if strings.TrimSpace(taskID) == "" {
+			continue
+		}
+
+		key := taskID + ":" + reason
+		r.mu.Lock()
+		last, ok := r.deferEventLast[key]
+		if ok && now.Sub(last) < 10*time.Second {
+			r.mu.Unlock()
+			continue
+		}
+		r.deferEventLast[key] = now
+		r.mu.Unlock()
+
+		attemptID := ""
+		if task, err := r.Store.GetTask(taskID); err == nil {
+			if a := task.LatestAttempt(); a != nil {
+				attemptID = a.ID
+			}
+		}
+
+		_ = r.Store.AppendEvent(Event{
+			TaskID:    taskID,
+			AttemptID: attemptID,
+			Type:      "scheduler.deferred",
+			Message:   "Task deferred by governance",
+			Data: map[string]any{
+				"workspace":              ws,
+				"reason_code":            reason,
+				"max_running_workspaces": snap.Global.MaxRunningWorkspaces,
+				"running_workspaces":     runningCount,
+				"deferred_workspaces":    snap.DeferredWorkspaces,
+				"paused_workspaces":      snap.PausedWorkspaces,
+			},
+		})
 	}
 }
 
@@ -772,12 +856,36 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 		return
 	}
 	if task.Workspace != workspace {
+		_ = r.Store.AppendEvent(Event{
+			TaskID:  taskID,
+			Type:    "scheduler.skipped",
+			Message: "Task skipped by scheduler (workspace mismatch)",
+			Data: map[string]any{
+				"workspace":              workspace,
+				"task_workspace":         task.Workspace,
+				"reason_code":            "workspace_mismatch",
+				"max_running_workspaces": func() int { g, _ := r.Store.GetGovernance(); return g.Global.MaxRunningWorkspaces }(),
+			},
+		})
 		return
 	}
 
 	latest := task.LatestAttempt()
 	if latest == nil {
 		_ = r.Store.AppendEvent(Event{TaskID: taskID, Type: "task.error", Message: "task has no attempts"})
+		return
+	}
+	if latest.Status != AttemptQueued {
+		_ = r.Store.AppendEvent(Event{
+			TaskID:    taskID,
+			AttemptID: latest.ID,
+			Type:      "scheduler.skipped",
+			Message:   "Task skipped by scheduler (attempt not queued)",
+			Data: map[string]any{
+				"reason_code": "attempt_not_queued",
+				"status":      string(latest.Status),
+			},
+		})
 		return
 	}
 	attemptID := latest.ID
@@ -800,6 +908,23 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	if after == nil || after.ID != attemptID || after.Status != AttemptRunning {
 		return
 	}
+
+	_ = r.Store.AppendEvent(Event{
+		TaskID:    taskID,
+		AttemptID: attemptID,
+		Type:      "scheduler.picked",
+		Message:   "Task picked for execution",
+		Data: func() map[string]any {
+			g, _ := r.Store.GetGovernance()
+			p := g.Workspaces[workspace]
+			return map[string]any{
+				"workspace":              workspace,
+				"priority":               p.Priority,
+				"max_running_workspaces": g.Global.MaxRunningWorkspaces,
+				"reason_code":            ScheduleReasonPicked,
+			}
+		}(),
+	})
 
 	_ = r.Store.AppendEvent(Event{
 		TaskID:    taskID,
