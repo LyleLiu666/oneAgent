@@ -29,7 +29,7 @@
 - `update-openspec-truth-alignment`：✓ Complete
 - `add-head2head-benchmark-suite`：✓ Complete
 - `update-task-deliverable-contract-v1`：✓ Complete
-- `update-worktree-attempt-isolation-v2`：0/13 tasks
+- `update-worktree-attempt-isolation-v2`：✓ Complete
 - `update-secretary-autonomy-selfheal-v2`：0/12 tasks
 - `update-queue-governance-scheduling-v2`：0/12 tasks
 - `update-mcp-action-plane-v1`：0/12 tasks
