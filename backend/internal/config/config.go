@@ -37,6 +37,12 @@ type Config struct {
 	// Default is false (local-only).
 	MCPAllowRemote bool
 
+	// ChannelRelaySecret enables the channel relay inbound webhook. When empty, inbound requests are rejected (fail-closed).
+	ChannelRelaySecret string
+	// ChannelRelayOutboundURL is the endpoint used for outbound task notifications for webhook.v1 provider.
+	// When empty, outbound notifications are recorded but not delivered.
+	ChannelRelayOutboundURL string
+
 	EnableTrace bool
 
 	BashRootDir string
@@ -152,6 +158,9 @@ type configFile struct {
 
 	MCPAllowRemote *bool `yaml:"mcp_allow_remote"`
 
+	ChannelRelaySecret      *string `yaml:"channel_relay_secret"`
+	ChannelRelayOutboundURL *string `yaml:"channel_relay_outbound_url"`
+
 	EnableTrace *bool `yaml:"enable_trace"`
 
 	BashRootDir *string `yaml:"bash_root_dir"`
@@ -195,6 +204,12 @@ func loadConfigFile(cfg *Config) error {
 	if parsed.MCPAllowRemote != nil {
 		cfg.MCPAllowRemote = *parsed.MCPAllowRemote
 	}
+	if parsed.ChannelRelaySecret != nil {
+		cfg.ChannelRelaySecret = *parsed.ChannelRelaySecret
+	}
+	if parsed.ChannelRelayOutboundURL != nil {
+		cfg.ChannelRelayOutboundURL = *parsed.ChannelRelayOutboundURL
+	}
 	if parsed.EnableTrace != nil {
 		cfg.EnableTrace = *parsed.EnableTrace
 	}
@@ -232,6 +247,12 @@ func applyEnv(cfg *Config) {
 	}
 	if v := strings.TrimSpace(os.Getenv("MCP_ALLOW_REMOTE")); v != "" {
 		cfg.MCPAllowRemote = parseBool(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("CHANNEL_RELAY_SECRET")); v != "" {
+		cfg.ChannelRelaySecret = v
+	}
+	if v := strings.TrimSpace(os.Getenv("CHANNEL_RELAY_OUTBOUND_URL")); v != "" {
+		cfg.ChannelRelayOutboundURL = v
 	}
 	if v := strings.TrimSpace(os.Getenv("AUTH_MODE")); v != "" {
 		cfg.AuthMode = v

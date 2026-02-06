@@ -45,6 +45,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		"/api/auth/config",
 		"/api/auth/callback",
 		"/api/auth/pair/exchange",
+		"/api/channel_relay/v1/inbound",
 	))
 
 	// Health check endpoint (no auth required).
@@ -78,6 +79,9 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/secretary/recovery/focus", secretaryHandler.SetRecoveryFocus)
 		api.GET("/secretary/session", secretaryHandler.GetSession)
 		api.POST("/secretary/session/reset", secretaryHandler.ResetSession)
+
+		channelRelayHandler := handler.NewChannelRelayHandler(rt)
+		api.POST("/channel_relay/v1/inbound", channelRelayHandler.Inbound)
 
 		// Task queue.
 		api.POST("/tasks", handler.CreateTask)

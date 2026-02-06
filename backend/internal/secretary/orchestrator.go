@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/liu_y/oneAgent/backend/internal/agent"
+	"github.com/liu_y/oneAgent/backend/internal/channelrelay"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/model"
@@ -158,6 +159,10 @@ func secretaryDefaultToolIDs(policySnapshot permissions.Snapshot) []string {
 }
 
 func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID, content, workspace string) (InboxAppendResult, error) {
+	return o.AppendInboxMessageWithTrace(ctx, userID, sessionID, content, workspace, nil)
+}
+
+func (o *Orchestrator) AppendInboxMessageWithTrace(ctx context.Context, userID, sessionID, content, workspace string, traceMeta map[string]any) (InboxAppendResult, error) {
 	if o == nil || o.Sessions == nil {
 		return InboxAppendResult{}, errors.New("sessions store not initialized")
 	}
@@ -209,10 +214,19 @@ func (o *Orchestrator) AppendInboxMessage(ctx context.Context, userID, sessionID
 	// message history here (e.g., compression that renumbers IDs) to preserve
 	// traceability and maximize provider KV-cache effectiveness.
 
+	trace := model.TraceDataJSON{}
+	if len(traceMeta) > 0 {
+		entry := model.NewTraceEntry(model.TraceTypeCustom, "inbox_message")
+		entry.Metadata = traceMeta
+		entry.Complete()
+		trace = model.TraceDataJSON{TraceData: model.TraceData{Entries: []model.TraceEntry{entry}}}
+	}
+
 	userMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
 		Role:    model.MessageRoleUser,
 		Type:    model.MessageTypeText,
 		Content: content,
+		Trace:   trace,
 	})
 	if err != nil {
 		return InboxAppendResult{}, err
@@ -498,6 +512,13 @@ func (o *Orchestrator) dispatchPlanAsSW(ctx context.Context, userID, sessionID, 
 		return dispatchResult{}, errors.New("sessionID is required")
 	}
 	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
+
+	relayLink, relayOK := channelrelay.TaskLink{}, false
+	if o.Sessions != nil {
+		if session, _, err := o.Sessions.GetSessionWithMessages(sessionID, userID); err == nil {
+			relayLink, relayOK = extractChannelRelayLink(session.Metadata, userID, sessionID)
+		}
+	}
 
 	createdTaskIDs := make([]string, 0, len(plan.Tasks))
 	canceledTaskIDs := make([]string, 0, len(plan.TaskActions))
@@ -1169,6 +1190,28 @@ Rules:
 		}
 		createdTaskIDs = append(createdTaskIDs, created.ID)
 
+		if relayOK {
+			attemptID := ""
+			if latest := created.LatestAttempt(); latest != nil {
+				attemptID = latest.ID
+			}
+			_ = o.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    created.ID,
+				AttemptID: attemptID,
+				Type:      channelrelay.TaskLinkEventType,
+				Message:   "task linked to channel relay source",
+				Data: map[string]any{
+					"provider":      strings.TrimSpace(relayLink.Provider),
+					"principal_id":  strings.TrimSpace(relayLink.PrincipalID),
+					"channel_id":    strings.TrimSpace(relayLink.ChannelID),
+					"thread_id":     strings.TrimSpace(relayLink.ThreadID),
+					"message_id":    strings.TrimSpace(relayLink.MessageID),
+					"session_id":    strings.TrimSpace(relayLink.SessionID),
+					"dispatch_mode": "secretary",
+				},
+			})
+		}
+
 		if err := o.Runner.Enqueue(created.ID); err != nil {
 			return dispatchResult{}, err
 		}
@@ -1241,6 +1284,58 @@ Rules:
 		Questions:         questions,
 		WorkspacesCreated: workspacesCreated,
 	}, nil
+}
+
+func extractChannelRelayLink(meta model.JSONB, userID, sessionID string) (channelrelay.TaskLink, bool) {
+	if meta == nil {
+		return channelrelay.TaskLink{}, false
+	}
+
+	raw, ok := meta["channel_relay"].(map[string]any)
+	if !ok {
+		if v, ok := meta["channel_relay"].(model.JSONB); ok {
+			raw = map[string]any(v)
+		}
+	}
+	if len(raw) == 0 {
+		return channelrelay.TaskLink{}, false
+	}
+
+	provider := strings.TrimSpace(anyString(raw["provider"]))
+	if provider == "" {
+		provider = channelrelay.ProviderWebhookV1
+	}
+	channelID := strings.TrimSpace(anyString(raw["channel_id"]))
+	threadID := strings.TrimSpace(anyString(raw["thread_id"]))
+	if channelID == "" || threadID == "" {
+		return channelrelay.TaskLink{}, false
+	}
+
+	principal := strings.TrimSpace(anyString(raw["principal_id"]))
+	if principal == "" {
+		principal = strings.TrimSpace(userID)
+		if principal == "" {
+			principal = "local"
+		}
+	}
+
+	return channelrelay.TaskLink{
+		Provider:    provider,
+		PrincipalID: principal,
+		ChannelID:   channelID,
+		ThreadID:    threadID,
+		MessageID:   strings.TrimSpace(anyString(raw["message_id"])),
+		SessionID:   strings.TrimSpace(sessionID),
+	}, true
+}
+
+func anyString(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	default:
+		return ""
+	}
 }
 
 func (o *Orchestrator) GetState(_ context.Context, userID, sessionID string) (StateResult, error) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/liu_y/oneAgent/backend/internal/channelrelay"
 	"github.com/liu_y/oneAgent/backend/internal/checkpoint"
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/memorydb"
@@ -35,6 +36,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		rt.Tasks = store
 	}
 	if rt.TaskRunner != nil {
+		attachChannelRelayNotifier(rt)
 		cleanupOrphanAttemptWorktrees(context.Background(), rt)
 		return rt.TaskRunner.Start()
 	}
@@ -719,7 +721,40 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			})
 		},
 	}
+	attachChannelRelayNotifier(rt)
 	return rt.TaskRunner.Start()
+}
+
+func attachChannelRelayNotifier(rt *runtime.Runtime) {
+	if rt == nil || rt.Config == nil || rt.Layout == nil || rt.Tasks == nil || rt.TaskRunner == nil {
+		return
+	}
+	outboundURL := strings.TrimSpace(rt.Config.ChannelRelayOutboundURL)
+	if outboundURL == "" {
+		return
+	}
+	traceDir := strings.TrimSpace(rt.Layout.TraceLogsDir)
+	if traceDir == "" {
+		return
+	}
+
+	notifier := &channelrelay.Notifier{OutboundURL: outboundURL, TraceDir: traceDir}
+	prev := rt.TaskRunner.OnAttemptFinished
+	rt.TaskRunner.OnAttemptFinished = func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) {
+		if prev != nil {
+			prev(ctx, task, attempt)
+		}
+
+		evs, err := rt.Tasks.ReadEvents(task.ID)
+		if err != nil {
+			return
+		}
+		link, ok := channelrelay.FindLatestTaskLink(evs)
+		if !ok {
+			return
+		}
+		_ = notifier.NotifyTaskTerminal(ctx, link, task, attempt)
+	}
 }
 
 func maxInt64(a, b int64) int64 {
