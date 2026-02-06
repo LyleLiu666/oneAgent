@@ -82,22 +82,22 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 					"policy_hash":  policySnap.PolicyHash,
 				},
 			})
-			}
+		}
 
-			// Optional workspace project config (also controls attempt execution mode).
-			projectCfg, projectCfgFound, err := projectcfg.Load(task.Workspace)
-			if err != nil {
-				attemptResult.Summary = "project config error: " + err.Error()
-				return attemptResult, err
-			}
-			if projectCfgFound {
-				attemptResult.ProjectConfigPath = filepath.Join(task.Workspace, ".oneagent", "project.json")
-			}
+		// Optional workspace project config (also controls attempt execution mode).
+		projectCfg, projectCfgFound, err := projectcfg.Load(task.Workspace)
+		if err != nil {
+			attemptResult.Summary = "project config error: " + err.Error()
+			return attemptResult, err
+		}
+		if projectCfgFound {
+			attemptResult.ProjectConfigPath = filepath.Join(task.Workspace, ".oneagent", "project.json")
+		}
 
-			// Rollback boundary: snapshot workspace at attempt start (best-effort, fail-closed).
-			checkpointDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "checkpoint")
-			cp, err := checkpoint.CreateWorkspaceCheckpoint(ctx, task.Workspace, checkpointDir)
-			if err != nil {
+		// Rollback boundary: snapshot workspace at attempt start (best-effort, fail-closed).
+		checkpointDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "checkpoint")
+		cp, err := checkpoint.CreateWorkspaceCheckpoint(ctx, task.Workspace, checkpointDir)
+		if err != nil {
 			_ = rt.Tasks.AppendEvent(taskqueue.Event{
 				TaskID:    task.ID,
 				AttemptID: attempt.ID,
@@ -128,114 +128,114 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 				Data: map[string]any{
 					"checkpoint_path": cpPath,
 				},
-				})
-			}
+			})
+		}
 
-			executionRoot := strings.TrimSpace(task.Workspace)
-			if projectCfgFound && projectCfg.AttemptExecutionMode == "worktree" {
-				base, err := resolveGitBase(ctx, task.Workspace)
-				if err != nil {
-					_ = rt.Tasks.AppendEvent(taskqueue.Event{
-						TaskID:    task.ID,
-						AttemptID: attempt.ID,
-						Type:      "attempt.worktree.failed",
-						Message:   "worktree base resolution failed",
-						Data: map[string]any{
-							"error": err.Error(),
-						},
-					})
-					attemptResult.Summary = "worktree failed: " + err.Error()
-					return attemptResult, err
-				}
-
-				worktreeRoot := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "worktree")
-				if err := createWorktree(ctx, task.Workspace, worktreeRoot, base.BaseCommitSHA); err != nil {
-					_ = rt.Tasks.AppendEvent(taskqueue.Event{
-						TaskID:    task.ID,
-						AttemptID: attempt.ID,
-						Type:      "attempt.worktree.failed",
-						Message:   "worktree creation failed",
-						Data: map[string]any{
-							"worktree_root":   worktreeRoot,
-							"base_commit_sha": base.BaseCommitSHA,
-							"base_ref":        base.BaseRef,
-							"error":           err.Error(),
-						},
-					})
-					attemptResult.Summary = "worktree failed: " + err.Error()
-					return attemptResult, err
-				}
-
-				executionRoot = worktreeRoot
-				attemptResult.WorktreeRoot = worktreeRoot
-				attemptResult.BaseCommitSHA = base.BaseCommitSHA
-				attemptResult.BaseRef = base.BaseRef
-
-				_, _ = rt.Tasks.UpdateTask(task.ID, func(tk *taskqueue.Task) error {
-					a := tk.LatestAttempt()
-					if a == nil || a.ID != attempt.ID {
-						return nil
-					}
-					a.WorktreeRoot = worktreeRoot
-					a.BaseCommitSHA = base.BaseCommitSHA
-					a.BaseRef = base.BaseRef
-					return nil
-				})
+		executionRoot := strings.TrimSpace(task.Workspace)
+		if projectCfgFound && projectCfg.AttemptExecutionMode == "worktree" {
+			base, err := resolveGitBase(ctx, task.Workspace)
+			if err != nil {
 				_ = rt.Tasks.AppendEvent(taskqueue.Event{
 					TaskID:    task.ID,
 					AttemptID: attempt.ID,
-					Type:      "attempt.worktree.created",
-					Message:   "worktree created",
+					Type:      "attempt.worktree.failed",
+					Message:   "worktree base resolution failed",
+					Data: map[string]any{
+						"error": err.Error(),
+					},
+				})
+				attemptResult.Summary = "worktree failed: " + err.Error()
+				return attemptResult, err
+			}
+
+			worktreeRoot := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "worktree")
+			if err := createWorktree(ctx, task.Workspace, worktreeRoot, base.BaseCommitSHA); err != nil {
+				_ = rt.Tasks.AppendEvent(taskqueue.Event{
+					TaskID:    task.ID,
+					AttemptID: attempt.ID,
+					Type:      "attempt.worktree.failed",
+					Message:   "worktree creation failed",
 					Data: map[string]any{
 						"worktree_root":   worktreeRoot,
 						"base_commit_sha": base.BaseCommitSHA,
 						"base_ref":        base.BaseRef,
+						"error":           err.Error(),
 					},
 				})
+				attemptResult.Summary = "worktree failed: " + err.Error()
+				return attemptResult, err
+			}
 
-				if worktreeKeepEnabled() {
+			executionRoot = worktreeRoot
+			attemptResult.WorktreeRoot = worktreeRoot
+			attemptResult.BaseCommitSHA = base.BaseCommitSHA
+			attemptResult.BaseRef = base.BaseRef
+
+			_, _ = rt.Tasks.UpdateTask(task.ID, func(tk *taskqueue.Task) error {
+				a := tk.LatestAttempt()
+				if a == nil || a.ID != attempt.ID {
+					return nil
+				}
+				a.WorktreeRoot = worktreeRoot
+				a.BaseCommitSHA = base.BaseCommitSHA
+				a.BaseRef = base.BaseRef
+				return nil
+			})
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
+				Type:      "attempt.worktree.created",
+				Message:   "worktree created",
+				Data: map[string]any{
+					"worktree_root":   worktreeRoot,
+					"base_commit_sha": base.BaseCommitSHA,
+					"base_ref":        base.BaseRef,
+				},
+			})
+
+			if worktreeKeepEnabled() {
+				_ = rt.Tasks.AppendEvent(taskqueue.Event{
+					TaskID:    task.ID,
+					AttemptID: attempt.ID,
+					Type:      "attempt.worktree.retained",
+					Message:   "worktree retained (ONEAGENT_KEEP_WORKTREES=1)",
+					Data: map[string]any{
+						"worktree_root": worktreeRoot,
+					},
+				})
+			} else {
+				defer func() {
+					if err := removeWorktree(context.Background(), task.Workspace, worktreeRoot); err != nil {
+						_ = rt.Tasks.AppendEvent(taskqueue.Event{
+							TaskID:    task.ID,
+							AttemptID: attempt.ID,
+							Type:      "attempt.worktree.cleanup.failed",
+							Message:   "worktree cleanup failed",
+							Data: map[string]any{
+								"worktree_root": worktreeRoot,
+								"error":         err.Error(),
+								"hint":          fmt.Sprintf("git -C %q worktree remove --force %q", task.Workspace, worktreeRoot),
+							},
+						})
+						return
+					}
 					_ = rt.Tasks.AppendEvent(taskqueue.Event{
 						TaskID:    task.ID,
 						AttemptID: attempt.ID,
-						Type:      "attempt.worktree.retained",
-						Message:   "worktree retained (ONEAGENT_KEEP_WORKTREES=1)",
+						Type:      "attempt.worktree.cleaned",
+						Message:   "worktree cleaned up",
 						Data: map[string]any{
 							"worktree_root": worktreeRoot,
 						},
 					})
-				} else {
-					defer func() {
-						if err := removeWorktree(context.Background(), task.Workspace, worktreeRoot); err != nil {
-							_ = rt.Tasks.AppendEvent(taskqueue.Event{
-								TaskID:    task.ID,
-								AttemptID: attempt.ID,
-								Type:      "attempt.worktree.cleanup.failed",
-								Message:   "worktree cleanup failed",
-								Data: map[string]any{
-									"worktree_root": worktreeRoot,
-									"error":         err.Error(),
-									"hint":          fmt.Sprintf("git -C %q worktree remove --force %q", task.Workspace, worktreeRoot),
-								},
-							})
-							return
-						}
-						_ = rt.Tasks.AppendEvent(taskqueue.Event{
-							TaskID:    task.ID,
-							AttemptID: attempt.ID,
-							Type:      "attempt.worktree.cleaned",
-							Message:   "worktree cleaned up",
-							Data: map[string]any{
-								"worktree_root": worktreeRoot,
-							},
-						})
-					}()
-				}
+				}()
 			}
+		}
 
-			toolIDs := make([]string, 0, 16)
-			for _, def := range tool.All() {
-				if def.ID == tool.ToolIDSubagent {
-					continue
+		toolIDs := make([]string, 0, 16)
+		for _, def := range tool.All() {
+			if def.ID == tool.ToolIDSubagent {
+				continue
 			}
 			toolIDs = append(toolIDs, def.ID)
 		}
@@ -264,13 +264,13 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		toolCtx = tool.ContextWithUserID(toolCtx, userID)
 		toolCtx = tool.ContextWithAttemptID(toolCtx, attempt.ID)
 		toolCtx = tool.ContextWithPolicySnapshot(toolCtx, policySnap)
-			toolCtx = tool.ContextWithSettingsDB(toolCtx, rt.Settings)
-			toolCtx = tool.ContextWithSkillManager(toolCtx, rt.Skills)
-			toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
-				Enabled: true,
-				Root:    executionRoot,
-			})
-			toolCtx = tool.ContextWithOCC(toolCtx, strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_OCC")) != "1")
+		toolCtx = tool.ContextWithSettingsDB(toolCtx, rt.Settings)
+		toolCtx = tool.ContextWithSkillManager(toolCtx, rt.Skills)
+		toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
+			Enabled: true,
+			Root:    executionRoot,
+		})
+		toolCtx = tool.ContextWithOCC(toolCtx, strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_OCC")) != "1")
 
 		limits := taskqueue.ResolveLimits(task.Limits)
 
@@ -284,11 +284,11 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			maxRuntime = int((6 * time.Hour).Seconds())
 		}
 
-			if projectCfgFound {
-				scriptsDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "project_scripts")
-				if err := os.MkdirAll(scriptsDir, 0o700); err != nil {
-					wrap := fmt.Errorf("create attempt project scripts dir: %w", err)
-					attemptResult.Summary = wrap.Error()
+		if projectCfgFound {
+			scriptsDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "project_scripts")
+			if err := os.MkdirAll(scriptsDir, 0o700); err != nil {
+				wrap := fmt.Errorf("create attempt project scripts dir: %w", err)
+				attemptResult.Summary = wrap.Error()
 				return attemptResult, wrap
 			}
 
@@ -309,14 +309,14 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 						})
 					}
 				}()
-				}
+			}
 
-				copyLogPath := filepath.Join(scriptsDir, "copy_files.log")
-				attemptResult.CopyFilesLogPath = copyLogPath
-				if err := runCopyFiles(copyLogPath, task.Workspace, executionRoot, projectCfg.CopyFiles); err != nil {
-					attemptResult.Summary = "copy_files failed: " + err.Error()
-					return attemptResult, err
-				}
+			copyLogPath := filepath.Join(scriptsDir, "copy_files.log")
+			attemptResult.CopyFilesLogPath = copyLogPath
+			if err := runCopyFiles(copyLogPath, task.Workspace, executionRoot, projectCfg.CopyFiles); err != nil {
+				attemptResult.Summary = "copy_files failed: " + err.Error()
+				return attemptResult, err
+			}
 
 			if strings.TrimSpace(projectCfg.SetupScript) != "" {
 				setupLogPath := filepath.Join(scriptsDir, "setup_script.log")
@@ -355,17 +355,17 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			contextSummary += "## Review notes\n"
 			contextSummary += strings.TrimSpace(attempt.ReviewNotes)
 		}
-			req := subagent.RunRequest{
-				ParentSessionID:   task.ID,
-				UserID:            userID,
-				SystemPrompt:      systemPrompt,
+		req := subagent.RunRequest{
+			ParentSessionID:   task.ID,
+			UserID:            userID,
+			SystemPrompt:      systemPrompt,
 			Client:            client,
-				Tools:             tools,
-				Handlers:          handlers,
-				WorkspaceRoot:     executionRoot,
-				WriteScope:        nil,
-				LogsBaseDir:       rt.Layout.SubagentLogsDir,
-				Task:              task.Prompt,
+			Tools:             tools,
+			Handlers:          handlers,
+			WorkspaceRoot:     executionRoot,
+			WriteScope:        nil,
+			LogsBaseDir:       rt.Layout.SubagentLogsDir,
+			Task:              task.Prompt,
 			ContextSummary:    contextSummary,
 			MaxSteps:          maxSteps,
 			MaxRuntimeSeconds: maxRuntime,
@@ -383,20 +383,20 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 
 		// Best-effort test report generation (evidence), written next to findings/trace when possible.
 		testReportPath := ""
-			if strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_TEST_REPORT")) != "1" {
-				outDir := ""
-				if strings.TrimSpace(res.FindingsPath) != "" {
-					outDir = filepath.Dir(res.FindingsPath)
+		if strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_TEST_REPORT")) != "1" {
+			outDir := ""
+			if strings.TrimSpace(res.FindingsPath) != "" {
+				outDir = filepath.Dir(res.FindingsPath)
 			} else if strings.TrimSpace(res.TraceLogPath) != "" {
 				outDir = filepath.Dir(res.TraceLogPath)
 			}
 
-				if outDir != "" {
-					report, _ := generateTestReport(toolCtx, testReportInput{
-						WorkspaceRoot: executionRoot,
-						OutputDir:     outDir,
-						Enable:        true,
-						RunBash: func(ctx context.Context, command string, timeout time.Duration) (tool.BashToolResult, error) {
+			if outDir != "" {
+				report, _ := generateTestReport(toolCtx, testReportInput{
+					WorkspaceRoot: executionRoot,
+					OutputDir:     outDir,
+					Enable:        true,
+					RunBash: func(ctx context.Context, command string, timeout time.Duration) (tool.BashToolResult, error) {
 						raw := []byte(fmt.Sprintf(`{"command":%q,"timeout_ms":%d}`, command, int(timeout.Milliseconds())))
 						out, err := handlers["bash"](ctx, raw)
 						if err != nil {
@@ -460,18 +460,18 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			if f, err := os.OpenFile(attemptResult.ReviewCommentsPath, os.O_CREATE, 0o600); err == nil {
 				_ = f.Close()
 			}
-			}
-			if diff, err := generateDiffArtifacts(toolCtx, executionRoot, res.FindingsPath, reviewDir); err != nil {
-				_ = rt.Tasks.AppendEvent(taskqueue.Event{
-					TaskID:    task.ID,
-					AttemptID: attempt.ID,
+		}
+		if diff, err := generateDiffArtifacts(toolCtx, executionRoot, res.FindingsPath, reviewDir); err != nil {
+			_ = rt.Tasks.AppendEvent(taskqueue.Event{
+				TaskID:    task.ID,
+				AttemptID: attempt.ID,
 				Type:      "attempt.diff_artifacts.failed",
 				Message:   "diff artifacts generation failed",
 				Data: map[string]any{
 					"error": err.Error(),
-					},
-				})
-			} else {
+				},
+			})
+		} else {
 			attemptResult.DiffPatchPath = diff.DiffPatchPath
 			attemptResult.ChangedFilesPath = diff.ChangedFilesPath
 			_ = rt.Tasks.AppendEvent(taskqueue.Event{
@@ -485,53 +485,8 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 					"changed_files_path": diff.ChangedFilesPath,
 					"note":               diff.Reason,
 				},
-				})
-			}
-
-		if rt.WorkLedger != nil {
-			summary := strings.TrimSpace(res.Summary)
-			if summary == "" {
-				summary = "subagent finished"
-			}
-			if runErr != nil {
-				summary = "attempt failed: " + runErr.Error()
-			}
-			status := workledger.ReceiptStatusSucceeded
-			if runErr != nil {
-				status = workledger.ReceiptStatusFailed
-			}
-			finished := time.Now()
-			started := finished.Add(-time.Duration(maxInt64(0, res.DurationMs)) * time.Millisecond)
-			signals := workledger.ReceiptSignals{DurationMs: res.DurationMs}
-			if res.Usage != nil {
-				signals.Calls = res.Usage.Calls
-				signals.PromptTokens = res.Usage.PromptTokens
-				signals.CompletionTokens = res.Usage.CompletionTokens
-				signals.TotalTokens = res.Usage.TotalTokens
-				signals.CostUSD = res.Usage.CostUSD
-			}
-			_, _ = rt.WorkLedger.CreateReceipt(workledger.CreateReceiptInput{
-				PrincipalID:   userID,
-				WorkspaceRoot: task.Workspace,
-				Kind:          workledger.ReceiptKindSubagentRun,
-				Status:        status,
-				StartedAt:     started,
-				FinishedAt:    finished,
-					Summary:       summary,
-					Artifacts: workledger.ReceiptArtifacts{
-						FindingsPath:       strings.TrimSpace(res.FindingsPath),
-						TraceLogPath:       strings.TrimSpace(res.TraceLogPath),
-						TestReportPath:     strings.TrimSpace(testReportPath),
-						DiffPatchPath:      strings.TrimSpace(attemptResult.DiffPatchPath),
-						ChangedFilesPath:   strings.TrimSpace(attemptResult.ChangedFilesPath),
-						ReviewCommentsPath: strings.TrimSpace(attemptResult.ReviewCommentsPath),
-						WorktreeRoot:       strings.TrimSpace(attemptResult.WorktreeRoot),
-						BaseCommitSHA:      strings.TrimSpace(attemptResult.BaseCommitSHA),
-						BaseRef:            strings.TrimSpace(attemptResult.BaseRef),
-					},
-					Signals: signals,
-				})
-			}
+			})
+		}
 
 		return attemptResult, runErr
 	}
@@ -568,7 +523,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 		ExecuteAttempt: exec,
 		DecideOutcome:  decideOutcome,
 		OnAttemptFinished: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) {
-			if rt == nil || rt.Memory == nil {
+			if rt == nil {
 				return
 			}
 			userID := strings.TrimSpace(task.UserID)
@@ -579,6 +534,114 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			title := strings.TrimSpace(task.Title)
 			if title == "" {
 				title = "Task"
+			}
+
+			if rt.WorkLedger != nil {
+				status := workledger.ReceiptStatusFailed
+				switch attempt.Status {
+				case taskqueue.AttemptSucceeded:
+					status = workledger.ReceiptStatusSucceeded
+				case taskqueue.AttemptCanceled:
+					status = workledger.ReceiptStatusCanceled
+				case taskqueue.AttemptTimedOut:
+					status = workledger.ReceiptStatusTimedOut
+				case taskqueue.AttemptInterrupted:
+					status = workledger.ReceiptStatusInterrupted
+				case taskqueue.AttemptFailed, taskqueue.AttemptLimitExceeded:
+					status = workledger.ReceiptStatusFailed
+				default:
+					status = workledger.ReceiptStatusFailed
+				}
+
+				started := attempt.CreatedAt
+				if attempt.StartedAt != nil && !attempt.StartedAt.IsZero() {
+					started = attempt.StartedAt.UTC()
+				}
+				finished := started
+				if attempt.FinishedAt != nil && !attempt.FinishedAt.IsZero() {
+					finished = attempt.FinishedAt.UTC()
+				}
+
+				fileExists := func(path string) bool {
+					path = strings.TrimSpace(path)
+					if path == "" {
+						return false
+					}
+					info, err := os.Stat(path)
+					return err == nil && !info.IsDir()
+				}
+
+				// Back-compat: prefer stable default artifact locations when the attempt fields are empty.
+				artifacts := workledger.ReceiptArtifacts{
+					FindingsPath:       strings.TrimSpace(attempt.FindingsPath),
+					TraceLogPath:       strings.TrimSpace(attempt.TraceLogPath),
+					TestReportPath:     strings.TrimSpace(attempt.TestReportPath),
+					DiffPatchPath:      strings.TrimSpace(attempt.DiffPatchPath),
+					ChangedFilesPath:   strings.TrimSpace(attempt.ChangedFilesPath),
+					ReviewCommentsPath: strings.TrimSpace(attempt.ReviewCommentsPath),
+					WorktreeRoot:       strings.TrimSpace(attempt.WorktreeRoot),
+					BaseCommitSHA:      strings.TrimSpace(attempt.BaseCommitSHA),
+					BaseRef:            strings.TrimSpace(attempt.BaseRef),
+				}
+				if rt.Layout != nil {
+					reviewDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "review")
+					if strings.TrimSpace(artifacts.DiffPatchPath) == "" {
+						if p := filepath.Join(reviewDir, "diff.patch"); fileExists(p) {
+							artifacts.DiffPatchPath = p
+						}
+					}
+					if strings.TrimSpace(artifacts.ChangedFilesPath) == "" {
+						if p := filepath.Join(reviewDir, "changed_files.txt"); fileExists(p) {
+							artifacts.ChangedFilesPath = p
+						}
+					}
+					if strings.TrimSpace(artifacts.ReviewCommentsPath) == "" {
+						if p := filepath.Join(reviewDir, "review_comments.jsonl"); fileExists(p) {
+							artifacts.ReviewCommentsPath = p
+						}
+					}
+				}
+
+				summary := strings.TrimSpace(attempt.Summary)
+				if summary == "" && strings.TrimSpace(attempt.Error) != "" {
+					summary = strings.TrimSpace(attempt.Error)
+				}
+				if summary == "" {
+					summary = fmt.Sprintf("task attempt finished: %s", strings.TrimSpace(string(attempt.Status)))
+				}
+
+				signals := workledger.ReceiptSignals{}
+				if attempt.StartedAt != nil && attempt.FinishedAt != nil && !attempt.StartedAt.IsZero() && !attempt.FinishedAt.IsZero() {
+					if d := attempt.FinishedAt.Sub(*attempt.StartedAt); d > 0 {
+						signals.DurationMs = d.Milliseconds()
+					}
+				}
+				if attempt.Usage != nil {
+					signals.Calls = attempt.Usage.Calls
+					signals.PromptTokens = attempt.Usage.PromptTokens
+					signals.CompletionTokens = attempt.Usage.CompletionTokens
+					signals.TotalTokens = attempt.Usage.TotalTokens
+					signals.CostUSD = attempt.Usage.CostUSD
+				}
+
+				_, _ = rt.WorkLedger.CreateReceipt(workledger.CreateReceiptInput{
+					ReceiptID:               fmt.Sprintf("task_%s_attempt_%s", strings.TrimSpace(task.ID), strings.TrimSpace(attempt.ID)),
+					PrincipalID:             userID,
+					WorkspaceRoot:           task.Workspace,
+					Kind:                    workledger.ReceiptKindSubagentRun,
+					Status:                  status,
+					StartedAt:               started,
+					FinishedAt:              finished,
+					Summary:                 summary,
+					ArtifactManifestVersion: strings.TrimSpace(attempt.ArtifactManifestVersion),
+					ArtifactManifestPath:    strings.TrimSpace(attempt.ArtifactManifestPath),
+					Artifacts:               artifacts,
+					Signals:                 signals,
+				})
+			}
+
+			if rt.Memory == nil {
+				return
 			}
 
 			lines := []string{

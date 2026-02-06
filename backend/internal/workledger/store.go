@@ -88,6 +88,10 @@ func (s *Store) suggestionLock(suggestionID string) *sync.Mutex {
 }
 
 type CreateReceiptInput struct {
+	// ReceiptID is optional. When provided, CreateReceipt becomes idempotent:
+	// if a receipt already exists at that id, it is returned without rewriting.
+	ReceiptID string
+
 	PrincipalID   string
 	WorkspaceRoot string
 
@@ -97,14 +101,23 @@ type CreateReceiptInput struct {
 	StartedAt  time.Time
 	FinishedAt time.Time
 
-	Summary   string
-	Artifacts ReceiptArtifacts
-	Signals   ReceiptSignals
+	Summary                 string
+	ArtifactManifestVersion string
+	ArtifactManifestPath    string
+	EvidenceCompleteness    EvidenceCompleteness
+	Artifacts               ReceiptArtifacts
+	Signals                 ReceiptSignals
 }
 
 func (s *Store) CreateReceipt(in CreateReceiptInput) (Receipt, error) {
 	if s == nil {
 		return Receipt{}, errors.New("store is nil")
+	}
+	receiptID := strings.TrimSpace(in.ReceiptID)
+	if receiptID != "" {
+		if filepath.Base(receiptID) != receiptID || strings.Contains(receiptID, string(filepath.Separator)) {
+			return Receipt{}, errors.New("receipt_id is invalid")
+		}
 	}
 	if strings.TrimSpace(in.PrincipalID) == "" {
 		return Receipt{}, errors.New("principal_id is required")
@@ -119,7 +132,10 @@ func (s *Store) CreateReceipt(in CreateReceiptInput) (Receipt, error) {
 		return Receipt{}, errors.New("status is required")
 	}
 
-	id := uuid.NewString()
+	id := receiptID
+	if id == "" {
+		id = uuid.NewString()
+	}
 	now := time.Now()
 	started := in.StartedAt
 	if started.IsZero() {
@@ -134,16 +150,19 @@ func (s *Store) CreateReceipt(in CreateReceiptInput) (Receipt, error) {
 	}
 
 	r := Receipt{
-		ReceiptID:     id,
-		PrincipalID:   strings.TrimSpace(in.PrincipalID),
-		WorkspaceRoot: strings.TrimSpace(in.WorkspaceRoot),
-		Kind:          in.Kind,
-		Status:        in.Status,
-		StartedAt:     started.UTC(),
-		FinishedAt:    finished.UTC(),
-		Summary:       strings.TrimSpace(in.Summary),
-		Artifacts:     in.Artifacts,
-		Signals:       in.Signals,
+		ReceiptID:               id,
+		PrincipalID:             strings.TrimSpace(in.PrincipalID),
+		WorkspaceRoot:           strings.TrimSpace(in.WorkspaceRoot),
+		Kind:                    in.Kind,
+		Status:                  in.Status,
+		StartedAt:               started.UTC(),
+		FinishedAt:              finished.UTC(),
+		Summary:                 strings.TrimSpace(in.Summary),
+		ArtifactManifestVersion: strings.TrimSpace(in.ArtifactManifestVersion),
+		ArtifactManifestPath:    strings.TrimSpace(in.ArtifactManifestPath),
+		EvidenceCompleteness:    in.EvidenceCompleteness,
+		Artifacts:               in.Artifacts,
+		Signals:                 in.Signals,
 	}
 
 	mu := s.receiptLock(id)
@@ -156,6 +175,16 @@ func (s *Store) CreateReceipt(in CreateReceiptInput) (Receipt, error) {
 	}
 
 	jsonPath := s.receiptJSONPath(id)
+	if data, err := os.ReadFile(jsonPath); err == nil {
+		var existing Receipt
+		if jsonErr := json.Unmarshal(data, &existing); jsonErr == nil && strings.TrimSpace(existing.ReceiptID) != "" {
+			return existing, nil
+		}
+	}
+
+	if strings.TrimSpace(string(r.EvidenceCompleteness)) == "" {
+		r.EvidenceCompleteness = computeEvidenceCompleteness(r)
+	}
 	if err := writeJSONAtomic(jsonPath, r, 0o600); err != nil {
 		return Receipt{}, err
 	}
@@ -166,6 +195,20 @@ func (s *Store) CreateReceipt(in CreateReceiptInput) (Receipt, error) {
 	}
 
 	return r, nil
+}
+
+func computeEvidenceCompleteness(r Receipt) EvidenceCompleteness {
+	findingsOK := fileExists(r.Artifacts.FindingsPath)
+	traceOK := fileExists(r.Artifacts.TraceLogPath)
+
+	switch {
+	case findingsOK && traceOK:
+		return EvidenceCompletenessComplete
+	case findingsOK || traceOK:
+		return EvidenceCompletenessPartial
+	default:
+		return EvidenceCompletenessInsufficient
+	}
 }
 
 func (s *Store) GetReceipt(receiptID string) (Receipt, error) {
@@ -330,26 +373,38 @@ func buildReceiptMarkdown(r Receipt) string {
 	b.WriteString(r.StartedAt.Format(time.RFC3339))
 	b.WriteString("\n- finished_at: ")
 	b.WriteString(r.FinishedAt.Format(time.RFC3339))
+	if strings.TrimSpace(r.ArtifactManifestVersion) != "" {
+		b.WriteString("\n- artifact_manifest_version: ")
+		b.WriteString(strings.TrimSpace(r.ArtifactManifestVersion))
+	}
+	if strings.TrimSpace(r.ArtifactManifestPath) != "" {
+		b.WriteString("\n- artifact_manifest_path: ")
+		b.WriteString(strings.TrimSpace(r.ArtifactManifestPath))
+	}
+	if strings.TrimSpace(string(r.EvidenceCompleteness)) != "" {
+		b.WriteString("\n- evidence_completeness: ")
+		b.WriteString(strings.TrimSpace(string(r.EvidenceCompleteness)))
+	}
 	b.WriteString("\n\n")
 
 	b.WriteString("## Summary\n\n")
 	b.WriteString(strings.TrimSpace(r.Summary))
 	b.WriteString("\n\n")
 
-		if strings.TrimSpace(r.Artifacts.FindingsPath) != "" ||
-			strings.TrimSpace(r.Artifacts.TraceLogPath) != "" ||
-			strings.TrimSpace(r.Artifacts.TestReportPath) != "" ||
-			strings.TrimSpace(r.Artifacts.DiffPatchPath) != "" ||
-			strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" ||
-			strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" ||
-			strings.TrimSpace(r.Artifacts.DiffRef) != "" ||
-			strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" ||
-			strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" ||
-			strings.TrimSpace(r.Artifacts.BaseRef) != "" {
-			b.WriteString("## Artifacts\n\n")
-			if strings.TrimSpace(r.Artifacts.FindingsPath) != "" {
-				b.WriteString("- findings_path: ")
-				b.WriteString(strings.TrimSpace(r.Artifacts.FindingsPath))
+	if strings.TrimSpace(r.Artifacts.FindingsPath) != "" ||
+		strings.TrimSpace(r.Artifacts.TraceLogPath) != "" ||
+		strings.TrimSpace(r.Artifacts.TestReportPath) != "" ||
+		strings.TrimSpace(r.Artifacts.DiffPatchPath) != "" ||
+		strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" ||
+		strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" ||
+		strings.TrimSpace(r.Artifacts.DiffRef) != "" ||
+		strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" ||
+		strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" ||
+		strings.TrimSpace(r.Artifacts.BaseRef) != "" {
+		b.WriteString("## Artifacts\n\n")
+		if strings.TrimSpace(r.Artifacts.FindingsPath) != "" {
+			b.WriteString("- findings_path: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.FindingsPath))
 			b.WriteString("\n")
 		}
 		if strings.TrimSpace(r.Artifacts.TraceLogPath) != "" {
@@ -377,28 +432,28 @@ func buildReceiptMarkdown(r Receipt) string {
 			b.WriteString(strings.TrimSpace(r.Artifacts.ReviewCommentsPath))
 			b.WriteString("\n")
 		}
-			if strings.TrimSpace(r.Artifacts.DiffRef) != "" {
-				b.WriteString("- diff_ref: ")
-				b.WriteString(strings.TrimSpace(r.Artifacts.DiffRef))
-				b.WriteString("\n")
-			}
-			if strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" {
-				b.WriteString("- worktree_root: ")
-				b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeRoot))
-				b.WriteString("\n")
-			}
-			if strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" {
-				b.WriteString("- base_commit_sha: ")
-				b.WriteString(strings.TrimSpace(r.Artifacts.BaseCommitSHA))
-				b.WriteString("\n")
-			}
-			if strings.TrimSpace(r.Artifacts.BaseRef) != "" {
-				b.WriteString("- base_ref: ")
-				b.WriteString(strings.TrimSpace(r.Artifacts.BaseRef))
-				b.WriteString("\n")
-			}
+		if strings.TrimSpace(r.Artifacts.DiffRef) != "" {
+			b.WriteString("- diff_ref: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.DiffRef))
 			b.WriteString("\n")
 		}
+		if strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" {
+			b.WriteString("- worktree_root: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeRoot))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" {
+			b.WriteString("- base_commit_sha: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.BaseCommitSHA))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.BaseRef) != "" {
+			b.WriteString("- base_ref: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.BaseRef))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
 
 	if r.Signals.DurationMs > 0 || r.Signals.TotalTokens > 0 || r.Signals.Calls > 0 || r.Signals.CostUSD > 0 {
 		b.WriteString("## Signals\n\n")
@@ -466,4 +521,13 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func fileExists(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

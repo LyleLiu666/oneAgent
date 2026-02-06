@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	"github.com/liu_y/oneAgent/backend/internal/runtime"
@@ -97,10 +98,20 @@ func TestTaskQueueRunner_WorktreeMode_CleansUpAndWritesReceiptEvidence(t *testin
 		t.Fatalf("expected 1 attempt, got %d", len(created.Attempts))
 	}
 
-	attempt := created.Attempts[0]
-	_, execErr := rt.TaskRunner.ExecuteAttempt(ctx, created, attempt, nil)
-	if execErr == nil {
-		t.Fatalf("expected ExecuteAttempt error due to unreachable provider")
+	if err := rt.TaskRunner.Enqueue(created.ID); err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		tk, err := rt.Tasks.GetTask(created.ID)
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		a := tk.LatestAttempt()
+		if a != nil && a.Status != taskqueue.AttemptQueued && a.Status != taskqueue.AttemptRunning {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	updated, err := rt.Tasks.GetTask(created.ID)
@@ -110,6 +121,9 @@ func TestTaskQueueRunner_WorktreeMode_CleansUpAndWritesReceiptEvidence(t *testin
 	latest := updated.LatestAttempt()
 	if latest == nil {
 		t.Fatalf("expected latest attempt")
+	}
+	if latest.Status == taskqueue.AttemptQueued || latest.Status == taskqueue.AttemptRunning {
+		t.Fatalf("expected attempt to reach terminal status, got %q", latest.Status)
 	}
 	if strings.TrimSpace(latest.WorktreeRoot) == "" {
 		t.Fatalf("expected worktree_root to be recorded on attempt")
@@ -131,6 +145,17 @@ func TestTaskQueueRunner_WorktreeMode_CleansUpAndWritesReceiptEvidence(t *testin
 	}
 	if len(receipts) != 1 {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
+	}
+	if strings.TrimSpace(receipts[0].ArtifactManifestVersion) == "" || strings.TrimSpace(receipts[0].ArtifactManifestPath) == "" {
+		t.Fatalf("expected receipt to include artifact manifest reference, got %+v", receipts[0])
+	}
+	if _, err := os.Stat(receipts[0].ArtifactManifestPath); err != nil {
+		t.Fatalf("artifact manifest path missing: %v", err)
+	}
+	if got := strings.TrimSpace(string(receipts[0].EvidenceCompleteness)); got == "" {
+		t.Fatalf("expected evidence_completeness to be set")
+	} else if got != "complete" && got != "partial" && got != "insufficient" {
+		t.Fatalf("unexpected evidence_completeness: %q", got)
 	}
 	if strings.TrimSpace(receipts[0].Artifacts.WorktreeRoot) == "" {
 		t.Fatalf("expected receipt.worktree_root")
