@@ -585,6 +585,8 @@ export interface TaskAttempt {
   policy_snapshot?: ToolPolicySnapshot;
   run_id?: string;
   summary?: string;
+  artifact_manifest_version?: string;
+  artifact_manifest_path?: string;
   findings_path?: string;
   trace_log_path?: string;
   test_report_path?: string;
@@ -1258,6 +1260,8 @@ export type ReceiptStatus =
   | "timed_out"
   | "interrupted";
 
+export type EvidenceCompleteness = "complete" | "partial" | "insufficient";
+
 export interface ReceiptArtifacts {
   findings_path?: string;
   trace_log_path?: string;
@@ -1289,6 +1293,9 @@ export interface Receipt {
   started_at: string;
   finished_at: string;
   summary: string;
+  artifact_manifest_version?: string;
+  artifact_manifest_path?: string;
+  evidence_completeness?: EvidenceCompleteness;
   artifacts?: ReceiptArtifacts;
   signals?: ReceiptSignals;
 }

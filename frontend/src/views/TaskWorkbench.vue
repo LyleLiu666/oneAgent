@@ -116,6 +116,11 @@ const advancedArtifacts = computed<AttemptArtifactSummary[]>(() => {
       label: "findings",
       path: String(a.findings_path || ""),
     },
+    {
+      kind: "artifact_manifest",
+      label: "manifest",
+      path: String(a.artifact_manifest_path || ""),
+    },
     { kind: "trace", label: "trace", path: String(a.trace_log_path || "") },
     {
       kind: "test_report",

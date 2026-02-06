@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
+	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 )
 
 type artifactContentResponse struct {
@@ -75,6 +77,27 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 		if path == "" && rt.Layout != nil {
 			path = filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "artifact_manifest.v1.json")
 		}
+		path = filepath.Clean(path)
+		if strings.TrimSpace(path) != "" {
+			if _, err := os.Stat(path); err != nil && errors.Is(err, os.ErrNotExist) {
+				// Back-compat: older attempts may not have persisted a manifest; try to write one on demand.
+				isTerminal := attempt.Status != taskqueue.AttemptQueued && attempt.Status != taskqueue.AttemptRunning
+				if isTerminal && rt.Tasks != nil && rt.Layout != nil {
+					_, _ = rt.Tasks.UpdateTask(task.ID, func(tk *taskqueue.Task) error {
+						for i := range tk.Attempts {
+							if strings.TrimSpace(tk.Attempts[i].ID) != strings.TrimSpace(attempt.ID) {
+								continue
+							}
+							if tk.Attempts[i].Status == taskqueue.AttemptQueued || tk.Attempts[i].Status == taskqueue.AttemptRunning {
+								return nil
+							}
+							return taskqueue.EnsureArtifactManifestV1(rt.Layout.TasksDir, *tk, &tk.Attempts[i])
+						}
+						return nil
+					})
+				}
+			}
+		}
 	case "diff_patch":
 		path = strings.TrimSpace(attempt.DiffPatchPath)
 		if path == "" && rt.Layout != nil {
@@ -110,7 +133,6 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported artifact kind"})
 		return
 	}
-	path = filepath.Clean(path)
 	if strings.TrimSpace(path) == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "artifact not available"})
 		return
@@ -127,6 +149,26 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 		content, truncated, readErr = readFileLimited(path, maxArtifactBytes)
 	}
 	if readErr != nil {
+		if errors.Is(readErr, os.ErrNotExist) && kind == "artifact_manifest" {
+			// Best-effort: synthesize manifest so older attempts still have an inspectable contract.
+			isTerminal := attempt.Status != taskqueue.AttemptQueued && attempt.Status != taskqueue.AttemptRunning
+			if !isTerminal {
+				c.JSON(http.StatusNotFound, gin.H{"error": "artifact not available"})
+				return
+			}
+			tasksDir := ""
+			if rt.Layout != nil {
+				tasksDir = rt.Layout.TasksDir
+			}
+			m := taskqueue.BuildArtifactManifestV1(tasksDir, task, *attempt)
+			b, _ := json.MarshalIndent(m, "", "  ")
+			c.JSON(http.StatusOK, artifactContentResponse{
+				Path:      path,
+				Content:   string(b) + "\n",
+				Truncated: false,
+			})
+			return
+		}
 		if errors.Is(readErr, os.ErrNotExist) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "artifact not available"})
 			return
