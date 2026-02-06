@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines per-principal tool permissions policies and enforcement, including sandbox/profile constraints, approval gating for high-risk actions, and a read-only default for the secretary.
-
 ## Requirements
 ### Requirement: System MUST define a per-principal tool permissions policy
 系统必须 (MUST) 支持按 `principal_id` 定义工具权限策略，策略由多条规则组成，并支持 `allow/deny` 效果与约束（constraints）。
@@ -172,3 +171,22 @@ Defines per-principal tool permissions policies and enforcement, including sandb
 - **GIVEN** 用户处于秘书模式（best-effort）
 - **WHEN** 秘书调用只读文件工具读取某个产物文件（例如 findings/trace）（best-effort）
 - **THEN** 系统在权限允许的前提下返回文件内容（best-effort）
+
+### Requirement: MCP action-plane operations MUST be covered by principal policy and approval gates
+The system MUST treat MCP task lifecycle actions as policy-governed mutating operations, including approval constraints when configured.
+
+#### Scenario: MCP resume action is blocked by approval policy
+- **GIVEN** policy marks task resume action as approval-required
+- **WHEN** MCP client invokes resume without approval grant
+- **THEN** the system blocks execution and returns approval-required response
+- **AND** the decision is recorded in audit evidence (best-effort)
+
+### Requirement: MCP approvals MUST be scoped and non-replayable
+Approval grants for MCP actions MUST be scoped to action fingerprint and MUST NOT be replayable across attempts or altered parameters.
+
+#### Scenario: MCP approval cannot be replayed for a different action payload
+- **GIVEN** one MCP action approval grant has been consumed
+- **WHEN** client invokes the same action type with a different payload fingerprint
+- **THEN** the previous approval is not reused
+- **AND** a new approval flow is required (or action is denied by policy)
+
