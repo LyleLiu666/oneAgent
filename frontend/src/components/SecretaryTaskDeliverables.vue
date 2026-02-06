@@ -45,6 +45,11 @@ type TaskCompletedEvent = {
   attemptId: string
   title: string
   status: string
+  summary?: string
+  observer?: TaskAttempt['observer']
+  continuing?: boolean
+  nextAttemptId?: string
+  nextAttemptStatus?: string
 }
 
 type TaskNeedsAttentionEvent = {
@@ -95,6 +100,7 @@ const error = ref<string>('')
 const tasks = ref<Task[]>([])
 const hasTaskBaseline = ref(false)
 const lastLatestStatusByTaskID = ref<Record<string, string>>({})
+const lastLatestAttemptIDByTaskID = ref<Record<string, string>>({})
 
 let pollTimer: number | undefined
 
@@ -190,6 +196,22 @@ const getLatestAttempt = (t: Task): TaskAttempt | null => {
   return t.attempts[t.attempts.length - 1] || null
 }
 
+const toCompletedEvent = (
+  task: Task,
+  attempt: TaskAttempt,
+  opts?: { continuing?: boolean; nextAttempt?: TaskAttempt | null }
+): TaskCompletedEvent => ({
+  taskId: String((task as any)?.id || '').trim(),
+  attemptId: String(attempt?.id || '').trim(),
+  title: String((task as any)?.title || '').trim(),
+  status: String(attempt?.status || '').trim(),
+  summary: typeof attempt?.summary === 'string' ? attempt.summary : undefined,
+  observer: attempt?.observer,
+  continuing: Boolean(opts?.continuing),
+  nextAttemptId: opts?.nextAttempt ? String(opts.nextAttempt?.id || '').trim() || undefined : undefined,
+  nextAttemptStatus: opts?.nextAttempt ? String(opts.nextAttempt?.status || '').trim() || undefined : undefined,
+})
+
 const toNeedsAttentionEvent = (task: Task, attempt: TaskAttempt): TaskNeedsAttentionEvent => ({
   taskId: String((task as any)?.id || '').trim(),
   attemptId: String(attempt?.id || '').trim(),
@@ -284,6 +306,7 @@ const refresh = async () => {
     const res = await listTasks(ws || undefined)
     const nextTasks = Array.isArray(res) ? res : []
     const nextLatestStatusByTaskID: Record<string, string> = {}
+    const nextLatestAttemptIDByTaskID: Record<string, string> = {}
     const hadBaseline = hasTaskBaseline.value
 
     for (const t of nextTasks) {
@@ -291,10 +314,12 @@ const refresh = async () => {
       if (!taskID) continue
       const latest = getLatestAttempt(t)
       nextLatestStatusByTaskID[taskID] = String(latest?.status || '').trim()
+      nextLatestAttemptIDByTaskID[taskID] = String(latest?.id || '').trim()
     }
 
     if (hadBaseline) {
       const prev = lastLatestStatusByTaskID.value
+      const prevAttemptIDs = lastLatestAttemptIDByTaskID.value
 
       for (const t of nextTasks) {
         const taskID = String((t as any)?.id || '').trim()
@@ -304,19 +329,47 @@ const refresh = async () => {
 
         const prevStatus = String(prev[taskID] || '').trim()
         const nextStatus = String(latest.status || '').trim()
+
+        const prevAttemptID = String(prevAttemptIDs[taskID] || '').trim()
+        const nextAttemptID = String(latest.id || '').trim()
         if (!prevStatus) continue
-        if (!['queued', 'running'].includes(prevStatus)) continue
-        if (!isTerminalStatus(nextStatus)) continue
 
-        emit('task-completed', {
-          taskId: taskID,
-          attemptId: String(latest.id || '').trim(),
-          title: String((t as any)?.title || '').trim(),
-          status: nextStatus,
-        })
+        // Normal progression: same latest attempt moves from running/queued to terminal.
+        if (prevAttemptID && prevAttemptID === nextAttemptID) {
+          if (!['queued', 'running'].includes(prevStatus)) continue
+          if (!isTerminalStatus(nextStatus)) continue
 
-        if (isNeedsAttentionAttempt(latest) && !isDismissedAttempt(taskID, String(latest.id || '').trim())) {
-          emit('task-needs-attention', toNeedsAttentionEvent(t, latest))
+          emit('task-completed', toCompletedEvent(t, latest))
+
+          if (isNeedsAttentionAttempt(latest) && !isDismissedAttempt(taskID, nextAttemptID)) {
+            emit('task-needs-attention', toNeedsAttentionEvent(t, latest))
+          }
+          continue
+        }
+
+        // Auto-follow-up/resume: the latest attempt ID changed between polls.
+        if (prevAttemptID && prevAttemptID !== nextAttemptID) {
+          if (!['queued', 'running'].includes(prevStatus)) continue
+
+          const prevAttempt =
+            Array.isArray((t as any)?.attempts) && (t as any).attempts.length > 0
+              ? ((t as any).attempts as TaskAttempt[]).find((a) => String(a?.id || '').trim() === prevAttemptID) || null
+              : null
+          const continuing = ['queued', 'running'].includes(nextStatus)
+
+          if (prevAttempt && isTerminalAttempt(prevAttempt)) {
+            emit('task-completed', toCompletedEvent(t, prevAttempt, { continuing, nextAttempt: latest }))
+          }
+
+          // If the new latest attempt is already terminal (very fast follow-up), also surface it.
+          if (isTerminalAttempt(latest)) {
+            emit('task-completed', toCompletedEvent(t, latest))
+            if (isNeedsAttentionAttempt(latest) && !isDismissedAttempt(taskID, nextAttemptID)) {
+              emit('task-needs-attention', toNeedsAttentionEvent(t, latest))
+            }
+          }
+
+          continue
         }
       }
     } else {
@@ -325,6 +378,7 @@ const refresh = async () => {
 
     tasks.value = nextTasks
     lastLatestStatusByTaskID.value = nextLatestStatusByTaskID
+    lastLatestAttemptIDByTaskID.value = nextLatestAttemptIDByTaskID
 
     // Initial snapshot: surface existing needs-attention items once per mount (best-effort).
     if (!hadBaseline) {

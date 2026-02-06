@@ -254,19 +254,6 @@ it('recovery ask prefers error over summary (secretary mode)', async () => {
 
     await flushPromises()
 
-    // No history replay: snapshot only fills the recovery inbox.
-    expect(wrapper.text()).not.toContain('原因：invalid observer output (expected JSON)')
-
-    deliverables.vm.$emit('task-needs-attention', {
-        taskId: 't1',
-        attemptId: 'a1',
-        title: 'task1',
-        status: 'failed',
-        summary: 'subagent finished',
-        error: 'invalid observer output (expected JSON)',
-    })
-    await flushPromises()
-
     expect(wrapper.text()).toContain('原因：invalid observer output (expected JSON)')
     expect(wrapper.text()).not.toContain('原因：subagent finished')
 })
@@ -693,7 +680,7 @@ it('appends an assistant message when receiving a task-completed event (secretar
             plugins: [pinia],
             stubs: {
                 SecretaryTaskDeliverables: {
-                    template: `<button data-testid="emit-task-completed" @click="$emit('task-completed', { taskId: 't1', title: 'task1', status: 'succeeded' })"></button>`,
+                    template: `<button data-testid="emit-task-completed" @click="$emit('task-completed', { taskId: 't1', attemptId: 'a1', title: 'task1', status: 'failed', summary: 'WEATHER_RESULT', continuing: true })"></button>`,
                 },
             },
         },
@@ -707,6 +694,13 @@ it('appends an assistant message when receiving a task-completed event (secretar
     await flushPromises()
 
     expect(chat.messages.some((m: any) => m.role === 'assistant' && m.type === 'text')).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('当前结果'))).toBe(
+        true
+    )
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('WEATHER_RESULT'))).toBe(
+        true
+    )
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('继续'))).toBe(true)
 })
 
 it('optimistically renders secretary message and prevents resubmission while pending', async () => {
@@ -769,7 +763,7 @@ it('optimistically renders secretary message and prevents resubmission while pen
     expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
 })
 
-it('does not replay recovery asks on initial recovery snapshot (secretary mode)', async () => {
+it('starts recovery conversation on initial recovery snapshot (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -808,8 +802,7 @@ it('does not replay recovery asks on initial recovery snapshot (secretary mode)'
     await wrapper.get('[data-testid="emit-recovery-snapshot"]').trigger('click')
     await flushPromises()
 
-    // Baseline snapshot should not spam chat with recovery asks (no history replay).
-    expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('需要你确认才能继续：task1'))).toBe(true)
 })
 
 it('handles recovery focus switching and resumes via chat reply (secretary mode)', async () => {

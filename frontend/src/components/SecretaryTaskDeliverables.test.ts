@@ -467,6 +467,92 @@ it("emits task-completed when a running task finishes (no history replay)", asyn
   wrapper.unmount();
 });
 
+it("emits task-completed when an attempt is replaced by a follow-up attempt (auto-resume)", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "running",
+          created_at: "2026-02-01T00:00:01Z",
+          started_at: "2026-02-01T00:00:01Z",
+        },
+      ],
+    },
+  ]);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:03Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "partial",
+        },
+        {
+          id: "a2",
+          status: "queued",
+          created_at: "2026-02-01T00:00:02Z",
+          resumed_from_attempt_id: "a1",
+          auto: true,
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  expect(wrapper.emitted("task-completed")).toBeUndefined();
+  expect(wrapper.emitted("task-needs-attention")).toBeUndefined();
+
+  // Trigger a second refresh via the workspace watch (keeping normalized path stable).
+  await wrapper.setProps({ workspace: "/tmp/ws " });
+  await flushPromises();
+
+  const completed = wrapper.emitted("task-completed");
+  expect(completed?.length).toBe(1);
+  expect(completed?.[0]?.[0]).toMatchObject({
+    taskId: "t1",
+    attemptId: "a1",
+    status: "failed",
+    continuing: true,
+  });
+
+  // The failed attempt already has a follow-up attempt running/queued, so it should not be surfaced as needs-attention.
+  expect(wrapper.emitted("task-needs-attention")).toBeUndefined();
+
+  wrapper.unmount();
+});
+
 it("uses readable warning accents in light mode", async () => {
   vi.stubGlobal("localStorage", makeLocalStorage());
 
