@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,6 +118,9 @@ type DiffArtifacts struct {
 }
 
 const maxDiffPatchBytes = 512 * 1024
+const maxFileSnapshotBytes = maxDiffPatchBytes + 1
+const maxChangedFilesReportEntries = 200
+const maxFileSnapshots = 30
 
 func GenerateDiffArtifacts(ctx context.Context, workspaceRoot, findingsPath, outDir string) (DiffArtifacts, error) {
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
@@ -159,15 +164,29 @@ func GenerateDiffArtifacts(ctx context.Context, workspaceRoot, findingsPath, out
 	} else {
 		changedFiles = extractChangedFilesFromFindings(findingsPath)
 		if len(changedFiles) == 0 {
-			reason = "not a git workspace; no changed files found in findings"
+			changedFiles = listWorkspaceFilesBestEffort(workspaceRoot, maxChangedFilesReportEntries)
+			if len(changedFiles) == 0 {
+				reason = "not a git workspace; no changed files found in findings; workspace scan found no files"
+			} else {
+				reason = "not a git workspace; changed files inferred from workspace listing (best-effort)"
+			}
 		} else {
 			reason = "not a git workspace"
 		}
 	}
 
-	if err := writeChangedFilesReport(changedFilesPath, createdAt, workspaceRoot, isGit, reason, changedFiles); err != nil {
+	reportFiles := changedFiles
+	if len(reportFiles) > maxChangedFilesReportEntries {
+		reportFiles = reportFiles[:maxChangedFilesReportEntries]
+		reason = strings.TrimSpace(reason + fmt.Sprintf("; changed_files truncated: showing %d of %d", len(reportFiles), len(changedFiles)))
+	}
+
+	if err := writeChangedFilesReport(changedFilesPath, createdAt, workspaceRoot, isGit, reason, reportFiles); err != nil {
 		return DiffArtifacts{}, err
 	}
+
+	// Best-effort: snapshot file contents for UI browsing (important for worktree cleanup).
+	_ = snapshotChangedFilesBestEffort(workspaceRoot, outDir, reportFiles)
 
 	// Only return diff_patch_path when the file is actually created.
 	if _, err := os.Stat(diffPatchPath); err != nil {
@@ -207,6 +226,169 @@ func listGitChangedFiles(ctx context.Context, workspaceRoot string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func listWorkspaceFilesBestEffort(workspaceRoot string, maxFiles int) []string {
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot == "" || maxFiles <= 0 {
+		return nil
+	}
+
+	skipDirs := map[string]struct{}{
+		".git":         {},
+		".oneagent":    {},
+		"node_modules": {},
+		"vendor":       {},
+		"dist":         {},
+		"build":        {},
+		".next":        {},
+		"coverage":     {},
+	}
+
+	var stopErr = errors.New("limit reached")
+
+	out := make([]string, 0, min(maxFiles, 64))
+	err := filepath.WalkDir(workspaceRoot, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(workspaceRoot, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if _, ok := skipDirs[name]; ok {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		relSlash := filepath.ToSlash(rel)
+		relSlash = strings.TrimPrefix(relSlash, "./")
+		relSlash = strings.TrimPrefix(relSlash, "/")
+		if relSlash == "" || relSlash == "." || relSlash == ".." || strings.HasPrefix(relSlash, "../") {
+			return nil
+		}
+		out = append(out, relSlash)
+		if len(out) >= maxFiles {
+			return stopErr
+		}
+		return nil
+	})
+	// Best-effort: ignore walk errors (including early-exit stopErr).
+	_ = err
+	sort.Strings(out)
+	return out
+}
+
+func snapshotChangedFilesBestEffort(workspaceRoot, outDir string, files []string) error {
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	outDir = strings.TrimSpace(outDir)
+	if workspaceRoot == "" || outDir == "" || len(files) == 0 {
+		return nil
+	}
+
+	workspaceRootReal := workspaceRoot
+	if resolved, err := filepath.EvalSymlinks(workspaceRoot); err == nil && strings.TrimSpace(resolved) != "" {
+		workspaceRootReal = resolved
+	}
+
+	filesDir := filepath.Join(outDir, "files")
+	if err := os.MkdirAll(filesDir, 0o700); err != nil {
+		return err
+	}
+
+	count := 0
+	for _, raw := range files {
+		if count >= maxFileSnapshots {
+			break
+		}
+		rel := normalizeRelFilePath(raw)
+		if rel == "" {
+			continue
+		}
+
+		src := filepath.Join(workspaceRoot, filepath.FromSlash(rel))
+		if !isWithinRoot(workspaceRoot, src) {
+			continue
+		}
+		// Avoid following symlinks that escape the workspace.
+		if st, err := os.Lstat(src); err != nil || st.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(src)
+		if err != nil || !isWithinRoot(workspaceRootReal, resolved) {
+			continue
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+
+		dst := filepath.Join(filesDir, filepath.FromSlash(rel))
+		if !isWithinRoot(filesDir, dst) {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			continue
+		}
+
+		in, err := os.Open(resolved)
+		if err != nil {
+			continue
+		}
+		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			_ = in.Close()
+			continue
+		}
+
+		_, _ = io.Copy(out, io.LimitReader(in, maxFileSnapshotBytes))
+		_ = out.Close()
+		_ = in.Close()
+		count++
+	}
+
+	return nil
+}
+
+func normalizeRelFilePath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	canonical := strings.ReplaceAll(raw, "\\", "/")
+	if strings.HasPrefix(canonical, "/") {
+		return ""
+	}
+	canonical = strings.TrimPrefix(canonical, "./")
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(canonical)))
+	clean = strings.TrimPrefix(clean, "./")
+	clean = strings.TrimPrefix(clean, "/")
+	if clean == "" || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return ""
+	}
+	return clean
+}
+
+func isWithinRoot(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if root == target {
+		return true
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func gitDiffHead(ctx context.Context, workspaceRoot string) ([]byte, string) {

@@ -3,7 +3,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import type { Task } from "@/api/client";
+import type { ListTaskAttemptFilesResponse, Task, TaskAttemptFileEntry } from "@/api/client";
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -27,6 +27,17 @@ const mocks = vi.hoisted(() => {
       content: "# Findings\n- ok\n",
       truncated: false,
     })),
+    listTaskAttemptFiles: vi.fn(
+      async (): Promise<ListTaskAttemptFilesResponse> => ({
+        files: [] as TaskAttemptFileEntry[],
+        omitted: 0,
+      }),
+    ),
+    readTaskAttemptFileSnapshot: vi.fn(async () => ({
+      path: "report.md",
+      content: "# ok\n",
+      truncated: false,
+    })),
   };
 });
 
@@ -38,6 +49,8 @@ vi.mock("@/api/client", () => ({
   listTasks: mocks.listTasks,
   resumeTask: mocks.resumeTask,
   getTaskAttemptArtifact: mocks.getTaskAttemptArtifact,
+  listTaskAttemptFiles: mocks.listTaskAttemptFiles,
+  readTaskAttemptFileSnapshot: mocks.readTaskAttemptFileSnapshot,
 }));
 
 beforeEach(() => {
@@ -149,6 +162,69 @@ it("opens artifact preview modal when clicking findings", async () => {
     wrapper.find('[data-testid="secretary-task-artifact-modal"]').exists(),
   ).toBe(true);
   expect(wrapper.text()).toContain("# Findings");
+
+  wrapper.unmount();
+});
+
+it("opens file browser modal and previews a snapshotted file", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "succeeded",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "done",
+          findings_path: "/tmp/ws/FINDINGS.md",
+        },
+      ],
+    },
+  ]);
+
+  mocks.listTaskAttemptFiles.mockResolvedValueOnce({
+    files: [{ path: "report.md", available: true, size_bytes: 5 }],
+    omitted: 0,
+  });
+  mocks.readTaskAttemptFileSnapshot.mockResolvedValueOnce({
+    path: "/tmp/ws/review/files/report.md",
+    content: "# ok\n",
+    truncated: false,
+  });
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  await wrapper.get('[data-testid="secretary-task-deliverables-more"]').trigger("click");
+  await flushPromises();
+
+  const card = wrapper.get('[data-testid="secretary-task-deliverable-card"]');
+  await card.get('[data-testid="deliverable-open-files"]').trigger("click");
+  await flushPromises();
+
+  expect(mocks.listTaskAttemptFiles).toHaveBeenCalledWith("t1", "a1");
+  expect(mocks.readTaskAttemptFileSnapshot).toHaveBeenCalledWith("t1", "a1", "report.md");
+  expect(wrapper.find('[data-testid="secretary-task-file-modal"]').exists()).toBe(true);
+  expect(wrapper.text()).toContain("# ok");
 
   wrapper.unmount();
 });

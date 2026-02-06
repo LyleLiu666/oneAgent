@@ -4,11 +4,14 @@ import { useRouter } from 'vue-router'
 
 import {
   getTaskAttemptArtifact,
+  listTaskAttemptFiles,
+  readTaskAttemptFileSnapshot,
   listTasks,
   resumeTask,
   type Task,
   type TaskAttempt,
   type TaskAttemptArtifactContent,
+  type TaskAttemptFileEntry,
 } from '@/api/client'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { useUIStore } from '@/stores/ui'
@@ -476,6 +479,111 @@ const openArtifactModal = async (taskId: string, attemptId: string, artifact: De
   }
 }
 
+// Attempt file browser (snapshotted file contents).
+const fileModalOpen = ref(false)
+const fileModalLoading = ref(false)
+const fileModalError = ref<string>('')
+const fileModalTitle = ref('')
+const fileModalWorkspace = ref('')
+const fileModalTaskId = ref('')
+const fileModalAttemptId = ref('')
+const fileModalFiles = ref<TaskAttemptFileEntry[]>([])
+const fileModalOmitted = ref(0)
+const fileModalSelectedPath = ref('')
+const fileModalSelectedAvailable = ref(false)
+const fileModalContentLoading = ref(false)
+const fileModalContentError = ref('')
+const fileModalContent = ref<TaskAttemptArtifactContent | null>(null)
+
+let fileModalRequestSeq = 0
+let fileModalContentSeq = 0
+
+const closeFileModal = () => {
+  fileModalOpen.value = false
+  fileModalLoading.value = false
+  fileModalError.value = ''
+  fileModalTitle.value = ''
+  fileModalWorkspace.value = ''
+  fileModalTaskId.value = ''
+  fileModalAttemptId.value = ''
+  fileModalFiles.value = []
+  fileModalOmitted.value = 0
+  fileModalSelectedPath.value = ''
+  fileModalSelectedAvailable.value = false
+  fileModalContentLoading.value = false
+  fileModalContentError.value = ''
+  fileModalContent.value = null
+}
+
+const selectFileInModal = async (path: string) => {
+  const tid = String(fileModalTaskId.value || '').trim()
+  const aid = String(fileModalAttemptId.value || '').trim()
+  const rel = String(path || '').trim()
+  if (!tid || !aid || !rel) return
+
+  const entry = fileModalFiles.value.find((f) => String((f as any)?.path || '').trim() === rel)
+  const available = Boolean((entry as any)?.available)
+  fileModalSelectedPath.value = rel
+  fileModalSelectedAvailable.value = available
+  fileModalContentError.value = ''
+  fileModalContent.value = null
+  if (!available) return
+
+  fileModalContentLoading.value = true
+  const seq = ++fileModalContentSeq
+  try {
+    const res = await readTaskAttemptFileSnapshot(tid, aid, rel)
+    if (seq !== fileModalContentSeq) return
+    fileModalContent.value = res
+  } catch (e: any) {
+    if (seq !== fileModalContentSeq) return
+    const msg = e?.data?.error || e?.message || 'Failed to load file.'
+    fileModalContentError.value = String(msg)
+  } finally {
+    if (seq === fileModalContentSeq) fileModalContentLoading.value = false
+  }
+}
+
+const openFileModal = async (card: { task: Task; attempt: TaskAttempt }) => {
+  const tid = String((card as any)?.task?.id || '').trim()
+  const aid = String((card as any)?.attempt?.id || '').trim()
+  if (!tid || !aid) return
+
+  fileModalOpen.value = true
+  fileModalLoading.value = true
+  fileModalError.value = ''
+  fileModalTitle.value = String((card as any)?.task?.title || '').trim() || '文件'
+  fileModalWorkspace.value = String((card as any)?.task?.workspace || '').trim()
+  fileModalTaskId.value = tid
+  fileModalAttemptId.value = aid
+  fileModalFiles.value = []
+  fileModalOmitted.value = 0
+  fileModalSelectedPath.value = ''
+  fileModalSelectedAvailable.value = false
+  fileModalContentLoading.value = false
+  fileModalContentError.value = ''
+  fileModalContent.value = null
+
+  const seq = ++fileModalRequestSeq
+  try {
+    const res = await listTaskAttemptFiles(tid, aid)
+    if (seq !== fileModalRequestSeq) return
+    const files = Array.isArray((res as any)?.files) ? ((res as any).files as TaskAttemptFileEntry[]) : []
+    fileModalFiles.value = files
+    fileModalOmitted.value = Number((res as any)?.omitted || 0) || 0
+    const first = files.find((f) => Boolean((f as any)?.available)) || files[0]
+    if (first && String((first as any)?.path || '').trim()) {
+      await selectFileInModal(String((first as any).path))
+    }
+  } catch (e: any) {
+    if (seq !== fileModalRequestSeq) return
+    const msg = e?.data?.error || e?.message || 'Failed to load files.'
+    fileModalError.value = String(msg)
+  } finally {
+    if (seq === fileModalRequestSeq) fileModalLoading.value = false
+  }
+}
+
 watch(
   () => props.workspace,
   async () => {
@@ -565,6 +673,15 @@ onUnmounted(() => {
             </div>
 
             <div v-if="recoveryDetailsExpanded && card.artifacts.length" class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="recovery-open-files"
+                class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+                title="浏览变更文件内容（快照）"
+                @click.stop="openFileModal(card)"
+              >
+                文件
+              </button>
               <button
                 v-for="a in card.artifacts"
                 :key="a.kind"
@@ -677,6 +794,15 @@ onUnmounted(() => {
 
           <div v-if="deliverablesDetailsExpanded" class="mt-3 flex flex-wrap gap-2">
             <button
+              type="button"
+              data-testid="deliverable-open-files"
+              class="rounded-full border border-surface-700/40 bg-surface-900/40 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800/50"
+              title="浏览变更文件内容（快照）"
+              @click="openFileModal(card)"
+            >
+              文件
+            </button>
+            <button
               v-for="a in card.artifacts"
               :key="a.kind"
               type="button"
@@ -726,6 +852,96 @@ onUnmounted(() => {
             <pre
               class="max-h-[65vh] overflow-auto rounded-2xl bg-surface-950/60 p-4 text-[12px] text-surface-200 whitespace-pre font-mono leading-relaxed"
             >{{ artifactModalContent?.content }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="fileModalOpen"
+      data-testid="secretary-task-file-modal"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div class="absolute inset-0 bg-black/70" @click="closeFileModal"></div>
+      <div class="relative w-full max-w-6xl rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
+        <div class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-surface-100 truncate">文件 · {{ fileModalTitle }}</div>
+            <div v-if="fileModalWorkspace" class="text-xs text-surface-500 font-mono break-all mt-0.5">{{ fileModalWorkspace }}</div>
+          </div>
+          <button
+            type="button"
+            data-testid="secretary-task-file-modal-close"
+            class="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-700/50 text-surface-300 hover:bg-surface-600/50 transition-colors"
+            @click="closeFileModal"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="p-5">
+          <div v-if="fileModalLoading" class="text-sm text-surface-500 py-8 text-center">
+            加载中…
+          </div>
+          <ErrorBanner v-else-if="fileModalError" :error="fileModalError" title="加载失败" />
+          <div v-else class="space-y-3">
+            <div v-if="fileModalOmitted > 0" class="text-xs text-surface-500">
+              仅展示前 {{ fileModalFiles.length }} 个文件，另有 {{ fileModalOmitted }} 个已省略。
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div class="lg:col-span-1">
+                <div v-if="fileModalFiles.length === 0" class="text-sm text-surface-500 italic py-10 text-center">
+                  暂无可浏览文件（未检测到变更文件或未生成快照）
+                </div>
+                <div v-else class="max-h-[65vh] overflow-auto space-y-1 pr-1">
+                  <button
+                    v-for="f in fileModalFiles"
+                    :key="f.path"
+                    type="button"
+                    class="w-full text-left rounded-xl border px-3 py-2 transition-colors"
+                    :class="[
+                      String(f.path) === fileModalSelectedPath
+                        ? 'border-primary-500/40 bg-primary-500/10'
+                        : 'border-surface-800/60 bg-surface-950/40 hover:bg-surface-900/55',
+                    ]"
+                    @click="selectFileInModal(f.path)"
+                  >
+                    <div class="text-xs text-surface-100 font-mono break-all">{{ f.path }}</div>
+                    <div class="mt-0.5 text-[11px]" :class="f.available ? 'text-surface-500' : 'text-amber-400/90'">
+                      {{ f.available ? (f.size_bytes ? `${f.size_bytes} bytes` : '可预览') : '无快照' }}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div class="lg:col-span-2">
+                <div v-if="!fileModalSelectedPath" class="text-sm text-surface-500 italic py-10 text-center">
+                  选择一个文件查看内容
+                </div>
+                <div v-else class="space-y-3">
+                  <div class="text-xs text-surface-400 font-mono break-all">{{ fileModalSelectedPath }}</div>
+
+                  <div v-if="!fileModalSelectedAvailable" class="text-sm text-surface-500 italic py-10 text-center">
+                    该文件未生成快照（可能已被删除、是二进制文件，或超出限制）。
+                  </div>
+                  <div v-else>
+                    <div v-if="fileModalContentLoading" class="text-sm text-surface-500 py-8 text-center">
+                      加载中…
+                    </div>
+                    <ErrorBanner v-else-if="fileModalContentError" :error="fileModalContentError" title="加载失败" />
+                    <div v-else>
+                      <div v-if="fileModalContent?.truncated" class="text-xs text-amber-400 px-1 mb-2">
+                        内容已截断（仅展示前 512KB）
+                      </div>
+                      <pre
+                        class="max-h-[65vh] overflow-auto rounded-2xl bg-surface-950/60 p-4 text-[12px] text-surface-200 whitespace-pre font-mono leading-relaxed"
+                      >{{ fileModalContent?.content }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

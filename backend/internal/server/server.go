@@ -77,6 +77,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/secretary/state", secretaryHandler.GetState)
 		api.POST("/secretary/recovery/focus", secretaryHandler.SetRecoveryFocus)
 		api.GET("/secretary/session", secretaryHandler.GetSession)
+		api.POST("/secretary/session/reset", secretaryHandler.ResetSession)
 
 		// Task queue.
 		api.POST("/tasks", handler.CreateTask)
@@ -93,6 +94,8 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.GET("/tasks/:id/attempts/:attempt_id/artifacts/:kind", handler.GetTaskAttemptArtifact)
 		api.GET("/tasks/:id/attempts/:attempt_id/diff_patch", handler.GetTaskAttemptDiffPatch)
 		api.GET("/tasks/:id/attempts/:attempt_id/changed_files", handler.GetTaskAttemptChangedFiles)
+		api.GET("/tasks/:id/attempts/:attempt_id/files", handler.ListTaskAttemptFiles)
+		api.GET("/tasks/:id/attempts/:attempt_id/files/read", handler.ReadTaskAttemptFileSnapshot)
 		api.GET("/tasks/:id/attempts/:attempt_id/review_comments", handler.ListTaskAttemptReviewComments)
 		api.POST("/tasks/:id/attempts/:attempt_id/review_comments", handler.PostTaskAttemptReviewComment)
 		api.POST("/tasks/:id/attempts/:attempt_id/rollback", handler.RollbackTaskAttempt)

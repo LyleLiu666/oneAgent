@@ -19,6 +19,7 @@ vi.mock('@/api/client', () => ({
   getSecretaryState: vi.fn(async () => ({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })),
   setSecretaryRecoveryFocus: vi.fn(),
   getSecretarySession: vi.fn(async () => ({ id: 's1', messages: [], metadata: {} })),
+  resetSecretarySession: vi.fn(async () => ({ session_id: 's1' })),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
   getSessions: vi.fn(async () => []),
   getSession: vi.fn(async () => ({ messages: [], metadata: {} })),
@@ -262,6 +263,52 @@ it('shows in-flight tool call progress in secretary mode', async () => {
 
   await flushPromises()
   expect(wrapper.find('[data-testid=\"chat-secretary-tool-progress\"]').exists()).toBe(false)
+
+  wrapper.unmount()
+})
+
+it('can reset secretary context via a confirmation modal', async () => {
+  stubLocalStorage()
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: {
+      initialMode: 'secretary',
+    },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+
+  const chatStore = useSecretaryChatStore()
+  chatStore.setMessages([
+    {
+      id: 1,
+      role: 'user',
+      type: 'text',
+      content: 'hi',
+      createdAt: new Date(),
+      isStreaming: false,
+    } as any,
+  ])
+
+  await flushPromises()
+  expect(chatStore.messages.length).toBe(1)
+
+  await wrapper.get('[data-testid="secretary-reset-context"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[data-testid="secretary-reset-modal"]').exists()).toBe(true)
+
+  await wrapper.get('[data-testid="secretary-reset-confirm"]').trigger('click')
+  await flushPromises()
+
+  expect((apiClient as any).resetSecretarySession).toHaveBeenCalledTimes(1)
+  expect(chatStore.messages.length).toBe(0)
 
   wrapper.unmount()
 })

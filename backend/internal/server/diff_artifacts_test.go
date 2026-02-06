@@ -51,6 +51,40 @@ func TestGenerateDiffArtifacts_GitWorkspace_WritesPatchAndChangedFiles(t *testin
 	}
 }
 
+func TestGenerateDiffArtifacts_GitWorkspace_SnapshotsChangedFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found")
+	}
+
+	workspace := t.TempDir()
+	runGit(t, workspace, "init")
+	runGit(t, workspace, "config", "user.email", "test@example.com")
+	runGit(t, workspace, "config", "user.name", "Test")
+	writeFile(t, filepath.Join(workspace, "a.txt"), "hello\n")
+	runGit(t, workspace, "add", ".")
+	runGit(t, workspace, "commit", "-m", "init")
+
+	writeFile(t, filepath.Join(workspace, "a.txt"), "hello world\n")
+
+	outDir := filepath.Join(t.TempDir(), "artifacts")
+	got, err := generateDiffArtifacts(context.Background(), workspace, "", outDir)
+	if err != nil {
+		t.Fatalf("generateDiffArtifacts: %v", err)
+	}
+	if strings.TrimSpace(got.ChangedFilesPath) == "" {
+		t.Fatalf("expected changed_files_path")
+	}
+
+	snapPath := filepath.Join(outDir, "files", "a.txt")
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Fatalf("expected snapshot file %s: %v", snapPath, err)
+	}
+	data, _ := os.ReadFile(snapPath)
+	if !strings.Contains(string(data), "hello world") {
+		t.Fatalf("snapshot content looks wrong: %s", string(data))
+	}
+}
+
 func TestGenerateDiffArtifacts_NonGitWorkspace_UsesFindingsChangedFiles(t *testing.T) {
 	workspace := t.TempDir()
 	findings := filepath.Join(t.TempDir(), "FINDINGS.md")
@@ -73,6 +107,30 @@ func TestGenerateDiffArtifacts_NonGitWorkspace_UsesFindingsChangedFiles(t *testi
 	}
 }
 
+func TestGenerateDiffArtifacts_NonGitWorkspace_FallsBackToWorkspaceScan(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, "report.md"), "# ok\n")
+
+	outDir := filepath.Join(t.TempDir(), "artifacts")
+	got, err := generateDiffArtifacts(context.Background(), workspace, "", outDir)
+	if err != nil {
+		t.Fatalf("generateDiffArtifacts: %v", err)
+	}
+	if got.IsGitWorkspace {
+		t.Fatalf("expected non-git workspace")
+	}
+
+	cf, _ := os.ReadFile(got.ChangedFilesPath)
+	if !strings.Contains(string(cf), "report.md") {
+		t.Fatalf("expected report.md in changed_files: %s", string(cf))
+	}
+
+	snapPath := filepath.Join(outDir, "files", "report.md")
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Fatalf("expected snapshot file %s: %v", snapPath, err)
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -92,4 +150,3 @@ func writeFile(t *testing.T, path string, content string) {
 		t.Fatalf("write file: %v", err)
 	}
 }
-

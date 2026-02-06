@@ -517,6 +517,127 @@ func TestServer_SecretaryTriage_ProgressQuery_ReturnsWorkspaceStats(t *testing.T
 	}
 }
 
+func TestServer_SecretarySessionReset_ClearsMessagesAndState(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	workspace := t.TempDir()
+
+	var inboxResp struct {
+		SessionID string `json:"session_id"`
+		MessageID uint   `json:"message_id"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content":   "hello",
+		"workspace": workspace,
+	}, &inboxResp)
+	if strings.TrimSpace(inboxResp.SessionID) == "" || inboxResp.MessageID == 0 {
+		t.Fatalf("unexpected inbox response: %+v", inboxResp)
+	}
+
+	var focusResp struct {
+		SessionID     string `json:"session_id"`
+		RecoveryFocus any    `json:"recovery_focus"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/recovery/focus", map[string]any{
+		"task_id":    "t1",
+		"attempt_id": "a1",
+	}, &focusResp)
+	if strings.TrimSpace(focusResp.SessionID) != inboxResp.SessionID {
+		t.Fatalf("expected focus session_id=%q, got %+v", inboxResp.SessionID, focusResp)
+	}
+	if focusResp.RecoveryFocus == nil {
+		t.Fatalf("expected recovery focus to be set")
+	}
+
+	body := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
+	var sess struct {
+		ID       string         `json:"id"`
+		Metadata map[string]any `json:"metadata"`
+		Messages []any          `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &sess); err != nil {
+		t.Fatalf("unmarshal session: %v", err)
+	}
+	if sess.ID != inboxResp.SessionID {
+		t.Fatalf("expected session id=%q, got %q", inboxResp.SessionID, sess.ID)
+	}
+	if len(sess.Messages) == 0 {
+		t.Fatalf("expected messages before reset")
+	}
+	if strings.TrimSpace(stringifyAny(sess.Metadata["workspace"])) == "" {
+		t.Fatalf("expected workspace metadata before reset, got %+v", sess.Metadata)
+	}
+
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/session/reset", map[string]any{}, nil)
+
+	body2 := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
+	var sess2 struct {
+		ID       string         `json:"id"`
+		Metadata map[string]any `json:"metadata"`
+		Messages []any          `json:"messages"`
+	}
+	if err := json.Unmarshal(body2, &sess2); err != nil {
+		t.Fatalf("unmarshal session2: %v", err)
+	}
+	if sess2.ID != inboxResp.SessionID {
+		t.Fatalf("expected session id=%q after reset, got %q", inboxResp.SessionID, sess2.ID)
+	}
+	if len(sess2.Messages) != 0 {
+		t.Fatalf("expected no messages after reset, got %d", len(sess2.Messages))
+	}
+	if strings.TrimSpace(stringifyAny(sess2.Metadata["workspace"])) != "" {
+		t.Fatalf("expected workspace metadata cleared after reset, got %+v", sess2.Metadata)
+	}
+
+	body3 := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/state")
+	var st struct {
+		CursorMessageID uint `json:"cursor_message_id"`
+		RecoveryFocus   any  `json:"recovery_focus"`
+	}
+	if err := json.Unmarshal(body3, &st); err != nil {
+		t.Fatalf("unmarshal state: %v", err)
+	}
+	if st.CursorMessageID != 0 {
+		t.Fatalf("expected cursor_message_id=0 after reset, got %d", st.CursorMessageID)
+	}
+	if st.RecoveryFocus != nil {
+		t.Fatalf("expected recovery focus cleared after reset, got %+v", st.RecoveryFocus)
+	}
+}
+
+func stringifyAny(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch vv := v.(type) {
+	case string:
+		return vv
+	default:
+		return ""
+	}
+}
+
 func TestServer_SecretaryTriage_ProgressQuery_NoWorkspace_StillReturnsStats(t *testing.T) {
 	poolRoot := t.TempDir()
 	t.Setenv("ONEAGENT_WORKSPACE_POOL_DIR", poolRoot)

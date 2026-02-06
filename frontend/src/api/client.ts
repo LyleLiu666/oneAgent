@@ -372,6 +372,10 @@ export async function getSecretarySession() {
   return api("/api/secretary/session");
 }
 
+export async function resetSecretarySession(): Promise<{ session_id: string }> {
+  return api("/api/secretary/session/reset", { method: "POST", body: {} });
+}
+
 export async function approveToolApproval(approvalId: string, reason: string = "") {
   const id = String(approvalId || "").trim();
   if (!id) throw new Error("approvalId is required");
@@ -725,6 +729,39 @@ export async function getTaskAttemptChangedFiles(
 ): Promise<TaskAttemptArtifactContent> {
   return api(
     `/api/tasks/${encodeURIComponent(taskId)}/attempts/${encodeURIComponent(attemptId)}/changed_files`,
+  );
+}
+
+export interface TaskAttemptFileEntry {
+  path: string;
+  available: boolean;
+  size_bytes?: number;
+}
+
+export interface ListTaskAttemptFilesResponse {
+  files: TaskAttemptFileEntry[];
+  omitted?: number;
+}
+
+export async function listTaskAttemptFiles(
+  taskId: string,
+  attemptId: string,
+): Promise<ListTaskAttemptFilesResponse> {
+  return api(
+    `/api/tasks/${encodeURIComponent(taskId)}/attempts/${encodeURIComponent(attemptId)}/files`,
+  );
+}
+
+export async function readTaskAttemptFileSnapshot(
+  taskId: string,
+  attemptId: string,
+  path: string,
+  opts?: { tail?: boolean },
+): Promise<TaskAttemptArtifactContent> {
+  const q = new URLSearchParams({ path: String(path || "") });
+  if (opts?.tail) q.set("tail", "1");
+  return api(
+    `/api/tasks/${encodeURIComponent(taskId)}/attempts/${encodeURIComponent(attemptId)}/files/read?${q.toString()}`,
   );
 }
 

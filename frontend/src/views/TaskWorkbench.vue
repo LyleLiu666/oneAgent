@@ -21,6 +21,8 @@ import {
   createTask,
   getTask,
   getTaskAttemptArtifact,
+  listTaskAttemptFiles,
+  readTaskAttemptFileSnapshot,
   getTaskAttemptChangedFiles,
   getTaskAttemptDiffPatch,
   getTaskQueueGovernanceSnapshot,
@@ -32,6 +34,7 @@ import {
   type Task,
   type TaskAttempt,
   type TaskAttemptArtifactContent,
+  type TaskAttemptFileEntry,
   type TaskAttemptReviewComment,
   type TaskEvent,
   type TaskQueueGovernanceSnapshot,
@@ -101,6 +104,17 @@ const reviewLoading = ref(false);
 const reviewError = ref<ParsedApiError | null>(null);
 const diffPatch = ref<TaskAttemptArtifactContent | null>(null);
 const changedFiles = ref<TaskAttemptArtifactContent | null>(null);
+const attemptFilesLoading = ref(false);
+const attemptFilesError = ref<ParsedApiError | null>(null);
+const attemptFiles = ref<TaskAttemptFileEntry[]>([]);
+const attemptFilesOmitted = ref(0);
+const attemptFileSelectedPath = ref("");
+const attemptFileSelectedAvailable = ref(false);
+const attemptFileContentLoading = ref(false);
+const attemptFileContentError = ref<ParsedApiError | null>(null);
+const attemptFileContent = ref<TaskAttemptArtifactContent | null>(null);
+let attemptFilesRequestSeq = 0;
+let attemptFileContentSeq = 0;
 const reviewComments = ref<TaskAttemptReviewComment[]>([]);
 const reviewCommentDraft = ref("");
 const followUpNotes = ref("");
@@ -429,25 +443,88 @@ const loadReviewArtifacts = async () => {
   diffPatch.value = null;
   changedFiles.value = null;
   reviewComments.value = [];
+  attemptFilesError.value = null;
+  attemptFiles.value = [];
+  attemptFilesOmitted.value = 0;
+  attemptFilesLoading.value = false;
+  attemptFileSelectedPath.value = "";
+  attemptFileSelectedAvailable.value = false;
+  attemptFileContentLoading.value = false;
+  attemptFileContentError.value = null;
+  attemptFileContent.value = null;
 
   const t = selectedTask.value;
   const a = latestAttempt.value;
   if (!t || !a) return;
 
   reviewLoading.value = true;
+  attemptFilesLoading.value = true;
+  const filesSeq = ++attemptFilesRequestSeq;
   try {
-    const [diff, changed, comments] = await Promise.all([
+    const [diff, changed, comments, files] = await Promise.all([
       getTaskAttemptDiffPatch(t.id, a.id).catch(() => null),
       getTaskAttemptChangedFiles(t.id, a.id).catch(() => null),
       listTaskAttemptReviewComments(t.id, a.id).catch(() => []),
+      listTaskAttemptFiles(t.id, a.id).catch((e: any) => {
+        if (filesSeq === attemptFilesRequestSeq) {
+          attemptFilesError.value = parseApiError(e, "加载文件失败");
+        }
+        return null;
+      }),
     ]);
     diffPatch.value = diff;
     changedFiles.value = changed;
     reviewComments.value = Array.isArray(comments) ? comments : [];
+
+    if (filesSeq === attemptFilesRequestSeq) {
+      const entries = Array.isArray((files as any)?.files)
+        ? ((files as any).files as TaskAttemptFileEntry[])
+        : [];
+      attemptFiles.value = entries;
+      attemptFilesOmitted.value = Number((files as any)?.omitted || 0) || 0;
+    }
+    if (attemptFiles.value.length > 0) {
+      const first =
+        attemptFiles.value.find((f) => Boolean((f as any)?.available)) ||
+        attemptFiles.value[0];
+      if (first) {
+        void selectAttemptFile(first);
+      }
+    }
   } catch (e: any) {
     reviewError.value = parseApiError(e, "加载审查信息失败");
   } finally {
     reviewLoading.value = false;
+    if (filesSeq === attemptFilesRequestSeq) attemptFilesLoading.value = false;
+  }
+};
+
+const selectAttemptFile = async (entry: TaskAttemptFileEntry) => {
+  const t = selectedTask.value;
+  const a = latestAttempt.value;
+  if (!t || !a) return;
+
+  const rel = String((entry as any)?.path || "").trim();
+  const available = Boolean((entry as any)?.available);
+  if (!rel) return;
+
+  attemptFileSelectedPath.value = rel;
+  attemptFileSelectedAvailable.value = available;
+  attemptFileContentError.value = null;
+  attemptFileContent.value = null;
+  if (!available) return;
+
+  attemptFileContentLoading.value = true;
+  const seq = ++attemptFileContentSeq;
+  try {
+    const res = await readTaskAttemptFileSnapshot(t.id, a.id, rel);
+    if (seq !== attemptFileContentSeq) return;
+    attemptFileContent.value = res;
+  } catch (e: any) {
+    if (seq !== attemptFileContentSeq) return;
+    attemptFileContentError.value = parseApiError(e, "加载文件失败");
+  } finally {
+    if (seq === attemptFileContentSeq) attemptFileContentLoading.value = false;
   }
 };
 
@@ -1449,30 +1526,75 @@ onUnmounted(() => {
                     <div class="glass-card p-4">
                       <div class="flex items-center justify-between mb-3">
                         <span class="text-sm font-semibold text-surface-100"
-                          >变更文件</span
+                          >文件</span
                         >
                         <span
-                          v-if="changedFiles?.content"
+                          v-if="attemptFiles.length"
                           class="text-xs text-surface-500"
-                          >{{
-                            changedFiles.content
-                              .split("\n")
-                              .filter((l) => l.trim()).length
-                          }}
-                          文件</span
+                          >{{ attemptFiles.length }} 个</span
                         >
                       </div>
-                      <pre
-                        v-if="changedFiles?.content"
-                        class="max-h-[40vh] overflow-auto rounded-xl bg-surface-950/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap"
-                        >{{ changedFiles.content }}</pre
-                      >
-                      <div
-                        v-else
-                        class="py-8 text-sm text-surface-500 text-center italic"
-                      >
-                        暂无变更文件列表
+
+                      <div v-if="attemptFilesLoading" class="py-8 text-sm text-surface-500 text-center italic">
+                        加载中…
                       </div>
+                      <ErrorBanner v-else-if="attemptFilesError" :error="attemptFilesError" title="加载文件失败" />
+                      <div v-else-if="attemptFiles.length === 0" class="py-8 text-sm text-surface-500 text-center italic">
+                        暂无可浏览文件（未检测到变更文件或未生成快照）
+                      </div>
+                      <div v-else class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <div class="max-h-[55vh] overflow-auto space-y-1 pr-1">
+                          <button
+                            v-for="f in attemptFiles"
+                            :key="f.path"
+                            type="button"
+                            class="w-full text-left rounded-xl border px-3 py-2 transition-colors"
+                            :class="[
+                              String(f.path) === attemptFileSelectedPath
+                                ? 'border-indigo-500/40 bg-indigo-500/10'
+                                : 'border-surface-700/40 bg-surface-950/40 hover:bg-surface-900/55',
+                            ]"
+                            @click="selectAttemptFile(f)"
+                          >
+                            <div class="text-xs text-surface-100 font-mono break-all">{{ f.path }}</div>
+                            <div class="mt-0.5 text-[11px]" :class="f.available ? 'text-surface-500' : 'text-amber-400/90'">
+                              {{ f.available ? (f.size_bytes ? `${f.size_bytes} bytes` : '可预览') : '无快照' }}
+                            </div>
+                          </button>
+                          <div v-if="attemptFilesOmitted > 0" class="mt-2 text-[11px] text-surface-500">
+                            另有 {{ attemptFilesOmitted }} 个文件已省略。
+                          </div>
+                        </div>
+
+                        <div>
+                          <div v-if="!attemptFileSelectedPath" class="py-8 text-sm text-surface-500 text-center italic">
+                            选择一个文件查看内容
+                          </div>
+                          <div v-else class="space-y-2">
+                            <div class="text-[11px] text-surface-500 font-mono break-all">{{ attemptFileSelectedPath }}</div>
+                            <div v-if="!attemptFileSelectedAvailable" class="py-8 text-sm text-surface-500 text-center italic">
+                              该文件未生成快照（可能已被删除、是二进制文件，或超出限制）。
+                            </div>
+                            <div v-else-if="attemptFileContentLoading" class="py-8 text-sm text-surface-500 text-center italic">
+                              加载中…
+                            </div>
+                            <ErrorBanner v-else-if="attemptFileContentError" :error="attemptFileContentError" title="加载文件失败" />
+                            <div v-else class="space-y-2">
+                              <div v-if="attemptFileContent?.truncated" class="text-xs text-amber-400 px-1">
+                                内容已截断（仅展示前 512KB）
+                              </div>
+                              <pre
+                                class="max-h-[40vh] overflow-auto rounded-xl bg-surface-950/50 p-3 text-[11px] text-surface-200 whitespace-pre"
+                              >{{ attemptFileContent?.content }}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <details v-if="changedFiles?.content" class="mt-3">
+                        <summary class="cursor-pointer text-xs text-surface-500">changed_files 报告（调试）</summary>
+                        <pre class="mt-2 max-h-[25vh] overflow-auto rounded-xl bg-surface-950/50 p-3 text-[11px] text-surface-200 whitespace-pre-wrap">{{ changedFiles.content }}</pre>
+                      </details>
                     </div>
                   </div>
 

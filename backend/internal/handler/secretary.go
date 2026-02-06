@@ -271,3 +271,35 @@ func (h *SecretaryHandler) GetSession(c *gin.Context) {
 	session.Messages = msgs
 	c.JSON(http.StatusOK, session)
 }
+
+func (h *SecretaryHandler) ResetSession(c *gin.Context) {
+	if h == nil || h.rt == nil || h.rt.Sessions == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	sessionID, err := h.rt.ResolveSecretarySessionID(c.Request.Context(), userID)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		return
+	}
+
+	if err := h.rt.Sessions.DeleteSession(sessionID, userID); err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	// Recreate the canonical session so the client can immediately bootstrap with empty state.
+	if _, err := h.rt.Sessions.GetOrCreateSession(sessionID, userID, "secretary", "Secretary"); err != nil {
+		RespondError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"session_id": sessionID})
+}

@@ -12,6 +12,8 @@ vi.mock("@/api/client", () => ({
   getTaskAttemptArtifact: vi.fn(async () => ({})),
   getTaskAttemptDiffPatch: vi.fn(async () => ({})),
   getTaskAttemptChangedFiles: vi.fn(async () => ({})),
+  listTaskAttemptFiles: vi.fn(async () => ({ files: [], omitted: 0 })),
+  readTaskAttemptFileSnapshot: vi.fn(async () => ({ path: "", content: "", truncated: false })),
   getTaskQueueGovernanceSnapshot: vi.fn(async () => ({
     ts: new Date().toISOString(),
     global: { max_running_workspaces: 0 },
@@ -887,6 +889,7 @@ it("loads review artifacts and submits a review comment", async () => {
 
   expect(apiClient.getTaskAttemptDiffPatch).toHaveBeenCalledWith("t1", "a1");
   expect(apiClient.getTaskAttemptChangedFiles).toHaveBeenCalledWith("t1", "a1");
+  expect(apiClient.listTaskAttemptFiles).toHaveBeenCalledWith("t1", "a1");
 
   await wrapper.get('[data-testid="review-comment-input"]').setValue("LGTM");
   await wrapper.get('[data-testid="review-comment-submit"]').trigger("click");

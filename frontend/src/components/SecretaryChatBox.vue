@@ -24,6 +24,7 @@ import {
   getSecretaryState,
   setSecretaryRecoveryFocus,
   getSecretarySession,
+  resetSecretarySession,
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import Welcome from './Welcome.vue'
@@ -106,6 +107,9 @@ let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
 const secretaryTaskPanelVisible = ref(false)
 const secretaryPendingQuestions = ref<string[]>([])
 const secretaryPendingQuestionsModalOpen = ref(false)
+const secretaryResetConfirmOpen = ref(false)
+const secretaryResetSubmitting = ref(false)
+const secretaryResetError = ref('')
 
 type SecretaryRecoveryItem = {
   taskId: string
@@ -135,6 +139,36 @@ const normalizeSecretaryQuestions = (raw: any): string[] => {
 
 const closeSecretaryPendingQuestionsModal = () => {
   secretaryPendingQuestionsModalOpen.value = false
+}
+
+const openSecretaryResetConfirm = () => {
+  secretaryResetError.value = ''
+  secretaryResetConfirmOpen.value = true
+}
+
+const closeSecretaryResetConfirm = () => {
+  if (secretaryResetSubmitting.value) return
+  secretaryResetConfirmOpen.value = false
+  secretaryResetError.value = ''
+}
+
+const confirmSecretaryReset = async () => {
+  if (!isSecretaryMode.value) return
+  if (secretaryResetSubmitting.value) return
+
+  secretaryResetSubmitting.value = true
+  secretaryResetError.value = ''
+  try {
+    await resetSecretarySession()
+    closeSecretaryResetConfirm()
+    startNewSession()
+    await loadSessionMessages('', false)
+  } catch (error: any) {
+    const msg = error?.data?.error || error?.message || 'Failed to reset session.'
+    secretaryResetError.value = String(msg)
+  } finally {
+    secretaryResetSubmitting.value = false
+  }
 }
 
 const streamTokenCount = (msg: ChatMessage): number | undefined => {
@@ -2323,6 +2357,17 @@ onUnmounted(() => {
               {{ secretaryTaskPanelVisible ? '隐藏任务面板' : '查看任务面板' }}
             </button>
             <button
+              v-if="isSecretaryMode"
+              type="button"
+              data-testid="secretary-reset-context"
+              class="bg-red-500/10 text-red-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-red-500/25 hover:bg-red-500/15 focus:outline-none focus:ring-2 focus:ring-red-500/30 disabled:opacity-60 disabled:cursor-not-allowed"
+              title="清空秘书上下文（删除本会话消息、重置游标/待确认）。不影响后台任务。"
+              :disabled="secretaryResetSubmitting"
+              @click="openSecretaryResetConfirm"
+            >
+              清空上下文
+            </button>
+            <button
               type="button"
               data-testid="chat-toggle-mode"
               class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
@@ -2776,6 +2821,65 @@ onUnmounted(() => {
             </li>
           </ol>
           <div class="text-xs text-surface-400">建议直接在对话框回复编号/答案。</div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="secretaryResetConfirmOpen"
+      data-testid="secretary-reset-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="清空上下文"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+    >
+      <div class="absolute inset-0 bg-black/70" @click="closeSecretaryResetConfirm"></div>
+      <div class="relative w-full max-w-lg rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
+        <div class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-surface-100 truncate">清空上下文 · 秘书</div>
+            <div class="text-xs text-surface-400 mt-0.5">这会删除本秘书会话的历史消息，并重置待确认/游标。</div>
+          </div>
+          <button
+            type="button"
+            data-testid="secretary-reset-modal-close"
+            class="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-700/50 text-surface-300 hover:bg-surface-600/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            :disabled="secretaryResetSubmitting"
+            @click="closeSecretaryResetConfirm"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="p-5 space-y-4">
+          <ul class="space-y-1 text-sm text-surface-200 list-disc list-inside">
+            <li>会话消息会被清空</li>
+            <li>待确认列表会被重置</li>
+            <li>不会删除后台任务（交付/排障仍可在任务面板查看）</li>
+          </ul>
+
+          <p v-if="secretaryResetError" class="text-xs text-red-400">{{ secretaryResetError }}</p>
+
+          <div class="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              data-testid="secretary-reset-cancel"
+              class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-800/60 text-surface-200 hover:bg-surface-700/60 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="secretaryResetSubmitting"
+              @click="closeSecretaryResetConfirm"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              data-testid="secretary-reset-confirm"
+              class="px-3 py-2 rounded-xl text-sm font-medium bg-red-500/80 text-white hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="secretaryResetSubmitting"
+              @click="confirmSecretaryReset"
+            >
+              {{ secretaryResetSubmitting ? '清空中…' : '确认清空' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
