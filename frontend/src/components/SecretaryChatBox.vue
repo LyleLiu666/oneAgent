@@ -232,7 +232,8 @@ const openSecretaryResetConfirm = () => {
   secretaryResetConfirmOpen.value = true
 }
 
-const closeSecretaryResetConfirm = (force = false) => {
+const closeSecretaryResetConfirm = (arg?: boolean | PointerEvent) => {
+  const force = arg === true
   if (!force && secretaryResetSubmitting.value) return
   secretaryResetConfirmOpen.value = false
   secretaryResetError.value = ''
