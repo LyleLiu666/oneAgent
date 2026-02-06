@@ -324,6 +324,62 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		progressSnapshot = strings.TrimSpace(snap)
 	}
 
+	// Fast path (deterministic): progress questions should not require LLM availability.
+	// Only trigger this when there is a single new user message to reduce false positives.
+	if len(newUserMsgs) == 1 && isLikelyProgressQuestion(newUserMsgs[0].Content) && strings.TrimSpace(progressSnapshot) != "" {
+		summaryMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
+			Role:    model.MessageRoleAssistant,
+			Type:    model.MessageTypeText,
+			Content: progressSnapshot,
+		})
+		if err != nil {
+			return TriageResult{}, err
+		}
+
+		state.CursorMessageID = toID
+		state.TriageRuns = append(state.TriageRuns, TriageRun{
+			FromCursor:        cursor,
+			ToMessageID:       toID,
+			InputMessageIDs:   messageIDs(newUserMsgs),
+			SummaryMessageID:  summaryMsg.ID,
+			SummaryMessage:    progressSnapshot,
+			CreatedTaskIDs:    []string{},
+			CanceledTaskIDs:   []string{},
+			ResumedTaskIDs:    []string{},
+			Questions:         []string{},
+			WorkspacesCreated: []string{},
+			CreatedAt:         time.Now().UTC(),
+		})
+		if len(state.TriageRuns) > 20 {
+			state.TriageRuns = state.TriageRuns[len(state.TriageRuns)-20:]
+		}
+
+		meta := upsertState(session.Metadata, state)
+		_ = o.Sessions.UpdateSessionMetadata(sessionID, meta)
+
+		if o.Memory != nil {
+			_, _ = o.Memory.AppendEntry(ctx, memorydb.Entry{
+				PrincipalID: userID,
+				Writer:      "SU",
+				Type:        "findings",
+				Workspace:   sessionWorkspace,
+				Title:       "triage_summary",
+				Content:     progressSnapshot,
+			})
+		}
+
+		return TriageResult{
+			SummaryMessage:    progressSnapshot,
+			SummaryMessageID:  summaryMsg.ID,
+			CursorMessageID:   state.CursorMessageID,
+			CreatedTaskIDs:    []string{},
+			CanceledTaskIDs:   []string{},
+			ResumedTaskIDs:    []string{},
+			Questions:         []string{},
+			WorkspacesCreated: []string{},
+		}, nil
+	}
+
 	// SW: dispatch planning + worker coordination (best-effort).
 	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
 	if err != nil {
@@ -2313,6 +2369,54 @@ func formatApproxChineseChars(n int) string {
 		w = 1
 	}
 	return fmt.Sprintf("%dw字", w)
+}
+
+func isLikelyProgressQuestion(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	lower := strings.ToLower(text)
+
+	containsAny := func(needles []string) bool {
+		for _, needle := range needles {
+			needle = strings.TrimSpace(needle)
+			if needle == "" {
+				continue
+			}
+			if strings.Contains(lower, needle) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Strong progress/status intent.
+	if containsAny([]string{
+		"progress",
+		"status",
+		"进度",
+		"进展",
+		"状态",
+	}) {
+		return true
+	}
+
+	// Task-centric progress intent (avoid matching generic "任务" mentions).
+	if strings.Contains(lower, "任务") && containsAny([]string{
+		"完成",
+		"运行",
+		"排队",
+		"在跑",
+		"还在",
+		"几个",
+		"多少",
+		"进行",
+	}) {
+		return true
+	}
+
+	return false
 }
 
 func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (summary string, questions []string, err error) {

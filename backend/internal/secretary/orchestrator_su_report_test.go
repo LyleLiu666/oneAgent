@@ -76,7 +76,7 @@ func TestTriage_UsesSUReportWhenAvailable(t *testing.T) {
 		},
 	}
 
-	if _, err := o.AppendInboxMessage(context.Background(), "local", "session-1", "我有点忙，你先帮我看下进度", ws); err != nil {
+	if _, err := o.AppendInboxMessage(context.Background(), "local", "session-1", "我有点忙，你先帮我整理下需要我确认的信息", ws); err != nil {
 		t.Fatalf("AppendInboxMessage: %v", err)
 	}
 

@@ -83,7 +83,7 @@ func TestTriage_ToolLoop_XML_FeedsToolErrorAndDoesNotWrite(t *testing.T) {
 		},
 	}
 
-	if _, err := o.AppendInboxMessage(context.Background(), "local", "session-1", "帮我看看进度", ws); err != nil {
+	if _, err := o.AppendInboxMessage(context.Background(), "local", "session-1", "帮我拆解一下接下来要做什么", ws); err != nil {
 		t.Fatalf("AppendInboxMessage: %v", err)
 	}
 
