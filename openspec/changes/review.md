@@ -31,6 +31,6 @@
 - `update-task-deliverable-contract-v1`：✓ Complete
 - `update-worktree-attempt-isolation-v2`：✓ Complete
 - `update-secretary-autonomy-selfheal-v2`：✓ Complete
-- `update-queue-governance-scheduling-v2`：0/12 tasks
+- `update-queue-governance-scheduling-v2`：✓ Complete
 - `update-mcp-action-plane-v1`：0/12 tasks
 - `add-channel-relay-v1`：0/14 tasks
