@@ -2,6 +2,15 @@
 
 日期：2026-02-06
 
+## 范围与取舍（已决策）
+
+本轮明确选择：先把 oneAgent 做成“本地工程交付助手”，专注解决【简单问题 + 复杂问题】，并且全链路留痕（可审查交付物 + 证据 + 回滚 + 少打断）。
+
+明确不做（至少不在第一阶段做）：
+
+- IM/多渠道接入与网关工程（WhatsApp/Telegram/iMessage/Slack/Discord 等）
+- 语音/移动端节点/Canvas 等设备侧能力
+
 ## 0. 结论先行（避免空谈）
 
 如果“超过 OpenClaw”不先被定义为可量化目标，我们会永远陷在主观体感里。
@@ -11,6 +20,20 @@
 - OpenClaw 在「多渠道入口 + always-on 网关 + 设备节点（语音/Canvas/移动端）」上领先非常明显。
 - oneAgent 的可赢定位不是“渠道数量”，而是「工程交付质量」：更少打断、更稳定的可审查交付物、更强的回滚与证据链、更低的污染成本。
 - 所以“超过”的可行路径是：明确一个用户画像与任务集合，用 head-to-head 基准评测把差距量化，然后用 OpenSpec 把差距拆成可验证的 changes，按依赖顺序推进。
+
+## 0.1 我们要打穿的主路径：简单问题 + 复杂问题（都要留痕）
+
+简单问题（同步）：
+
+- 在 chat 内快速完成，不强迫进入 task queue
+- 仍然必须留下可审查的产物与证据：summary/findings/trace/diff/test report（可得时）
+- 不要为了“灵活”牺牲可回归性：所有降级都要可解释（为什么没有 diff/为什么没跑测试）
+
+复杂问题（异步）：
+
+- 自动 handoff 到 Task Queue，支持 progress/中断/恢复
+- 默认可回滚边界（worktree 隔离或等价隔离）与防污染
+- 默认交付“可审查包”（manifest + 指针稳定），失败也要留下完整证据框架
 
 ## 1. OpenClaw 是什么（我们到底在对标什么）
 
@@ -56,7 +79,7 @@
 
 - 工程交付：代码/文档/运维类任务，“给出可审查交付物 + 可复核证据 + 可回滚边界”
 - 低打断自治：秘书模式“先自愈后升级”，减少无意义追问
-- 外部触发入口：通过 MCP action plane + 最小 channel relay，把“入口”补齐到够用，而不是一口气追全渠道
+- 简单/复杂任务的统一交付体验：简单问题不打断，复杂问题可挂机，且两者都能稳定留痕
 
 不建议第一阶段硬拼的战场：
 
@@ -164,6 +187,7 @@ Change：`openspec/changes/update-mcp-action-plane-v1/`
 
 Change：`openspec/changes/add-channel-relay-v1/`
 
+- 说明：本轮已明确“第一阶段不做 IM/多渠道接入”，所以该 change 暂时不在主线上推进（保留为后续可选项）。
 - 目的：用最小成本把“入站委托/出站通知”跑通，形成渠道闭环。
 - 核心交付：
   - ingress schema + webhook adapter（v1 先支持 1 个渠道）
@@ -183,17 +207,11 @@ Change：`openspec/changes/add-channel-relay-v1/`
 3) `update-worktree-attempt-isolation-v2`（降低污染与回滚成本）
 4) `update-secretary-autonomy-selfheal-v2`（减少用户介入）
 5) `update-queue-governance-scheduling-v2`（规模化稳定性）
-6) `update-mcp-action-plane-v1`（对外触发能力）
-7) `add-channel-relay-v1`（入口补齐：先 1 个渠道）
+6) （可选后续）`update-mcp-action-plane-v1`（对外触发能力；不影响本地交付主线）
+7) （更后）`add-channel-relay-v1`（渠道接入；本轮明确不做 IM/多渠道）
 
 理由：前 3 个 change 决定了“交付可信度”，有了它们，后面的入口扩展才不会把系统带崩。
 
-## 7. 你需要回答的唯一关键问题（否则“超过”无法定义）
+## 7. 结论：本轮选择的竞争路线
 
-你要赢的是哪类用户？
-
-- A) “多渠道 personal assistant”（对标 OpenClaw 主战场）
-- B) “本地工程交付助手”（oneAgent 更有赢面）
-
-我建议先选 B；但如果你坚持 A，我们要在 OpenSpec 里把“渠道/网关/设备节点/配对安全/daemon”单独拆成一条主线，并接受周期明显更长。
-
+已选择路线：先打穿 “本地工程交付助手（可审查交付物 + 证据 + 回滚 + 少打断）”，并用 head-to-head 基准把进步做成可回归曲线；渠道/IM/设备节点不作为第一阶段目标。
