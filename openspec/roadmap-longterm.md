@@ -155,10 +155,12 @@
 **目标**：oneAgent 不只是 UI，更是可编排运行时；外部客户端可以标准协议接入。
 
 **当前**：
-- 已有 OpenSpec：`add-mcp-server`（未实现）。
+- 已完成并归档：`add-mcp-server`（只读入口）
+- 可选后续：`update-mcp-action-plane-v1`（受控动作面：create/resume/cancel；复用 auth/policy/approval）
 
 **迭代点（典型）**：
-- MCP server 先只读，再逐步加入 create/cancel/resume（严格复用 auth/policy）。
+- MCP 保持 local-only 为默认；远程访问必须显式开启且复用 auth/policy。
+- MCP 调用必须进入证据链（events/receipt/trace），否则排障与审计断裂。
 - 事件流（events）与证据链打通，为通知/日报提供通用入口。
 
 ---
@@ -168,102 +170,38 @@
 这不是“排期承诺”，而是依赖关系与建议顺序（做完再滚动更新）。
 
 ### 4.0 地基 → 上层（执行顺序与依赖）
-为了保证“先把地基打牢再上楼”，我们把近期主线拆成层级（L0→L3）。  
-**规则**：默认只推进最靠前、且能形成闭环交付的那一层；后续层级的工作必须建立在前一层的稳定性之上。
+为了保证“先把地基打牢再上楼”，路线图拆成层级（L0→L4；必要时扩展）。  
+**规则**：默认只推进最靠前、且能形成闭环交付的那一层；后续层级必须建立在前一层稳定性之上。  
+**状态来源**：active changes 的真实进度以 `openspec list` 为准；本文件只维护“依赖顺序与验收门槛”（避免漂移）。
 
-| 层级 | 目标 | 主要 changes | 依赖/门槛 |
+#### 4.0.1 已完成的地基（归档变更，作为背景）
+我们已经完成了本地交付闭环的基础层（详见 `openspec/changes/archive/`）：
+- `add-project-scripts`：进入可运行/可测试（可复现）
+- `add-diff-review-loop`：交付可审查（review → follow-up）
+- `add-worktree-attempt-isolation` + `add-native-command-sandbox`：隔离执行与硬边界（降低污染与破坏面）
+- `add-mcp-server`：MCP 只读入口（集成基底）
+
+#### 4.0.2 当前主线：本地工程交付助手（简单问题 + 复杂问题，都要留痕）
+目标：用户可以把简单问题当场解决，把复杂问题丢给后台挂机；两者都能拿到“可审查交付物 + 证据 + 可回滚边界（当有写操作时）”，且尽量少打断用户。
+
+| 层级 | 目标 | 对应 changes（按依赖） | 验收门槛（Hard Gate，示例） |
 | --- | --- | --- | --- |
-| **L0** | 项目可运行/可测试（可复现） | `add-project-scripts`（已完成） | tool permissions 不可绕过；失败留痕完整 |
-| **L1** | 交付可审查（评论→下一轮） | `add-diff-review-loop`（已完成） | 具备 diff/test evidence 的可打开指针 |
-| **L2** | 执行隔离 + 易回滚 | `add-worktree-attempt-isolation` + `add-native-command-sandbox` | git repo 检测稳定；生命周期清理可解释；命令执行硬边界（无 Docker） |
-| **L3** | 对外编排入口 | `add-mcp-server` | local-only + auth/policy；事件流与证据链打通 |
+| **L0** | 真相对齐 + 量尺 | `update-openspec-truth-alignment`（✓ Complete）→ `add-head2head-benchmark-suite` | truth check 可在本地/CI fail-fast；benchmark 本地最小集（>=3）可产出 JSON+MD 报告 |
+| **L1** | 交付物口径稳定（简单/复杂统一留痕） | `update-task-deliverable-contract-v1` | manifest v1 版本化；缺失字段有 reason code；API 合约测试覆盖成功/失败/降级 |
+| **L2** | 执行隔离 + 易回滚（复杂问题默认安全） | `update-worktree-attempt-isolation-v2` | worktree 元信息落盘；non-git fail-closed；清理失败可追溯/可重试；orphan 回收（best-effort） |
+| **L3** | 少打断自治（先自愈后升级） | `update-secretary-autonomy-selfheal-v2` | 单任务进度问答不追问；协议/参数类错误 bounded repair+retry；超过预算才升级且给下一步 |
+| **L4** | 规模化稳定性（多 workspace 调度治理） | `update-queue-governance-scheduling-v2` | 公平性/防饥饿；schedule misfire+幂等 key；治理决策写入事件；覆盖关键测试 |
+| **L5（可选）** | 外部触发动作面 | `update-mcp-action-plane-v1` | MCP 集成测试覆盖 auth/policy/approval；审计字段可追溯 |
+| **L6（更后）** | 渠道/IM 接入 | `add-channel-relay-v1` | v1 先 1 个渠道；webhook 签名 fail-closed；幂等去重；端到端测试 |
 
-辅助但低风险的“体验修补”（可穿插）：
-- `add-secretary-mode-chat`：不阻塞主线（L0/L1/L2/L3），但能显著降低“只想对话委托”的噪声。
-- `fix-skill-read-not-found-ux`：不阻塞主线，但每次碰到都值得顺手修掉（减少治理摩擦）。
-- `update-ux-error-surface`：分两段走（先错误披露契约与统一错误组件，再逐页修 UX），不阻塞 L2/L3，但会显著提升“可信度与可操作性”。
-
-### Phase A：把“项目任务”做到默认可用（地基主线）
-1) `add-project-scripts`（已完成：进入可运行态 + 日志证据）
-2) `add-diff-review-loop`（已完成：可审查交付 + review→follow-up）
-3) `add-worktree-attempt-isolation`（隔离执行 + 可回滚边界）
-
-### Phase A2：体验线（可与地基并行推进）
-4) `update-ux-error-surface`（安全错误面 + 渐进式披露 + 按 UX critique 修补）
-5) `add-secretary-mode-chat`（低噪声纯对话入口）
-6) `fix-skill-read-not-found-ux`（小而关键的摩擦修复）
-
-### Phase B：把“运行时”开放出去（集成主线）
-7) `add-mcp-server`（local-only + auth/policy + events）
-
-### Phase C：把“挂机收割”做到极致（留存主线）
-7) Digest/通知/批处理的体验增强（按需拆 change）
-8) 多 workspace 的队列策略、资源治理、自动化（按需拆 change）
-
-### Phase D：学习与治理的复利升级（资产主线）
-9) SOP/skills 的自动学习管线、强制证据、去重合并、过时淘汰（按需拆 change）
-
-### 4.1 近期 backlog（已写 OpenSpec：保留关键价值/风险点）
-
-> 进入实现阶段前，必须把工作区未提交变更整理为可回滚提交（否则“可复现/可推广”不成立）。
-
-#### P0（地基 / 必须先做）
-
-##### `add-worktree-attempt-isolation`（隔离执行）
-**价值**：把“并发/污染/回滚”问题降维为 git 合并问题，天然支持审查与回退。
-
-**关键坑**
-- Windows 文件占用/路径长度：worktree 清理与回收要足够鲁棒。
-- 非 git workspace：必须给出明确错误或按配置退化（不得 silent fallback）。
-- 生命周期：孤儿 worktree 的识别与清理需要证据与可操作提示。
-
-##### `add-native-command-sandbox`（命令执行硬边界：workspaceRoot 内真删除）
-**价值**：在不依赖 Docker、不复制 workspace 的前提下，让 agent 可以像开发者一样使用控制台命令（例如 `rm -rf`），但把破坏范围严格限定在 workspaceRoot 内。
-
-**关键坑**
-- 跨平台实现复杂：macOS（Seatbelt）/Linux（Landlock）/Windows（Restricted Token + ACL）需要不同后端；Windows 风险最高。
-- fallback 策略要一致且可解释：native sandbox 不可用时必须 fail-closed（或明确降级只读），不得 silent fallback 为宿主写执行。
-- “不断网”带来数据外泄风险：第一版不做断网，但必须配合 tool permissions / allowlist 治理（后续可加审批/规则）。
-
-##### `update-ux-error-surface`（安全错误面 + 统一错误展示 + 逐步修 UX）
-**价值**：把“报错直出/不可操作/信息暴露风险”系统性解决；同时把 `docs/ux_critique.md` 落到可验收的最小改动集（逐页推进）。
-
-**关键坑**
-- 默认必须“安全且可操作”：不把内部 `err.Error()` 直接塞给用户；必须有 `request_id` 以便定位 trace。
-- 渐进式披露要一致：默认只展示安全文案，细节必须显式展开（避免 UI 到处漏出技术串）。
-- 变更范围要可控：先做错误契约与公共组件，再按页面逐个验收（避免一次性大重构）。
-
-##### `fix-skill-read-not-found-ux`（可穿插：低成本高收益）
-**价值**：减少治理/学习阶段的“读不到 skill 却不知道怎么办”的摩擦，提升可用性。  
-**定位**：不阻塞主线（L0/L1/L2），但每次碰到都值得顺手修掉。
-
-#### P1（核心体验：低噪声纯对话）
-
-##### `add-secretary-mode-chat`（像“只和秘书说话”一样简单）
-**价值**：在不牺牲“复杂交互窗口（Tasks/Governance/Ledger）”的前提下，提供一个极低噪声的纯对话入口，让用户可以像使用 Moltbot/WebChat 那样只通过聊天完成委托与收割。
-
-**关键坑**
-- 不能把“简单”做成“功能缺失”：只是把复杂度折叠/隐藏，并确保一键回到完整模式。
-- 默认路径不得耦合 UI 文案：测试必须使用 `data-testid`，避免 i18n/措辞变更导致脆弱。
-- 证据链不丢：秘书模式隐藏 trace/工具细节，但必须可发现地打开查看（否则排障困难）。
-
-#### P2（生态/集成：把 oneAgent 变成可编排运行时）
-
-##### `add-mcp-server`（标准协议入口）
-**价值**：让外部客户端通过 MCP 读取/订阅/管理任务与账本，支撑通知/日报与“挂机收割”场景。
-
-**关键坑**
-- 默认必须 local-only；远程访问必须显式开启且复用 auth/policy。
-- MCP 调用必须进入证据链（否则排障与审计断裂）。
-
-#### 执行顺序（建议）
-按“地基 → 上层（L0→L3）”综合排序：
-1) `add-native-command-sandbox`
-2) `add-worktree-attempt-isolation`
-3) `update-ux-error-surface`（先做错误披露契约与统一组件，再逐页修 UX）
-4) `add-mcp-server`（建议先只读，逐步扩展）
-5) `add-secretary-mode-chat`（体验线：可并行推进）
-6) `fix-skill-read-not-found-ux`（穿插做，随时可落地）
+#### 4.0.3 线性执行顺序（按“地基 → 上层”排好）
+1) `add-head2head-benchmark-suite`（先把尺子立起来）
+2) `update-task-deliverable-contract-v1`（把“留痕/可审查”做成稳定契约）
+3) `update-worktree-attempt-isolation-v2`（把“回滚/防污染”做成默认）
+4) `update-secretary-autonomy-selfheal-v2`（减少用户介入，把可自愈问题拿回来）
+5) `update-queue-governance-scheduling-v2`（规模化后仍可解释/可恢复）
+6) `update-mcp-action-plane-v1`（可选后续：外部触发，不阻塞本地交付主线）
+7) `add-channel-relay-v1`（更后：渠道/IM，本阶段明确不做）
 
 ---
 
