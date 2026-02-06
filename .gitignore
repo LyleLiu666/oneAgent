@@ -21,7 +21,8 @@
 !.env.example
 
 # oneAgent runtime state (when ONEAGENT_HOME points to workspace)
-.oneagent/
+.oneagent/**
+!.oneagent/README.md
 
 # Go
 backend/server

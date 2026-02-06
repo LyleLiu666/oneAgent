@@ -299,12 +299,16 @@ func parseObserverDecisionFromToolCalls(calls []llm.ToolCall) (ObserverDecision,
 
 		var d ObserverDecision
 		if err := json.Unmarshal([]byte(raw), &d); err == nil {
-			return d, true
+			if err := validateObserverDecision(d); err == nil {
+				return d, true
+			}
 		}
 
 		if candidate := extractFirstJSONObject(raw); candidate != "" {
 			if err := json.Unmarshal([]byte(candidate), &d); err == nil {
-				return d, true
+				if err := validateObserverDecision(d); err == nil {
+					return d, true
+				}
 			}
 		}
 	}
@@ -314,39 +318,86 @@ func parseObserverDecisionFromToolCalls(calls []llm.ToolCall) (ObserverDecision,
 func parseObserverDecision(out string) (ObserverDecision, error) {
 	raw := strings.TrimSpace(out)
 	var d ObserverDecision
+	var validationErr error
+
 	if err := json.Unmarshal([]byte(raw), &d); err == nil {
-		return d, nil
+		if err := validateObserverDecision(d); err == nil {
+			return d, nil
+		} else {
+			validationErr = err
+		}
 	}
 
 	if candidate := extractFirstJSONObject(raw); candidate != "" {
 		if err := json.Unmarshal([]byte(candidate), &d); err == nil {
-			return d, nil
+			if err := validateObserverDecision(d); err == nil {
+				return d, nil
+			} else {
+				validationErr = err
+			}
 		}
 	}
 
 	if xmlBlock := extractFirstXMLBlock(raw, "observer_decision"); xmlBlock != "" {
 		if parsed, ok := parseObserverDecisionFromXML(xmlBlock); ok {
-			return parsed, nil
+			if err := validateObserverDecision(parsed); err == nil {
+				return parsed, nil
+			} else {
+				validationErr = err
+			}
 		}
 		if parsed, ok := parseObserverDecisionFromTags(xmlBlock); ok {
-			return parsed, nil
+			if err := validateObserverDecision(parsed); err == nil {
+				return parsed, nil
+			} else {
+				validationErr = err
+			}
 		}
 	}
 
 	if xmlBlock, ok := repairObserverDecisionXML(raw); ok {
 		if parsed, ok := parseObserverDecisionFromXML(xmlBlock); ok {
-			return parsed, nil
+			if err := validateObserverDecision(parsed); err == nil {
+				return parsed, nil
+			} else {
+				validationErr = err
+			}
 		}
 		if parsed, ok := parseObserverDecisionFromTags(xmlBlock); ok {
-			return parsed, nil
+			if err := validateObserverDecision(parsed); err == nil {
+				return parsed, nil
+			} else {
+				validationErr = err
+			}
 		}
 	}
 
 	if fallback, ok := parseObserverDecisionFromText(raw); ok {
-		return fallback, nil
+		if err := validateObserverDecision(fallback); err == nil {
+			return fallback, nil
+		} else {
+			validationErr = err
+		}
+	}
+
+	if validationErr != nil {
+		return ObserverDecision{}, validationErr
 	}
 
 	return ObserverDecision{}, fmt.Errorf("invalid observer output (expected XML or JSON): %q", truncateString(raw, 300))
+}
+
+func validateObserverDecision(d ObserverDecision) error {
+	if d.Pass {
+		return nil
+	}
+	if strings.TrimSpace(d.Reason) == "" {
+		return errors.New("observer decision is missing required field: reason (pass=false)")
+	}
+	if strings.TrimSpace(d.NextSteps) == "" {
+		return errors.New("observer decision is missing required field: next_steps (pass=false)")
+	}
+	return nil
 }
 
 func parseObserverPassValue(passText string) (bool, bool) {

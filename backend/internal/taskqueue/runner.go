@@ -996,6 +996,20 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 			observerFailed = true
 		}
 		ranAttempt.Observer = &decision
+		if r.Store != nil && err == nil {
+			_ = r.Store.AppendEvent(Event{
+				TaskID:    taskID,
+				AttemptID: attemptID,
+				Type:      "attempt.observer.decided",
+				Message:   "Outcome observer decided",
+				Data: map[string]any{
+					"pass":               decision.Pass,
+					"reason":             decision.Reason,
+					"next_steps":         decision.NextSteps,
+					"questions_for_user": decision.QuestionsForUser,
+				},
+			})
+		}
 
 		// Enforce deliverable artifacts for succeeded attempts.
 		if finalStatus == AttemptSucceeded {

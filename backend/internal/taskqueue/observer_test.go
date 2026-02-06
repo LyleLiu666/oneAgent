@@ -81,6 +81,31 @@ func (c *stubToolLLMClient) ChatCompletionWithTools(ctx context.Context, message
 	return c.result, c.err
 }
 
+type stubToolThenTextLLMClient struct {
+	toolResult llm.ChatCompletionResult
+	toolErr    error
+
+	textOut string
+	textErr error
+
+	toolCalls int
+	textCalls int
+}
+
+func (c *stubToolThenTextLLMClient) ChatCompletion(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (string, error) {
+	c.textCalls++
+	return c.textOut, c.textErr
+}
+
+func (c *stubToolThenTextLLMClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, callback llm.StreamCallback) error {
+	return errors.New("streaming not implemented in stubToolThenTextLLMClient")
+}
+
+func (c *stubToolThenTextLLMClient) ChatCompletionWithTools(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions) (llm.ChatCompletionResult, error) {
+	c.toolCalls++
+	return c.toolResult, c.toolErr
+}
+
 func TestOutcomeObserver_Decide_ParsesJSON(t *testing.T) {
 	dir := t.TempDir()
 	findings := filepath.Join(dir, "FINDINGS.md")
@@ -364,6 +389,47 @@ func TestOutcomeObserver_Decide_ParsesToolCallDecision(t *testing.T) {
 	}
 	if client.lastOpts == nil || len(client.lastOpts.Tools) == 0 {
 		t.Fatalf("expected tool calling options to be provided")
+	}
+}
+
+func TestOutcomeObserver_Decide_ToolCallMissingRequiredFields_FallsBackToText(t *testing.T) {
+	client := &stubToolThenTextLLMClient{
+		toolResult: llm.ChatCompletionResult{
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "observer_decision",
+						Arguments: `{"pass":false}`,
+					},
+				},
+			},
+		},
+		textOut: `<observer_decision><pass>false</pass><reason>missing required field</reason><evidence><item>FINDINGS.md</item></evidence><next_steps>add next steps</next_steps><questions_for_user></questions_for_user></observer_decision>`,
+	}
+
+	obs := &OutcomeObserver{Client: client}
+	got, err := obs.Decide(context.Background(), ObserveInput{
+		TaskID:        "task-1",
+		AttemptID:     "attempt-1",
+		WorkspaceRoot: "/tmp/ws",
+		Prompt:        "do the thing",
+	})
+	if err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	if got.Pass {
+		t.Fatalf("expected pass=false, got %+v", got)
+	}
+	if strings.TrimSpace(got.Reason) != "missing required field" {
+		t.Fatalf("expected reason from fallback output, got %+v", got)
+	}
+	if strings.TrimSpace(got.NextSteps) != "add next steps" {
+		t.Fatalf("expected next_steps from fallback output, got %+v", got)
+	}
+	if client.toolCalls != 1 || client.textCalls != 1 {
+		t.Fatalf("expected 1 tool call + 1 text call, got toolCalls=%d textCalls=%d", client.toolCalls, client.textCalls)
 	}
 }
 

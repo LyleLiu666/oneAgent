@@ -837,6 +837,70 @@ func TestTaskRunner_ObserverFail_AutoFollowUp_StopsAfterCap(t *testing.T) {
 	t.Fatalf("timeout waiting for capped auto-follow-up failure; got attempts=%d latest=%+v", len(cur.Attempts), cur.LatestAttempt())
 }
 
+func TestTaskRunner_ObserverDecision_AppendsObserverDecidedEvent(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	workspace := t.TempDir()
+	task, err := store.CreateTask("local", workspace, "A", "task A", "", Limits{})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	attempt := task.LatestAttempt()
+	if attempt == nil {
+		t.Fatalf("expected attempt")
+	}
+
+	exec := &execStub{
+		t:            t,
+		artifactsDir: t.TempDir(),
+	}
+
+	runner := &TaskRunner{
+		Store: store,
+		DecideOutcome: func(ctx context.Context, task Task, attempt Attempt) (ObserverDecision, error) {
+			return ObserverDecision{
+				Pass:      false,
+				Reason:    "missing requirement",
+				NextSteps: "do the missing thing",
+			}, nil
+		},
+		ExecuteAttempt: exec.Execute,
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+
+	_ = runner.Enqueue(task.ID)
+	waitForStatus(t, store, task.ID, AttemptFailed, 2*time.Second)
+
+	evs, err := store.ReadEvents(task.ID)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+
+	for _, ev := range evs {
+		if ev.Type != "attempt.observer.decided" || ev.AttemptID != attempt.ID {
+			continue
+		}
+		if v, ok := ev.Data["pass"]; !ok || v != false {
+			t.Fatalf("expected observer pass=false in event data, got %+v", ev.Data)
+		}
+		if v, ok := ev.Data["reason"]; !ok || strings.TrimSpace(fmt.Sprint(v)) != "missing requirement" {
+			t.Fatalf("expected observer reason in event data, got %+v", ev.Data)
+		}
+		if v, ok := ev.Data["next_steps"]; !ok || strings.TrimSpace(fmt.Sprint(v)) != "do the missing thing" {
+			t.Fatalf("expected observer next_steps in event data, got %+v", ev.Data)
+		}
+		return
+	}
+
+	t.Fatalf("expected attempt.observer.decided event")
+}
+
 func TestTaskRunner_AttemptResult_DiffArtifactsPropagate(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	if err != nil {
