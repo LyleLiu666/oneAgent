@@ -9,6 +9,7 @@
       "title": "Write README.md (docs, short, single-step)",
       "labels": ["docs", "short", "single-step"],
       "prompt": "Create README.md with a title and a short usage section.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
@@ -47,6 +48,7 @@
       "title": "Write main.go (coding, short, single-step)",
       "labels": ["coding", "short", "single-step"],
       "prompt": "Create main.go with a minimal Go program that prints a greeting.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
@@ -58,7 +60,7 @@
         { "type": "file_contains", "path": "main.go", "contains": "package main" },
         { "type": "changed_files_contains", "path": "main.go" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -88,12 +90,13 @@
       "title": "Edit main.go (coding, short, single-step)",
       "labels": ["coding", "short", "single-step"],
       "prompt": "Update main.go to print 'hello world' instead of 'hello'.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
           {
             "path": "main.go",
-            "content": "package main\\n\\nimport \\\"fmt\\\"\\n\\nfunc main() {\\n\\tfmt.Println(\\\"hello\\\")\\n}\\n"
+            "content": "hello"
           }
         ]
       },
@@ -102,7 +105,7 @@
         { "type": "file_not_contains", "path": "main.go", "contains": "fmt.Println(\"hello\")" },
         { "type": "changed_files_contains", "path": "main.go" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -116,8 +119,8 @@
                       "edits": [
                         {
                           "filePath": "main.go",
-                          "oldString": "fmt.Println(\\\"hello\\\")",
-                          "newString": "fmt.Println(\\\"hello world\\\")"
+                          "oldString": "hello",
+                          "newString": "hello world"
                         }
                       ]
                     }
@@ -137,6 +140,7 @@
       "title": "Write config/app.json (ops, short, single-step)",
       "labels": ["ops", "short", "single-step"],
       "prompt": "Create config/app.json with keys {name, version, enabled}.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [{ "path": "seed.txt", "content": "seed\n" }]
@@ -146,7 +150,7 @@
         { "type": "json_valid", "path": "config/app.json" },
         { "type": "changed_files_contains", "path": "config/app.json" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -176,6 +180,7 @@
       "title": "Write docs/guide.md + docs/faq.md (docs, short, multi-step)",
       "labels": ["docs", "short", "multi-step"],
       "prompt": "Create docs/guide.md and docs/faq.md with simple content.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [{ "path": "seed.txt", "content": "seed\n" }]
@@ -186,7 +191,7 @@
         { "type": "changed_files_contains", "path": "docs/guide.md" },
         { "type": "changed_files_contains", "path": "docs/faq.md" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -218,6 +223,7 @@
       "title": "Write research/notes.md (research, short, single-step)",
       "labels": ["research", "short", "single-step"],
       "prompt": "Create research/notes.md with 3 bullet points summarizing given facts.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "research/notes.md" },
@@ -251,6 +257,7 @@
       "title": "Trash obsolete.txt (ops, short, single-step)",
       "labels": ["ops", "short", "single-step"],
       "prompt": "Remove obsolete.txt by moving it to trash.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
@@ -261,7 +268,7 @@
         { "type": "file_not_exists", "path": "obsolete.txt" },
         { "type": "changed_files_contains", "path": "obsolete.txt" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -284,13 +291,14 @@
       "title": "Write Makefile (coding, short, single-step)",
       "labels": ["coding", "short", "single-step"],
       "prompt": "Create Makefile with a 'build' target that prints a message.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "Makefile" },
         { "type": "file_contains", "path": "Makefile", "contains": "build:" },
         { "type": "changed_files_contains", "path": "Makefile" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -311,13 +319,14 @@
       "title": "Write .gitignore (coding, short, single-step)",
       "labels": ["coding", "short", "single-step"],
       "prompt": "Create .gitignore ignoring dist/ and node_modules/.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": ".gitignore" },
         { "type": "file_contains", "path": ".gitignore", "contains": "node_modules/" },
         { "type": "changed_files_contains", "path": ".gitignore" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -334,6 +343,7 @@
       "title": "Write CHANGELOG.md (docs, short, single-step)",
       "labels": ["docs", "short", "single-step"],
       "prompt": "Create CHANGELOG.md with an Unreleased section.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "CHANGELOG.md" },
@@ -357,6 +367,7 @@
       "title": "Write pkg/util/util.go + pkg/util/doc.go (coding, short, multi-step)",
       "labels": ["coding", "short", "multi-step"],
       "prompt": "Create pkg/util/util.go and pkg/util/doc.go with minimal package docs.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "pkg/util/util.go" },
@@ -364,7 +375,7 @@
         { "type": "changed_files_contains", "path": "pkg/util/util.go" },
         { "type": "changed_files_contains", "path": "pkg/util/doc.go" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -386,6 +397,7 @@
       "title": "Write config/app.yaml (ops, short, single-step)",
       "labels": ["ops", "short", "single-step"],
       "prompt": "Create config/app.yaml with name/version/enabled keys.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "config/app.yaml" },
@@ -409,6 +421,7 @@
       "title": "Edit docs/guide.md (docs, short, single-step)",
       "labels": ["docs", "short", "single-step"],
       "prompt": "Add a Troubleshooting section to docs/guide.md.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
@@ -419,7 +432,7 @@
         { "type": "file_contains", "path": "docs/guide.md", "contains": "## Troubleshooting" },
         { "type": "changed_files_contains", "path": "docs/guide.md" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -452,13 +465,14 @@
       "title": "Recovery: wrong content then fix (coding, short, multi-step)",
       "labels": ["coding", "short", "multi-step"],
       "prompt": "Create hello.txt containing exactly 'hello world\\n'.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "hello.txt" },
         { "type": "file_equals", "path": "hello.txt", "equals": "hello world\n" },
         { "type": "changed_files_contains", "path": "hello.txt" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -481,6 +495,7 @@
       "title": "Recovery: trash wrong file then fix (ops, short, multi-step)",
       "labels": ["ops", "short", "multi-step"],
       "prompt": "Trash only a.txt (keep b.txt).",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
@@ -516,6 +531,7 @@
       "title": "Recovery: missing file then fix (docs, short, multi-step)",
       "labels": ["docs", "short", "multi-step"],
       "prompt": "Create docs/status.md with a Status header.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "docs/status.md" },
@@ -544,6 +560,7 @@
       "title": "Write src/a.txt + src/b.txt (coding, short, multi-step)",
       "labels": ["coding", "short", "multi-step"],
       "prompt": "Create src/a.txt and src/b.txt with simple contents.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "src/a.txt" },
@@ -573,6 +590,7 @@
       "title": "Write templates/email.txt (docs, short, single-step)",
       "labels": ["docs", "short", "single-step"],
       "prompt": "Create templates/email.txt with a placeholder line.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": "templates/email.txt" },
@@ -596,6 +614,7 @@
       "title": "Write .oneagent/project.json (ops, short, single-step)",
       "labels": ["ops", "short", "single-step"],
       "prompt": "Create .oneagent/project.json with attempt_execution_mode=worktree.",
+      "deliverable_type": "file_set",
       "workspace": { "git_init": true, "seed_files": [{ "path": "seed.txt", "content": "seed\n" }] },
       "acceptance": [
         { "type": "file_exists", "path": ".oneagent/project.json" },
@@ -632,6 +651,7 @@
       "title": "Edit two files (coding, short, multi-step)",
       "labels": ["coding", "short", "multi-step"],
       "prompt": "Update alpha.txt and beta.txt to replace TODO with DONE.",
+      "deliverable_type": "file_set",
       "workspace": {
         "git_init": true,
         "seed_files": [
@@ -645,7 +665,7 @@
         { "type": "changed_files_contains", "path": "alpha.txt" },
         { "type": "changed_files_contains", "path": "beta.txt" }
       ],
-      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments", "diff_patch"],
+      "evidence_required": ["checkpoint", "findings", "trace", "changed_files", "review_comments"],
       "mock": {
         "attempts": [
           {
@@ -674,4 +694,3 @@
     }
   ]
 }
-
