@@ -60,12 +60,28 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 			if err := os.WriteFile(testReport, []byte("ok\n"), 0o600); err != nil {
 				return taskqueue.AttemptResult{}, err
 			}
+
+			// Seed review artifacts under tasksDir so the API/UI can consume stable paths.
+			reviewDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "review")
+			if err := os.MkdirAll(reviewDir, 0o700); err != nil {
+				return taskqueue.AttemptResult{}, err
+			}
+			diffPatch := filepath.Join(reviewDir, "diff.patch")
+			changedFiles := filepath.Join(reviewDir, "changed_files.txt")
+			if err := os.WriteFile(diffPatch, []byte("diff --git a/a b/a\n"), 0o600); err != nil {
+				return taskqueue.AttemptResult{}, err
+			}
+			if err := os.WriteFile(changedFiles, []byte("a\n"), 0o600); err != nil {
+				return taskqueue.AttemptResult{}, err
+			}
 			return taskqueue.AttemptResult{
-				RunID:          "run-" + attempt.ID,
-				Summary:        "done",
-				FindingsPath:   findings,
-				TraceLogPath:   trace,
-				TestReportPath: testReport,
+				RunID:            "run-" + attempt.ID,
+				Summary:          "done",
+				FindingsPath:     findings,
+				TraceLogPath:     trace,
+				TestReportPath:   testReport,
+				DiffPatchPath:    diffPatch,
+				ChangedFilesPath: changedFiles,
 			}, nil
 		},
 		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
@@ -145,16 +161,14 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 		t.Fatalf("expected latest attempt")
 	}
 
-	// Seed diff artifacts so the artifact endpoints can serve content (stub runner does not generate them).
-	reviewDir := filepath.Join(rt.Layout.TasksDir, created.ID, "attempts", latest.ID, "review")
-	if err := os.MkdirAll(reviewDir, 0o700); err != nil {
-		t.Fatalf("mkdir reviewDir: %v", err)
+	if strings.TrimSpace(latest.ArtifactManifestVersion) != "v1" {
+		t.Fatalf("expected artifact_manifest_version=v1, got %q", latest.ArtifactManifestVersion)
 	}
-	if err := os.WriteFile(filepath.Join(reviewDir, "diff.patch"), []byte("diff --git a/a b/a\n"), 0o600); err != nil {
-		t.Fatalf("write diff.patch: %v", err)
+	if strings.TrimSpace(latest.ArtifactManifestPath) == "" {
+		t.Fatalf("expected artifact_manifest_path, got empty")
 	}
-	if err := os.WriteFile(filepath.Join(reviewDir, "changed_files.txt"), []byte("a\n"), 0o600); err != nil {
-		t.Fatalf("write changed_files.txt: %v", err)
+	if _, err := os.Stat(latest.ArtifactManifestPath); err != nil {
+		t.Fatalf("artifact_manifest_path missing: %v", err)
 	}
 
 	// Artifact endpoints.
@@ -207,6 +221,39 @@ func TestServer_TaskQueueAPI_Smoke(t *testing.T) {
 	}
 	if strings.TrimSpace(genericChangedResp["content"].(string)) == "" {
 		t.Fatalf("expected artifacts/changed_files content, got %+v", genericChangedResp)
+	}
+
+	manifestReq, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/tasks/"+created.ID+"/attempts/"+latest.ID+"/artifacts/artifact_manifest", nil)
+	manifestRes, err := http.DefaultClient.Do(manifestReq)
+	if err != nil {
+		t.Fatalf("GET artifacts/artifact_manifest: %v", err)
+	}
+	defer manifestRes.Body.Close()
+	if manifestRes.StatusCode != http.StatusOK {
+		t.Fatalf("GET artifacts/artifact_manifest status=%d", manifestRes.StatusCode)
+	}
+	var manifestResp map[string]any
+	if err := json.NewDecoder(manifestRes.Body).Decode(&manifestResp); err != nil {
+		t.Fatalf("decode artifacts/artifact_manifest: %v", err)
+	}
+	content, _ := manifestResp["content"].(string)
+	var manifest struct {
+		Version      string `json:"version"`
+		Summary      string `json:"summary"`
+		FindingsPath string `json:"findings_path"`
+		TraceLogPath string `json:"trace_log_path"`
+	}
+	if err := json.Unmarshal([]byte(content), &manifest); err != nil {
+		t.Fatalf("unmarshal manifest content: %v", err)
+	}
+	if strings.TrimSpace(manifest.Version) != "v1" {
+		t.Fatalf("expected manifest version v1, got %q", manifest.Version)
+	}
+	if strings.TrimSpace(manifest.Summary) == "" {
+		t.Fatalf("expected manifest summary, got empty")
+	}
+	if strings.TrimSpace(manifest.FindingsPath) == "" || strings.TrimSpace(manifest.TraceLogPath) == "" {
+		t.Fatalf("expected manifest findings/trace paths, got %+v", manifest)
 	}
 
 	// Review comments (append-only).

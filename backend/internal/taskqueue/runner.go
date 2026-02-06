@@ -565,14 +565,14 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.FindingsPath = strings.TrimSpace(result.FindingsPath)
 	ranAttempt.TraceLogPath = strings.TrimSpace(result.TraceLogPath)
 	ranAttempt.TestReportPath = strings.TrimSpace(result.TestReportPath)
-		ranAttempt.DiffPatchPath = strings.TrimSpace(result.DiffPatchPath)
-		ranAttempt.ChangedFilesPath = strings.TrimSpace(result.ChangedFilesPath)
-		ranAttempt.ReviewCommentsPath = strings.TrimSpace(result.ReviewCommentsPath)
-		ranAttempt.WorktreeRoot = strings.TrimSpace(result.WorktreeRoot)
-		ranAttempt.BaseCommitSHA = strings.TrimSpace(result.BaseCommitSHA)
-		ranAttempt.BaseRef = strings.TrimSpace(result.BaseRef)
-		ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
-		ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
+	ranAttempt.DiffPatchPath = strings.TrimSpace(result.DiffPatchPath)
+	ranAttempt.ChangedFilesPath = strings.TrimSpace(result.ChangedFilesPath)
+	ranAttempt.ReviewCommentsPath = strings.TrimSpace(result.ReviewCommentsPath)
+	ranAttempt.WorktreeRoot = strings.TrimSpace(result.WorktreeRoot)
+	ranAttempt.BaseCommitSHA = strings.TrimSpace(result.BaseCommitSHA)
+	ranAttempt.BaseRef = strings.TrimSpace(result.BaseRef)
+	ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
+	ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
 	ranAttempt.SetupScriptLogPath = strings.TrimSpace(result.SetupScriptLogPath)
 	ranAttempt.TestScriptLogPath = strings.TrimSpace(result.TestScriptLogPath)
 	ranAttempt.CleanupScriptLogPath = strings.TrimSpace(result.CleanupScriptLogPath)
@@ -628,6 +628,11 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 		ranAttempt.StartedAt = &startedAt
 	}
 
+	manifestErr := error(nil)
+	if r.Store != nil {
+		manifestErr = EnsureArtifactManifestV1(r.Store.TasksDir(), updated, &ranAttempt)
+	}
+
 	saved, err := r.Store.UpdateTask(taskID, func(tk *Task) error {
 		a := tk.LatestAttempt()
 		if a == nil || a.ID != attemptID {
@@ -656,6 +661,17 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 			"error":  finalError,
 		},
 	})
+	if manifestErr != nil {
+		_ = r.Store.AppendEvent(Event{
+			TaskID:    taskID,
+			AttemptID: attemptID,
+			Type:      "attempt.artifact_manifest.failed",
+			Message:   "artifact manifest write failed",
+			Data: map[string]any{
+				"error": manifestErr.Error(),
+			},
+		})
+	}
 
 	if r.OnAttemptFinished != nil {
 		func() {

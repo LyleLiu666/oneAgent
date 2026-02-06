@@ -70,6 +70,11 @@ func getTaskAttemptArtifact(c *gin.Context, kind string) {
 
 	path := ""
 	switch kind {
+	case "artifact_manifest":
+		path = strings.TrimSpace(attempt.ArtifactManifestPath)
+		if path == "" && rt.Layout != nil {
+			path = filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "artifact_manifest.v1.json")
+		}
 	case "diff_patch":
 		path = strings.TrimSpace(attempt.DiffPatchPath)
 		if path == "" && rt.Layout != nil {

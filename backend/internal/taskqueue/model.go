@@ -59,14 +59,16 @@ type Attempt struct {
 	BaseCommitSHA string `json:"base_commit_sha,omitempty"`
 	BaseRef       string `json:"base_ref,omitempty"`
 
-	RunID              string `json:"run_id,omitempty"`
-	Summary            string `json:"summary,omitempty"`
-	FindingsPath       string `json:"findings_path,omitempty"`
-	TraceLogPath       string `json:"trace_log_path,omitempty"`
-	TestReportPath     string `json:"test_report_path,omitempty"`
-	DiffPatchPath      string `json:"diff_patch_path,omitempty"`
-	ChangedFilesPath   string `json:"changed_files_path,omitempty"`
-	ReviewCommentsPath string `json:"review_comments_path,omitempty"`
+	RunID                   string `json:"run_id,omitempty"`
+	Summary                 string `json:"summary,omitempty"`
+	ArtifactManifestVersion string `json:"artifact_manifest_version,omitempty"`
+	ArtifactManifestPath    string `json:"artifact_manifest_path,omitempty"`
+	FindingsPath            string `json:"findings_path,omitempty"`
+	TraceLogPath            string `json:"trace_log_path,omitempty"`
+	TestReportPath          string `json:"test_report_path,omitempty"`
+	DiffPatchPath           string `json:"diff_patch_path,omitempty"`
+	ChangedFilesPath        string `json:"changed_files_path,omitempty"`
+	ReviewCommentsPath      string `json:"review_comments_path,omitempty"`
 
 	ReviewNotes string `json:"review_notes,omitempty"`
 
