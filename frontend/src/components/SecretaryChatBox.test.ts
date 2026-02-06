@@ -1,0 +1,144 @@
+// @vitest-environment jsdom
+
+import { expect, it, vi } from 'vitest'
+import { shallowMount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import * as apiClient from '@/api/client'
+
+const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+const makeLocalStorage = () => {
+  const store = new Map<string, string>()
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, String(value)),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => void store.clear(),
+  }
+}
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}))
+
+vi.mock('@/api/client', () => ({
+  streamChat: vi.fn(),
+  attachChatStream: vi.fn(),
+  stopSessionStream: vi.fn(),
+  getSessions: vi.fn(async () => []),
+  getSession: vi.fn(async () => ({ id: 's-full', messages: [], metadata: {} })),
+  truncateSession: vi.fn(),
+  getModels: vi.fn(async () => []),
+  getTools: vi.fn(async () => []),
+  chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
+  getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
+  createTask: vi.fn(),
+  resumeTask: vi.fn(),
+  appendSecretaryInboxMessage: vi.fn(),
+  secretaryTriage: vi.fn(),
+  getSecretaryState: vi.fn(async () => ({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })),
+  setSecretaryRecoveryFocus: vi.fn(),
+  getSecretarySession: vi.fn(async () => ({ id: 's1', title: 'Secretary', messages: [], metadata: {} })),
+  resetSecretarySession: vi.fn(async () => ({})),
+
+  // Task queue (imported by child components; not mounted in this test).
+  listTasks: vi.fn(async () => []),
+  getTask: vi.fn(),
+  getTaskEvents: vi.fn(async () => []),
+  cancelTask: vi.fn(),
+  getLedgerStatusToday: vi.fn(async () => ({
+    day_key: '2026-02-01',
+    digest_exists: false,
+    learning_job_status: 'none',
+    sop_proposed_count: 0,
+  })),
+  getTaskQueueGovernance: vi.fn(),
+  getTaskQueueGovernanceSnapshot: vi.fn(),
+  updateTaskQueueWorkspacePolicy: vi.fn(),
+  createTaskQueueSchedule: vi.fn(),
+  getTaskAttemptArtifact: vi.fn(),
+  listTaskAttemptFiles: vi.fn(),
+  readTaskAttemptFileSnapshot: vi.fn(),
+}))
+
+it('closes reset modal after confirming reset', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  await wrapper.get('[data-testid="secretary-reset-context"]').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="secretary-reset-modal"]').exists()).toBe(true)
+
+  await wrapper.get('[data-testid="secretary-reset-confirm"]').trigger('click')
+  await flushPromises()
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="secretary-reset-modal"]').exists()).toBe(false)
+
+  wrapper.unmount()
+})
+
+it('binds workspace when user replies with an absolute path for a pending workspace question', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  ;(apiClient.getSecretaryState as any).mockResolvedValue({
+    session_id: 's1',
+    cursor_message_id: 0,
+    triage_runs: [
+      {
+        from_cursor: 0,
+        to_message_id: 1,
+        questions: ['要继续推进，我需要你发我项目目录（仓库根目录）的路径。'],
+      },
+    ],
+  })
+
+  ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+    session_id: 's1',
+    message_id: 1,
+    ack_message_id: 0,
+    ack_text: '',
+  })
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  await wrapper.get('textarea').setValue('1. /tmp/workspace')
+  await wrapper.get('[data-testid="chat-send"]').trigger('click')
+  await flushPromises()
+
+  const args = (apiClient.appendSecretaryInboxMessage as any).mock.calls[0]?.[0]
+  expect(args).toBeTruthy()
+  expect(args.workspace).toBe('/tmp/workspace')
+
+  wrapper.unmount()
+})

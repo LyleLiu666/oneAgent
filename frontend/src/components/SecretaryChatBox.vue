@@ -137,6 +137,92 @@ const normalizeSecretaryQuestions = (raw: any): string[] => {
   return list.map((q) => String(q ?? '').trim()).filter(Boolean)
 }
 
+const isWorkspaceBindingQuestion = (raw: any): boolean => {
+  const q = String(raw ?? '').trim().toLowerCase()
+  if (!q) return false
+  return q.includes('项目目录') || q.includes('仓库根目录') || q.includes('工作区') || q.includes('workspace')
+}
+
+const extractWorkspacePathFromReply = (raw: any): string => {
+  const original = String(raw ?? '').trim()
+  if (!original) return ''
+
+  const firstLine = original.split('\n')[0]?.trim() || ''
+  if (!firstLine) return ''
+
+  const strippedIndex = firstLine.replace(/^\s*\d+\s*[\.\)、\)\]]\s*/, '').trim()
+  if (!strippedIndex) return ''
+
+  const unwrapOnce = (s: string) => {
+    const trimmed = s.trim()
+    if (
+      (trimmed.startsWith('`') && trimmed.endsWith('`')) ||
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+      return trimmed.slice(1, -1).trim()
+    }
+    return trimmed
+  }
+
+  const trimPathPunctuation = (s: string) => {
+    return s.replace(/[。.,;，；：:！!？?、)\]]+$/g, '').trim()
+  }
+
+  const isLikelyAbsWorkspace = (candidate: string) => {
+    const c = String(candidate || '').trim()
+    if (!c) return false
+    if (c.startsWith('/')) {
+      const parts = c.split('/').filter(Boolean)
+      return parts.length >= 2
+    }
+    if (/^[a-zA-Z]:[\\/]/.test(c)) {
+      const rest = c.slice(3)
+      return /[\\/]/.test(rest)
+    }
+    if (c.startsWith('\\\\')) {
+      const parts = c.slice(2).split(/[\\/]+/).filter(Boolean)
+      return parts.length >= 2
+    }
+    return false
+  }
+
+  const direct = trimPathPunctuation(unwrapOnce(strippedIndex))
+  if (isLikelyAbsWorkspace(direct)) return direct
+
+  const backticked = strippedIndex.match(/`([^`]+)`/)
+  if (backticked?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(backticked[1]))
+    if (isLikelyAbsWorkspace(candidate)) return candidate
+  }
+
+  const quoted = strippedIndex.match(/["']([^"']+)["']/)
+  if (quoted?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(quoted[1]))
+    if (isLikelyAbsWorkspace(candidate)) return candidate
+  }
+
+  const winDrive = strippedIndex.match(/([a-zA-Z]:[\\/][^\s]+)/)
+  if (winDrive?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(winDrive[1]))
+    if (isLikelyAbsWorkspace(candidate)) return candidate
+  }
+
+  const unc = strippedIndex.match(/(\\\\[^\s]+)/)
+  if (unc?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(unc[1]))
+    if (isLikelyAbsWorkspace(candidate)) return candidate
+  }
+
+  const posix = strippedIndex.match(/(\/[^\s]+)/)
+  if (posix?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(posix[1]))
+    if (isLikelyAbsWorkspace(candidate)) return candidate
+  }
+
+  return ''
+}
+
 const closeSecretaryPendingQuestionsModal = () => {
   secretaryPendingQuestionsModalOpen.value = false
 }
@@ -146,8 +232,8 @@ const openSecretaryResetConfirm = () => {
   secretaryResetConfirmOpen.value = true
 }
 
-const closeSecretaryResetConfirm = () => {
-  if (secretaryResetSubmitting.value) return
+const closeSecretaryResetConfirm = (force = false) => {
+  if (!force && secretaryResetSubmitting.value) return
   secretaryResetConfirmOpen.value = false
   secretaryResetError.value = ''
 }
@@ -160,7 +246,7 @@ const confirmSecretaryReset = async () => {
   secretaryResetError.value = ''
   try {
     await resetSecretarySession()
-    closeSecretaryResetConfirm()
+    closeSecretaryResetConfirm(true)
     startNewSession()
     await loadSessionMessages('', false)
   } catch (error: any) {
@@ -1636,10 +1722,17 @@ const sendSecretaryMessage = async (rawMessage: string) => {
 
   secretaryInboxSubmitting.value = true
   try {
+    const existingWorkspace = String(sessionWorkspace.value || '').trim()
+    const shouldInferWorkspace =
+      !existingWorkspace && secretaryPendingQuestions.value.some((q) => isWorkspaceBindingQuestion(q))
+    const inferredWorkspace = shouldInferWorkspace ? extractWorkspacePathFromReply(message) : ''
+    const workspaceToBind = existingWorkspace || inferredWorkspace
+    const boundFromReply = !existingWorkspace && Boolean(inferredWorkspace)
+
     const payload: any = {
       content: message,
-      // Best-effort: bind workspace if the session already has one.
-      workspace: String(sessionWorkspace.value || '').trim() || undefined,
+      // Best-effort: bind workspace when asked (repo root path).
+      workspace: workspaceToBind || undefined,
     }
     const res: any = await appendSecretaryInboxMessage(payload)
 
@@ -1663,6 +1756,11 @@ const sendSecretaryMessage = async (rawMessage: string) => {
 
     upsertServerTextMessage(res?.ack_message_id, 'assistant', res?.ack_text)
     loadSessions()
+
+    if (boundFromReply && workspaceToBind) {
+      sessionWorkspace.value = workspaceToBind
+      workspacePath.value = workspaceToBind
+    }
 
     scheduleSecretaryTriage()
   } catch (error) {
