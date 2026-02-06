@@ -1,0 +1,28 @@
+name: benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly (UTC).
+    - cron: "0 4 * * *"
+
+jobs:
+  head2head:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+      - name: Run head-to-head benchmark (mock)
+        env:
+          BENCHMARK_OUT_DIR: ${{ github.workspace }}/.oneagent/tmp/benchmarks/ci
+        run: bash scripts/benchmark_run.sh
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: head2head-benchmark
+          path: .oneagent/tmp/benchmarks/ci
+          retention-days: 14
+

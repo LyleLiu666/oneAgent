@@ -1,4 +1,4 @@
-.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth
+.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth benchmark benchmark-smoke
 
 DIST_DIR := dist
 ONEAGENT_BIN := $(DIST_DIR)/oneagent
@@ -32,3 +32,9 @@ clean:
 
 openspec-truth:
 	@bash scripts/openspec_truth_check.sh
+
+benchmark:
+	@bash scripts/benchmark_run.sh
+
+benchmark-smoke:
+	@BENCHMARK_LIMIT=3 bash scripts/benchmark_run.sh
