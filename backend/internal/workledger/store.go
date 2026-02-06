@@ -398,9 +398,14 @@ func buildReceiptMarkdown(r Receipt) string {
 		strings.TrimSpace(r.Artifacts.ChangedFilesPath) != "" ||
 		strings.TrimSpace(r.Artifacts.ReviewCommentsPath) != "" ||
 		strings.TrimSpace(r.Artifacts.DiffRef) != "" ||
+		strings.TrimSpace(r.Artifacts.CheckpointPath) != "" ||
+		strings.TrimSpace(r.Artifacts.WorktreeMode) != "" ||
 		strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" ||
 		strings.TrimSpace(r.Artifacts.BaseCommitSHA) != "" ||
-		strings.TrimSpace(r.Artifacts.BaseRef) != "" {
+		strings.TrimSpace(r.Artifacts.BaseRef) != "" ||
+		strings.TrimSpace(r.Artifacts.WorktreeCleanupStatus) != "" ||
+		strings.TrimSpace(r.Artifacts.WorktreeCleanupError) != "" ||
+		strings.TrimSpace(r.Artifacts.WorktreeCleanupHint) != "" {
 		b.WriteString("## Artifacts\n\n")
 		if strings.TrimSpace(r.Artifacts.FindingsPath) != "" {
 			b.WriteString("- findings_path: ")
@@ -437,6 +442,16 @@ func buildReceiptMarkdown(r Receipt) string {
 			b.WriteString(strings.TrimSpace(r.Artifacts.DiffRef))
 			b.WriteString("\n")
 		}
+		if strings.TrimSpace(r.Artifacts.CheckpointPath) != "" {
+			b.WriteString("- checkpoint_path: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.CheckpointPath))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.WorktreeMode) != "" {
+			b.WriteString("- worktree_mode: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeMode))
+			b.WriteString("\n")
+		}
 		if strings.TrimSpace(r.Artifacts.WorktreeRoot) != "" {
 			b.WriteString("- worktree_root: ")
 			b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeRoot))
@@ -450,6 +465,21 @@ func buildReceiptMarkdown(r Receipt) string {
 		if strings.TrimSpace(r.Artifacts.BaseRef) != "" {
 			b.WriteString("- base_ref: ")
 			b.WriteString(strings.TrimSpace(r.Artifacts.BaseRef))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.WorktreeCleanupStatus) != "" {
+			b.WriteString("- worktree_cleanup_status: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeCleanupStatus))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.WorktreeCleanupError) != "" {
+			b.WriteString("- worktree_cleanup_error: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeCleanupError))
+			b.WriteString("\n")
+		}
+		if strings.TrimSpace(r.Artifacts.WorktreeCleanupHint) != "" {
+			b.WriteString("- worktree_cleanup_hint: ")
+			b.WriteString(strings.TrimSpace(r.Artifacts.WorktreeCleanupHint))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")

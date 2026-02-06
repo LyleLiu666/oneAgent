@@ -12,10 +12,13 @@ func worktreeKeepEnabled() bool {
 	return strings.TrimSpace(os.Getenv("ONEAGENT_KEEP_WORKTREES")) == "1"
 }
 
+var worktreeCreateFn = gitutil.CreateWorktree
+var worktreeRemoveFn = gitutil.RemoveWorktree
+
 func createWorktree(ctx context.Context, workspaceRoot, worktreeRoot, baseCommitSHA string) error {
-	return gitutil.CreateWorktree(ctx, workspaceRoot, worktreeRoot, baseCommitSHA)
+	return worktreeCreateFn(ctx, workspaceRoot, worktreeRoot, baseCommitSHA)
 }
 
 func removeWorktree(ctx context.Context, workspaceRoot, worktreeRoot string) error {
-	return gitutil.RemoveWorktree(ctx, workspaceRoot, worktreeRoot)
+	return worktreeRemoveFn(ctx, workspaceRoot, worktreeRoot)
 }

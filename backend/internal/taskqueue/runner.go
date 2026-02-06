@@ -27,9 +27,13 @@ type AttemptResult struct {
 	ChangedFilesPath   string
 	ReviewCommentsPath string
 
-	WorktreeRoot  string
-	BaseCommitSHA string
-	BaseRef       string
+	WorktreeRoot          string
+	BaseCommitSHA         string
+	BaseRef               string
+	WorktreeMode          string
+	WorktreeCleanupStatus string
+	WorktreeCleanupError  string
+	WorktreeCleanupHint   string
 
 	ProjectConfigPath    string
 	CopyFilesLogPath     string
@@ -689,6 +693,10 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	ranAttempt.WorktreeRoot = strings.TrimSpace(result.WorktreeRoot)
 	ranAttempt.BaseCommitSHA = strings.TrimSpace(result.BaseCommitSHA)
 	ranAttempt.BaseRef = strings.TrimSpace(result.BaseRef)
+	ranAttempt.WorktreeMode = strings.TrimSpace(result.WorktreeMode)
+	ranAttempt.WorktreeCleanupStatus = strings.TrimSpace(result.WorktreeCleanupStatus)
+	ranAttempt.WorktreeCleanupError = strings.TrimSpace(result.WorktreeCleanupError)
+	ranAttempt.WorktreeCleanupHint = strings.TrimSpace(result.WorktreeCleanupHint)
 	ranAttempt.ProjectConfigPath = strings.TrimSpace(result.ProjectConfigPath)
 	ranAttempt.CopyFilesLogPath = strings.TrimSpace(result.CopyFilesLogPath)
 	ranAttempt.SetupScriptLogPath = strings.TrimSpace(result.SetupScriptLogPath)
@@ -794,7 +802,12 @@ func (r *TaskRunner) processTask(workspace string, taskID string) {
 	if r.OnAttemptFinished != nil {
 		func() {
 			defer func() { _ = recover() }()
-			r.OnAttemptFinished(context.Background(), saved, ranAttempt)
+			finalAttempt := saved.LatestAttempt()
+			if finalAttempt != nil && finalAttempt.ID == attemptID {
+				r.OnAttemptFinished(context.Background(), saved, *finalAttempt)
+			} else {
+				r.OnAttemptFinished(context.Background(), saved, ranAttempt)
+			}
 		}()
 	}
 

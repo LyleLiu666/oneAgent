@@ -40,8 +40,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 	}
 	cleanupOrphanAttemptWorktrees(context.Background(), rt)
 
-	exec := func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, resumedFrom *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
-		var attemptResult taskqueue.AttemptResult
+	exec := func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, resumedFrom *taskqueue.Attempt) (attemptResult taskqueue.AttemptResult, err error) {
 		userID := strings.TrimSpace(task.UserID)
 		if userID == "" {
 			userID = "local"
@@ -90,8 +89,12 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			attemptResult.Summary = "project config error: " + err.Error()
 			return attemptResult, err
 		}
+		attemptResult.WorktreeMode = "workspace"
 		if projectCfgFound {
 			attemptResult.ProjectConfigPath = filepath.Join(task.Workspace, ".oneagent", "project.json")
+			if strings.TrimSpace(projectCfg.AttemptExecutionMode) != "" {
+				attemptResult.WorktreeMode = strings.TrimSpace(projectCfg.AttemptExecutionMode)
+			}
 		}
 
 		// Rollback boundary: snapshot workspace at attempt start (best-effort, fail-closed).
@@ -194,6 +197,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 			})
 
 			if worktreeKeepEnabled() {
+				attemptResult.WorktreeCleanupStatus = "retained"
 				_ = rt.Tasks.AppendEvent(taskqueue.Event{
 					TaskID:    task.ID,
 					AttemptID: attempt.ID,
@@ -205,7 +209,28 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 				})
 			} else {
 				defer func() {
-					if err := removeWorktree(context.Background(), task.Workspace, worktreeRoot); err != nil {
+					cleanupHint := fmt.Sprintf("git -C %q worktree remove --force %q", task.Workspace, worktreeRoot)
+
+					retries := 0
+					var lastErr error
+					for retries = 0; retries < 3; retries++ {
+						rmErr := removeWorktree(context.Background(), task.Workspace, worktreeRoot)
+						if rmErr == nil {
+							lastErr = nil
+							break
+						}
+						if _, statErr := os.Stat(worktreeRoot); os.IsNotExist(statErr) {
+							lastErr = nil
+							break
+						}
+						lastErr = rmErr
+						time.Sleep(time.Duration(retries+1) * 100 * time.Millisecond)
+					}
+
+					if lastErr != nil {
+						attemptResult.WorktreeCleanupStatus = "cleanup_failed"
+						attemptResult.WorktreeCleanupError = lastErr.Error()
+						attemptResult.WorktreeCleanupHint = cleanupHint
 						_ = rt.Tasks.AppendEvent(taskqueue.Event{
 							TaskID:    task.ID,
 							AttemptID: attempt.ID,
@@ -213,12 +238,14 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 							Message:   "worktree cleanup failed",
 							Data: map[string]any{
 								"worktree_root": worktreeRoot,
-								"error":         err.Error(),
-								"hint":          fmt.Sprintf("git -C %q worktree remove --force %q", task.Workspace, worktreeRoot),
+								"error":         lastErr.Error(),
+								"hint":          cleanupHint,
+								"retries":       retries,
 							},
 						})
 						return
 					}
+					attemptResult.WorktreeCleanupStatus = "cleaned"
 					_ = rt.Tasks.AppendEvent(taskqueue.Event{
 						TaskID:    task.ID,
 						AttemptID: attempt.ID,
@@ -226,6 +253,7 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 						Message:   "worktree cleaned up",
 						Data: map[string]any{
 							"worktree_root": worktreeRoot,
+							"retries":       retries,
 						},
 					})
 				}()
@@ -573,15 +601,20 @@ func ensureTaskQueue(rt *runtime.Runtime) error {
 
 				// Back-compat: prefer stable default artifact locations when the attempt fields are empty.
 				artifacts := workledger.ReceiptArtifacts{
-					FindingsPath:       strings.TrimSpace(attempt.FindingsPath),
-					TraceLogPath:       strings.TrimSpace(attempt.TraceLogPath),
-					TestReportPath:     strings.TrimSpace(attempt.TestReportPath),
-					DiffPatchPath:      strings.TrimSpace(attempt.DiffPatchPath),
-					ChangedFilesPath:   strings.TrimSpace(attempt.ChangedFilesPath),
-					ReviewCommentsPath: strings.TrimSpace(attempt.ReviewCommentsPath),
-					WorktreeRoot:       strings.TrimSpace(attempt.WorktreeRoot),
-					BaseCommitSHA:      strings.TrimSpace(attempt.BaseCommitSHA),
-					BaseRef:            strings.TrimSpace(attempt.BaseRef),
+					FindingsPath:          strings.TrimSpace(attempt.FindingsPath),
+					TraceLogPath:          strings.TrimSpace(attempt.TraceLogPath),
+					TestReportPath:        strings.TrimSpace(attempt.TestReportPath),
+					DiffPatchPath:         strings.TrimSpace(attempt.DiffPatchPath),
+					ChangedFilesPath:      strings.TrimSpace(attempt.ChangedFilesPath),
+					ReviewCommentsPath:    strings.TrimSpace(attempt.ReviewCommentsPath),
+					CheckpointPath:        strings.TrimSpace(attempt.CheckpointPath),
+					WorktreeMode:          strings.TrimSpace(attempt.WorktreeMode),
+					WorktreeRoot:          strings.TrimSpace(attempt.WorktreeRoot),
+					BaseCommitSHA:         strings.TrimSpace(attempt.BaseCommitSHA),
+					BaseRef:               strings.TrimSpace(attempt.BaseRef),
+					WorktreeCleanupStatus: strings.TrimSpace(attempt.WorktreeCleanupStatus),
+					WorktreeCleanupError:  strings.TrimSpace(attempt.WorktreeCleanupError),
+					WorktreeCleanupHint:   strings.TrimSpace(attempt.WorktreeCleanupHint),
 				}
 				if rt.Layout != nil {
 					reviewDir := filepath.Join(rt.Layout.TasksDir, task.ID, "attempts", attempt.ID, "review")
