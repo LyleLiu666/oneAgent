@@ -1,7 +1,8 @@
 # system-task-queue Specification
 
 ## Purpose
-TBD - created by archiving change add-autonomous-task-queue. Update Purpose after archive.
+Defines long-running background task execution with per-workspace FIFO scheduling, durable attempts, resumability, evidence artifacts (summary/findings/trace), and observer-based acceptance.
+
 ## Requirements
 ### Requirement: 后台任务（Task）可独立于前端连接持续运行
 系统必须 (MUST) 支持创建一个后台任务（Task），并在后台持续推进该任务执行；任务执行不得 (MUST NOT) 依赖浏览器连接或 SSE 是否保持。
@@ -478,4 +479,3 @@ TBD - created by archiving change add-autonomous-task-queue. Update Purpose afte
 - **WHEN** observer 首次返回截断的 XML（例如缺失 `</observer_decision>`）（best-effort）
 - **THEN** 系统不应立刻失败，而应触发一次受限重试（best-effort）
 - **AND** 当重试返回合法结构时，系统正常写入 `attempt.observer` 并继续后续流程（best-effort）
-

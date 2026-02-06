@@ -1,7 +1,8 @@
 # system-error-surface Specification
 
 ## Purpose
-TBD - created by archiving change update-ux-error-surface. Update Purpose after archive.
+Defines a safe, actionable, and traceable error schema across HTTP/APIs, plus consistent UI error presentation via progressive disclosure.
+
 ## Requirements
 ### Requirement: HTTP/API errors MUST be safe, actionable, and traceable
 系统必须 (MUST) 对所有对外 HTTP/API 错误返回“用户安全、可操作、可追踪”的结构：
@@ -55,4 +56,3 @@ TBD - created by archiving change update-ux-error-surface. Update Purpose after 
 - **WHEN** 系统决定对外返回失败信息（达到重试上限后，best-effort）
 - **THEN** 返回用户可理解的错误（best-effort）
 - **AND** 不将其伪装成“需要用户确认才能继续”的空洞回执（best-effort）
-

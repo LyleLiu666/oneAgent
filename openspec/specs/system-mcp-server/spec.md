@@ -1,7 +1,8 @@
 # system-mcp-server Specification
 
 ## Purpose
-TBD - created by archiving change add-mcp-server. Update Purpose after archive.
+Defines the MCP server interface that exposes oneAgent runtime resources and events, enforcing local-only defaults, principal auth/policy, and traceable calls.
+
 ## Requirements
 ### Requirement: MCP server MUST be local-only by default
 系统必须 (MUST) 提供一个 MCP server，并默认仅允许本机访问（local-only），以降低暴露面与误用风险。
@@ -55,4 +56,3 @@ TBD - created by archiving change add-mcp-server. Update Purpose after archive.
 #### Scenario: MCP call is recorded in trace
 - **WHEN** 客户端通过 MCP 读取某个 task 详情
 - **THEN** 系统记录一条 trace/evidence 条目（best-effort）
-

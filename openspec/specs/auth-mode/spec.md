@@ -1,7 +1,8 @@
 # auth-mode Specification
 
 ## Purpose
-TBD - created by archiving change refactor-container-to-local-tool. Update Purpose after archive.
+Defines supported authentication modes and token issuance for oneAgent, including default token auth, multi-principal mapping, admin gating, and pairing-based token issuance.
+
 ## Requirements
 ### Requirement: 默认生成本地访问令牌（不过期）
 系统必须 (MUST) 支持 `AUTH_MODE=token` 作为默认认证模式，并在未显式配置 token 值时于启动时自动生成一个随机 token（不过期）。

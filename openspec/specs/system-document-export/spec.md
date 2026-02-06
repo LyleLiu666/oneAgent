@@ -1,7 +1,8 @@
 # system-document-export Specification
 
 ## Purpose
-TBD - created by archiving change add-office-export. Update Purpose after archive.
+Defines document export capabilities and UX (for example Markdown to Office formats) to turn intermediate drafts into shareable deliverables.
+
 ## Requirements
 ### Requirement: System MUST provide a document export tool
 系统必须 (MUST) 提供一个导出工具（canonical name 为 `document_export`；并兼容 `document.export` alias），支持将 workspace 内的 Markdown 文件导出为 Office 格式，至少支持：
@@ -38,4 +39,3 @@ TBD - created by archiving change add-office-export. Update Purpose after archiv
 - **WHEN** 页面渲染完成
 - **THEN** “导出”是视觉上最突出的主按钮（best-effort）
 - **AND** workspace chooser 的文案/样式明确其为“选择文件夹”（best-effort）
-

@@ -1,7 +1,8 @@
 # system-llm-prompt-caching Specification
 
 ## Purpose
-TBD - created by archiving change optimize-kv-cache. Update Purpose after archive.
+Defines prompt and KV-cache optimization constraints, including stable prefixes, TurnContext injection for volatile data, and provider-specific caching strategies.
+
 ## Requirements
 ### Requirement: Prompt 结构必须缓存友好
 系统必须 (MUST) 将 prompt 构建为“稳定前缀 (Stable Prefix)”与“动态上下文 (Volatile Context)”两段，并保证：
@@ -97,4 +98,3 @@ TBD - created by archiving change optimize-kv-cache. Update Purpose after archiv
 - **GIVEN** 同一会话的可用工具集合发生变化（例如启用/禁用某个工具或工具 schema 变化）
 - **WHEN** 发起新的 LLM 请求且启用 `prompt_cache_key`
 - **THEN** 系统更新 cache key（例如 `epoch` 递增或 stable signature 变化），避免沿用旧 key 导致不可解释的 miss
-

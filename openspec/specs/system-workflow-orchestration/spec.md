@@ -1,7 +1,8 @@
 # system-workflow-orchestration Specification
 
 ## Purpose
-TBD - created by archiving change add-workflow-orchestration-graph. Update Purpose after archive.
+Defines workflow orchestration (graph/version/run/node) with durable artifacts and evidence, including hard/soft gates and path-only multi-file handoffs between nodes.
+
 ## Requirements
 ### Requirement: The system MUST support workflow graphs with versioning (workspace-scoped)
 系统必须 (MUST) 支持工作流（workflow）的显式图表达，并提供版本化能力（workspace-scoped）：
@@ -102,4 +103,3 @@ TBD - created by archiving change add-workflow-orchestration-graph. Update Purpo
 - **WHEN** 用户 publish 一个 workflow_version 并创建一次 workflow_run（best-effort）
 - **THEN** workflow_version 中的 graph snapshot 包含这些 node-level 配置（best-effort）
 - **AND** workflow_run 保存一份 resolved snapshot，运行过程中不得漂移（best-effort）
-

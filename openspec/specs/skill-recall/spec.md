@@ -1,7 +1,8 @@
 # skill-recall Specification
 
 ## Purpose
-TBD - created by archiving change enable-skills-usage. Update Purpose after archive.
+Defines local skill recall behavior, including multi-source discovery, deterministic top-k recall outputs, and returned metadata fields for explainability and governance.
+
 ## Requirements
 ### Requirement: 基础召回独立于主 agent 且无需外部网络
 技能召回工具必须 (MUST) 在本地运行，独立于主 agent（主对话 LLM 推理），并且不得依赖外部网络服务来完成“基础召回”（Top-8 候选生成）。
@@ -69,4 +70,3 @@ TBD - created by archiving change enable-skills-usage. Update Purpose after arch
 #### Scenario: 编辑 personal skill 不影响归档语义
 - **GIVEN** 用户对 personal skill 执行编辑保存
 - **THEN** 该 skill 仍应参与 discover/recall（除非被归档）
-

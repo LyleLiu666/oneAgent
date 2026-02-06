@@ -1,28 +1,32 @@
 # OpenSpec Changes: Priority & Progress
 
-更新时间：2026-02-01
+更新时间：2026-02-06
 
 本文件只记录**当前 active changes** 的优先级与进度快照；历史内容不再维护。
 已完成变更请看 `openspec/changes/archive/`，真实进度以 `openspec list` 为准。
 
 ## Priority（高 → 低）
 
-### P0（核心体验 / 高 ROI）
-- `update-app-shell-secretary-first`：默认只保留秘书模式；仅完全模式显示 Sidebar/菜单（入口与心智一致性）
-- `add-session-context-compression-verification`：会话自动压缩可回归验证（确认“长会话不会失忆”机制生效）
-- `add-chat-stream-recovery-and-stop`：对话流可中断/可恢复（“像微信一样随时停/继续”）
-- `add-native-command-sandbox`：跨平台 native sandbox（workspaceRoot 边界、真删除、不断网）；不依赖 Docker 也能安全启用写能力命令
+### P0（地基 / 竞争力核心）
+- `update-openspec-truth-alignment`：OpenSpec 真相对齐（Purpose/状态快照可校验）
+- `add-head2head-benchmark-suite`：head-to-head 基准评测（指标可回归）
+- `update-worktree-attempt-isolation-v2`：worktree 隔离执行鲁棒化（可回滚边界）
+- `update-task-deliverable-contract-v1`：交付物契约化（manifest/证据一致）
 
-### P1（治理与自动化 / 降低损耗）
-- （暂无）
+### P1（可靠性 / 自愈与治理）
+- `update-secretary-autonomy-selfheal-v2`：秘书更少打断用户（先自愈后升级）
+- `update-queue-governance-scheduling-v2`：多 workspace 调度治理（公平性/可解释/日程化）
 
-### P2（中长期愿景 / 上层形态）
-- `add-workflow-orchestration-graph`：工作流编排（显式图）：节点=工作型 agent；交付物=文件集；Hard/Soft Gate
+### P2（生态 / 外部入口）
+- `update-mcp-action-plane-v1`：MCP 从只读扩展到受控动作面（create/resume/cancel）
+- `add-channel-relay-v1`：渠道中继 v1（入站委托 + 出站通知）
 
 ## Snapshot（来自 `openspec list`）
-- `update-app-shell-secretary-first`：2/13 tasks
-- `add-session-context-compression-verification`：2/9 tasks
-- `add-chat-stream-recovery-and-stop`：12/14 tasks
-- `add-workflow-orchestration-graph`：✓ Complete
-- `add-native-command-sandbox`：11/13 tasks
-- `add-trash-file-tool`：✓ Complete
+- `update-openspec-truth-alignment`：✓ Complete
+- `add-head2head-benchmark-suite`：0/13 tasks
+- `update-worktree-attempt-isolation-v2`：0/13 tasks
+- `update-task-deliverable-contract-v1`：0/12 tasks
+- `update-secretary-autonomy-selfheal-v2`：0/12 tasks
+- `update-queue-governance-scheduling-v2`：0/12 tasks
+- `update-mcp-action-plane-v1`：0/12 tasks
+- `add-channel-relay-v1`：0/14 tasks

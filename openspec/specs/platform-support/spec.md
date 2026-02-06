@@ -1,7 +1,8 @@
 # platform-support Specification
 
 ## Purpose
-TBD - created by archiving change add-windows-support. Update Purpose after archive.
+Defines platform support requirements (Windows/macOS/Linux), including dependency degradation behavior and diagnosability, and Windows command execution via Git Bash.
+
 ## Requirements
 ### Requirement: Windows 作为一级支持平台（Build & Run）
 系统必须 (MUST) 支持在 Windows 平台构建并运行 oneAgent（至少包括 `oneagent serve` 与 `oneagent doctor`）。
@@ -71,4 +72,3 @@ TBD - created by archiving change add-windows-support. Update Purpose after arch
 - **GIVEN** Windows release 产物内置了 Git/Git Bash 或其它第三方可执行文件
 - **WHEN** 执行 release 打包流程
 - **THEN** release 包内包含对应的许可证/NOTICE 文件（满足分发合规）
-

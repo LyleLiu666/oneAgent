@@ -1,7 +1,8 @@
 # work-ledger-ux Specification
 
 ## Purpose
-TBD - created by archiving change add-ledger-status-badges. Update Purpose after archive.
+Defines UX requirements for Work Ledger surfaces, including daily status summaries, badges, SOP governance entrypoints, and digest “harvest mode” interactions.
+
 ## Requirements
 ### Requirement: Ledger Daily Status Summary API
 The system MUST expose a read-only endpoint `GET /api/ledger/status/today` that summarizes today's Work Ledger status for the current principal.
@@ -92,4 +93,3 @@ Digest UI 必须 (MUST) 支持用户多选条目并批量发起 follow-up（best
 - **GIVEN** 用户打开某条 receipt 的详情
 - **WHEN** 详情渲染完成
 - **THEN** 详情包含可追溯的 artifacts 引用入口（best-effort）
-

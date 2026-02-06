@@ -1,4 +1,4 @@
-.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean
+.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth
 
 DIST_DIR := dist
 ONEAGENT_BIN := $(DIST_DIR)/oneagent
@@ -29,3 +29,6 @@ release:
 
 clean:
 	@rm -rf $(DIST_DIR)
+
+openspec-truth:
+	@bash scripts/openspec_truth_check.sh

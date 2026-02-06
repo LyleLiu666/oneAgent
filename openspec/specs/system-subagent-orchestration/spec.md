@@ -1,7 +1,8 @@
 # system-subagent-orchestration Specification
 
 ## Purpose
-TBD - created by archiving change enable-subagent-orchestration. Update Purpose after archive.
+Defines subagent orchestration patterns to reduce context pollution, including invocation decisions, context slicing, structured metadata, and findings-based handoffs.
+
 ## Requirements
 ### Requirement: agentic 子 Agent 启动决策 (Agentic Invocation Decision)
 系统必须 (MUST) 允许主 Agent 自主判断某个工作是否适合拆分并启用子 Agent；系统不得 (MUST NOT) 强制任何任务必须使用子 Agent。

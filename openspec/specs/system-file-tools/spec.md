@@ -1,7 +1,8 @@
 # system-file-tools Specification
 
 ## Purpose
-TBD - created by archiving change add-read-file-tool. Update Purpose after archive.
+Defines file tools for workspace-aware reading and mutation (`read_file`, `write_file`, `edit_v2`, `trash_file`), including atomic writes, policy enforcement, and size/ambiguity guardrails.
+
 ## Requirements
 ### Requirement: 系统必须提供 `read_file` 工具（分页读取 + 输出限流）
 系统必须 (MUST) 提供一个 `read_file` 工具，使 agent 可在不依赖 shell 输出的前提下读取文件内容，并支持：
@@ -146,4 +147,3 @@ TBD - created by archiving change add-read-file-tool. Update Purpose after archi
 - **WHEN** agent 调用 `write_file(filePath="a.txt", content=<oversize>)`
 - **THEN** 工具返回 `ok=false`
 - **AND** `a.txt` 内容仍为 `old`
-

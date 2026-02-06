@@ -1,7 +1,8 @@
 # system-code-intelligence Specification
 
 ## Purpose
-TBD - created by archiving change add-code-intelligence-tools. Update Purpose after archive.
+Defines semantic code intelligence tools (LSP navigation and rename preview) to enable safer code understanding without direct file mutations.
+
 ## Requirements
 ### Requirement: System MUST provide semantic code navigation tools
 系统必须 (MUST) 提供语义级代码导航工具（LSP/AST），至少包括：
@@ -38,4 +39,3 @@ TBD - created by archiving change add-code-intelligence-tools. Update Purpose af
 - **WHEN** agent 调用 `lsp_references`
 - **THEN** 系统返回的 references 列表被 cap 到固定上限
 - **AND** 结果中包含提示如何 refine（例如缩小范围或只看当前文件）
-

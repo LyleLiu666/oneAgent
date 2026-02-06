@@ -1,7 +1,8 @@
 # system-session-context-compression Specification
 
 ## Purpose
-TBD - created by archiving change add-session-context-compression-verification. Update Purpose after archive.
+Defines automatic session context compression for long conversations, including stable summary formats, safe degradation behavior, and regression-test requirements.
+
 ## Requirements
 ### Requirement: System MUST auto-compress long chat sessions
 系统必须 (MUST) 在 chat 会话上下文过长时自动执行“会话压缩”，以维持长会话可继续、可追溯、可缓存（best-effort）。
@@ -71,4 +72,3 @@ TBD - created by archiving change add-session-context-compression-verification. 
 - **GIVEN** 某次修改破坏了压缩逻辑（例如不再写入 `【会话压缩】`）
 - **WHEN** 运行 backend 单元测试
 - **THEN** 测试失败并指出不符合压缩契约（best-effort）
-

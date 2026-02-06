@@ -1,7 +1,8 @@
 # system-toolcalling-reliability Specification
 
 ## Purpose
-TBD - created by archiving change update-tool-protocol-boundaries. Update Purpose after archive.
+Defines toolcalling protocol boundaries (JSON default, XML fallback) and reliability invariants, including truncation detection, repair/retry behavior, and safe argument handling.
+
 ## Requirements
 ### Requirement: The system MUST define tool protocol boundaries and selection
 系统必须 (MUST) 明确并固化两套工具协议（JSON 原生 tool calling / XML `<tool_data>`）的能力边界，并提供可预测的协议选择策略（best-effort）：
@@ -173,4 +174,3 @@ TBD - created by archiving change update-tool-protocol-boundaries. Update Purpos
 - **WHEN** Secretary 进入工具 loop
 - **THEN** 系统使用 XML tool protocol 执行（best-effort）
 - **AND** Worker Chat 仍可继续使用原生 JSON tools（best-effort）
-

@@ -1,7 +1,8 @@
 # chat-ux Specification
 
 ## Purpose
-TBD - created by archiving change add-secretary-mode-chat. Update Purpose after archive.
+Defines requirements for the chat UI experience, including secretary mode behavior, task handoff and recovery affordances, and resilient streaming (reload/stop).
+
 ## Requirements
 ### Requirement: Chat UI MUST provide “Secretary Mode” (low-noise)
 系统必须 (MUST) 在 Chat UI 中提供一种“秘书模式”以降低默认信息噪声，并明确其语义为：**用户在秘书模式下与秘书对话（归并/解释/派工/进度汇报），而非与 worker（tool-calling 主 agent）直接对话**。
@@ -294,4 +295,3 @@ When a tool call is running, Chat UI MUST show a compact “working” indicator
 - **GIVEN** 某 session 存在未解决的 `questions[]`（best-effort）
 - **WHEN** 用户刷新页面或重新进入秘书模式（best-effort）
 - **THEN** UI 通过恢复 secretary state 再次显示这些待确认问题（best-effort）
-

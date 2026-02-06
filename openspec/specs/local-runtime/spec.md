@@ -1,7 +1,8 @@
 # local-runtime Specification
 
 ## Purpose
-TBD - created by archiving change refactor-container-to-local-tool. Update Purpose after archive.
+Defines local runtime behavior and safety defaults, including CLI entrypoints, profiles/bind posture, `ONEAGENT_HOME` layout, doctor diagnostics, and quick-start flags.
+
 ## Requirements
 ### Requirement: 提供统一的本地 CLI 入口
 系统必须 (MUST) 提供一个本地可执行入口（例如 `oneagent`），用于启动服务、进行自检与管理本地数据目录。
@@ -241,4 +242,3 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **GIVEN** policy 为 `bash` 指定 `sandbox_mode=native` 且 `command_profile=coding`
 - **WHEN** LLM 通过 `bash` 尝试删除 workspaceRoot 之外路径
 - **THEN** 系统拒绝或由 sandbox 阻止该操作并返回可解释错误
-

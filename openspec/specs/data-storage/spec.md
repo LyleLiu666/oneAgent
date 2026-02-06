@@ -1,7 +1,8 @@
 # data-storage Specification
 
 ## Purpose
-TBD - created by archiving change refactor-container-to-local-tool. Update Purpose after archive.
+Defines the local-first persistence model for sessions, tasks, receipts, and artifacts under `ONEAGENT_HOME`, including Settings/Memory SQLite and file-based storage for logs and evidence.
+
 ## Requirements
 ### Requirement: local 模式默认具备持久化存储（文件 + Settings SQLite）
 系统必须 (MUST) 在 `local` 运行画像下提供默认的持久化存储方案，使用户在未配置任何外部数据库的情况下也能保存会话、配置数据与秘书记忆（Memory）。
@@ -127,4 +128,3 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **WHEN** 客户端以 `since_ms/until_ms` 发起查询（best-effort）
 - **THEN** 系统仅返回落在该时间窗内的 entries（best-effort）
 - **AND** 结果按时间倒序返回并遵守 `limit`（best-effort）
-

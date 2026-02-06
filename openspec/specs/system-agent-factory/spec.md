@@ -1,7 +1,8 @@
 # system-agent-factory Specification
 
 ## Purpose
-TBD - created by archiving change refactor-agent-factory. Update Purpose after archive.
+Defines the shared Agent Factory used to build workers, secretary, and subagents from config, while preserving KV-cache friendliness and structured-output support.
+
 ## Requirements
 ### Requirement: The system MUST provide an Agent Factory to build agents from config (best-effort)
 系统必须 (MUST) 提供一套可复用的 **Agent Factory（build-agent）**（best-effort），用于用声明式 config 构建不同职责的 agent（例如 worker chat / secretary / subagent / worker task agent），以避免每个 agent 各自手写“拼 prompt/选协议/parse 输出”的重复逻辑。
@@ -54,4 +55,3 @@ Agent Factory 的 config 至少应覆盖（best-effort）：
 - **WHEN** 系统调用该 agent（best-effort）
 - **THEN** 结构化输出通过 tool-call 或宽松 tags 返回（best-effort）
 - **AND** 系统能将其解析为内部 plan 结构并继续流程（best-effort）
-

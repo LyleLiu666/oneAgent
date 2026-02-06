@@ -1,7 +1,8 @@
 # system-work-ledger Specification
 
 ## Purpose
-TBD - created by archiving change add-work-ledger-sop-learning. Update Purpose after archive.
+Defines the Work Ledger and receipt-driven evidence chain, including digest generation, SOP suggestion learning and governance, and batch follow-up creation from receipts.
+
 ## Requirements
 ### Requirement: Receipt（交付收据）必须生成且可追溯
 系统必须 (MUST) 为每次“可交付的工作尝试（attempt）”生成一个 Receipt，并持久化为：
@@ -280,4 +281,3 @@ SOP Suggestion 必须包含至少：`suggestion_id`、`title`、`description`、
 - **WHEN** 系统持久化该次交付的 receipt
 - **THEN** receipt artifacts 包含 `worktree_root`
 - **AND** receipt artifacts 包含 `base_commit_sha`
-

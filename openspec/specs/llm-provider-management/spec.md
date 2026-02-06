@@ -1,7 +1,8 @@
 # llm-provider-management Specification
 
 ## Purpose
-TBD - created by archiving change update-workspace-first-onboarding. Update Purpose after archive.
+Defines management and selection of LLM providers and models, including safety tiers, usage/cost normalization, and tool-calling support for supported providers.
+
 ## Requirements
 ### Requirement: 管理 LLM Providers（多平台接入）
 系统必须 (MUST) 支持管理多个 LLM Provider（多平台接入），至少包括：创建、列出、更新、删除 Provider，并安全存储 Provider 的敏感凭证（例如 API Key）。
@@ -78,4 +79,3 @@ TBD - created by archiving change update-workspace-first-onboarding. Update Purp
 - **GIVEN** provider 为 `openai_response` 且 tools 启用
 - **WHEN** 客户端请求 `stream=true`
 - **THEN** 系统降级为非流式或返回可操作错误（best-effort）
-

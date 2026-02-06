@@ -1,7 +1,8 @@
 # system-secretary-orchestration Specification
 
 ## Purpose
-TBD - created by archiving change add-secretary-inbox-and-triage. Update Purpose after archive.
+Defines secretary orchestration APIs and behavior (inbox/triage/state), SU/SW separation, shared memory sync, worker dispatch, and traceable recovery mediation.
+
 ## Requirements
 ### Requirement: The system MUST provide an append-only secretary inbox API with LLM quick acks (no tools)
 系统必须 (MUST) 提供一种“收件箱（inbox）”消息写入机制，用于在秘书模式下追加用户消息；该过程不得触发工具执行（tool calling）（best-effort）。
@@ -245,4 +246,3 @@ TBD - created by archiving change add-secretary-inbox-and-triage. Update Purpose
 - **GIVEN** 某个 worker task 或秘书自身决策产生待确认项（best-effort）
 - **WHEN** 秘书向用户请求确认（best-effort）
 - **THEN** 用户能在对话/弹窗中看到每条待确认项的完整内容（best-effort）
-

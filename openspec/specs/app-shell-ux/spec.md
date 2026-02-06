@@ -1,7 +1,8 @@
 # app-shell-ux Specification
 
 ## Purpose
-TBD - created by archiving change update-app-shell-secretary-first. Update Purpose after archive.
+Defines requirements for the global application shell, including `ui_mode=secretary|full`, sidebar visibility rules, and deep-link escape hatches.
+
 ## Requirements
 ### Requirement: App MUST support a global UI mode (secretary/full)
 系统必须 (MUST) 提供全局 `ui_mode`，并至少包含两种值：
@@ -49,4 +50,3 @@ TBD - created by archiving change update-app-shell-secretary-first. Update Purpo
 - **WHEN** 系统提示并提供“进入完全模式”按钮（best-effort）
 - **AND** 用户点击该按钮
 - **THEN** 系统切换到 `ui_mode=full` 并显示 Sidebar（best-effort）
-

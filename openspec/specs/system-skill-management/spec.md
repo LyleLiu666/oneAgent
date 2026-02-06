@@ -1,7 +1,8 @@
 # system-skill-management Specification
 
 ## Purpose
-TBD - created by archiving change enable-skills-usage. Update Purpose after archive.
+Defines skill discovery, selection and recall recommendations, plus governance workflows (eligibility, duplicates, merge/pin, edit, archive) with auditable usage signals.
+
 ## Requirements
 ### Requirement: 多来源技能发现 (Multi-Source Skill Discovery)
 系统必须 (MUST) 从以下位置发现技能文件（`SKILL.md`），并支持以“技能目录包”的方式组织（目录内包含 `SKILL.md`，可选包含 `scripts/`、`references/` 等）。系统应对以上来源取并集后按技能 `name` 去重（同名冲突按稳定规则消解）：

@@ -1,6 +1,6 @@
 # oneAgent Roadmap（愿景 → 支柱 → 路线图 / Backlog）
 
-更新时间：2026-02-01
+更新时间：2026-02-06
 
 目的：把「我们要做什么、为什么做、先做什么、做完如何验收」固化成一份长期可执行文档。  
 原则：**没有文档就没有执行**；每完成一项工作，必须回到愿景做一次对照检查（Simple/Beautiful/Progressive + Evidence）。
@@ -19,7 +19,7 @@
 以下以 `openspec list` 为准；Roadmap 只保留一个入口，避免分叉维护。
 
 ### 0.1 Doing（已写 Spec，待实现/进行中）
-- （暂无：当前 active changes 均已 `✓ Complete`；以 `openspec list` 为准）
+- 当前 active changes 请直接运行 `openspec list` 查看（本段不再手工维护列表，避免漂移）
 
 ### 0.2 Complete（已完成，待归档到 `openspec/changes/archive/`）
 - `update-app-shell-secretary-first`：默认只保留秘书模式；仅完全模式显示 Sidebar/菜单

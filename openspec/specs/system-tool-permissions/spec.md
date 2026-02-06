@@ -1,7 +1,8 @@
 # system-tool-permissions Specification
 
 ## Purpose
-TBD - created by archiving change add-tool-permissions-system. Update Purpose after archive.
+Defines per-principal tool permissions policies and enforcement, including sandbox/profile constraints, approval gating for high-risk actions, and a read-only default for the secretary.
+
 ## Requirements
 ### Requirement: System MUST define a per-principal tool permissions policy
 系统必须 (MUST) 支持按 `principal_id` 定义工具权限策略，策略由多条规则组成，并支持 `allow/deny` 效果与约束（constraints）。
@@ -171,4 +172,3 @@ TBD - created by archiving change add-tool-permissions-system. Update Purpose af
 - **GIVEN** 用户处于秘书模式（best-effort）
 - **WHEN** 秘书调用只读文件工具读取某个产物文件（例如 findings/trace）（best-effort）
 - **THEN** 系统在权限允许的前提下返回文件内容（best-effort）
-

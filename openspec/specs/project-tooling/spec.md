@@ -1,7 +1,8 @@
 # project-tooling Specification
 
 ## Purpose
-TBD - created by archiving change add-ci-daily-runs. Update Purpose after archive.
+Defines project-level tooling requirements, including CI coverage, release artifact workflows, and regression suites for toolcalling reliability and live-provider runs.
+
 ## Requirements
 ### Requirement: Continuous Integration coverage
 The project SHALL run backend unit tests, frontend unit tests, and an end-to-end smoke test in CI for pull requests and pushes.
@@ -105,4 +106,3 @@ Before executing a tool, the system MUST validate tool arguments against the too
 - **WHEN** the model issues a tool call without `file_path`
 - **THEN** the system rejects the call as invalid arguments
 - **AND** the tool handler is not executed
-

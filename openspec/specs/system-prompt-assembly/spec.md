@@ -1,7 +1,8 @@
 # system-prompt-assembly Specification
 
 ## Purpose
-TBD - created by archiving change add-prompt-assetization. Update Purpose after archive.
+Defines modular prompt assembly from assets, separating stable prefixes from volatile context, and adding injection defenses and tool manuals used by all agents.
+
 ## Requirements
 ### Requirement: Prompts MUST be assembled from modular assets
 系统必须 (MUST) 将稳定提示词（Stable Prefix）构建为可复用的模块化资产，并允许按启用工具集与 provider 选择组装对应的 prompt。
@@ -97,4 +98,3 @@ TBD - created by archiving change add-prompt-assetization. Update Purpose after 
 - **WHEN** 系统构建并发送 prompt（best-effort）
 - **THEN** stable prefix 不包含 tasks snapshot（best-effort）
 - **AND** tasks snapshot 仅出现在本轮 TurnContext（volatile）中（best-effort）
-

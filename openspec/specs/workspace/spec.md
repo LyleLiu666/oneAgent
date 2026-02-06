@@ -1,7 +1,8 @@
 # workspace Specification
 
 ## Purpose
-TBD - created by archiving change refactor-container-to-local-tool. Update Purpose after archive.
+Defines the workspace concept and safety boundaries, including tool scope alignment, onboarding and project config discovery, and optional worktree execution mode for attempts.
+
 ## Requirements
 ### Requirement: Workspace 是可选的“项目根目录”
 系统必须 (MUST) 支持一个可选的 `workspace` 概念：它是一个本地目录路径，对应 coding 场景下的 project 根目录。
@@ -166,4 +167,3 @@ TBD - created by archiving change refactor-container-to-local-tool. Update Purpo
 - **AND** workspace 启用了 attempt 执行模式 `worktree`
 - **WHEN** 系统尝试创建一个新的 task attempt
 - **THEN** 系统返回清晰错误（指出“workspace 非 git repo，无法创建 worktree”）
-

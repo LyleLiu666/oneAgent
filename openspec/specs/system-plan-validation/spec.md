@@ -1,7 +1,8 @@
 # system-plan-validation Specification
 
 ## Purpose
-TBD - created by archiving change enable-plan-observer-validation. Update Purpose after archive.
+Defines plan file support and observer-based validation of completion criteria, enabling TDD-like “done” checks that are traceable and repeatable.
+
 ## Requirements
 ### Requirement: 支持计划文件（Plan File）
 系统必须 (MUST) 支持在启用 workspace 的情况下创建并维护一个计划文件，用于承载复杂任务的分解、验收标准与进度。
@@ -51,4 +52,3 @@ TBD - created by archiving change enable-plan-observer-validation. Update Purpos
 - **GIVEN** 任务 T1 的 scope 为 `backend/**`
 - **WHEN** 执行 T1 的 subagent 尝试修改 `frontend/App.vue`
 - **THEN** 系统拒绝该写/改/删操作并返回清晰错误
-

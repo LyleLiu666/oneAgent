@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+echo "[ci] openspec truth check"
+bash "${ROOT_DIR}/scripts/openspec_truth_check.sh"
+
 echo "[ci] backend tests"
 cd "${ROOT_DIR}/backend"
 go test ./...
