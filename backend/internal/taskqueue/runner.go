@@ -624,15 +624,40 @@ func (r *TaskRunner) runSchedulesOnce(now time.Time) {
 	if r == nil || r.Store == nil {
 		return
 	}
-	due, err := r.Store.TakeDueSchedules(now)
+	now = now.UTC()
+
+	g, err := r.Store.GetGovernance()
 	if err != nil {
 		return
 	}
-	if len(due) == 0 {
+	if len(g.Schedules) == 0 {
 		return
 	}
 
-	for _, sc := range due {
+	type scheduleUpdate struct {
+		MisfirePolicy      string
+		NextRunAt          time.Time
+		UpdatedAt          time.Time
+		LastTriggerKey     string
+		LastEnqueueAt      time.Time
+		LastEnqueueError   string
+		LastEnqueueErrorAt time.Time
+	}
+
+	const maxCatchUpRuns = 25
+	updates := make(map[string]scheduleUpdate, len(g.Schedules))
+
+	for _, sc := range g.Schedules {
+		if !sc.Enabled {
+			continue
+		}
+		if strings.TrimSpace(sc.Workspace) == "" || strings.TrimSpace(sc.Prompt) == "" {
+			continue
+		}
+		if sc.EverySeconds <= 0 {
+			continue
+		}
+
 		userID := strings.TrimSpace(sc.UserID)
 		if userID == "" {
 			userID = "local"
@@ -642,12 +667,103 @@ func (r *TaskRunner) runSchedulesOnce(now time.Time) {
 			title = "Scheduled task"
 		}
 
-		task, err := r.Store.CreateTask(userID, sc.Workspace, title, sc.Prompt, sc.ModelID, ResolveLimits(sc.Limits))
-		if err != nil {
+		sc.MisfirePolicy = normalizeMisfirePolicy(sc.MisfirePolicy)
+		windows, nextAfter, due := dueWindowsForSchedule(sc, now, maxCatchUpRuns)
+		if !due {
 			continue
 		}
-		_ = r.Enqueue(task.ID)
+
+		up := scheduleUpdate{
+			MisfirePolicy:  sc.MisfirePolicy,
+			NextRunAt:      nextAfter,
+			UpdatedAt:      now,
+			LastTriggerKey: strings.TrimSpace(sc.LastTriggerKey),
+			LastEnqueueAt:  sc.LastEnqueueAt.UTC(),
+		}
+
+		if len(windows) == 0 {
+			// Skip policy misfire: advance without enqueuing, and clear stale errors.
+			up.LastEnqueueError = ""
+			up.LastEnqueueErrorAt = time.Time{}
+			updates[sc.ID] = up
+			continue
+		}
+
+		for _, windowStart := range windows {
+			windowStart = windowStart.UTC()
+			triggerKey := scheduleTriggerKey(sc.ID, windowStart)
+			taskID := scheduleTaskID(sc.ID, windowStart)
+
+			task, created, createErr := r.Store.CreateTaskWithID(
+				taskID,
+				userID,
+				sc.Workspace,
+				title,
+				sc.Prompt,
+				sc.ModelID,
+				ResolveLimits(sc.Limits),
+			)
+			if createErr != nil {
+				up.NextRunAt = windowStart
+				up.LastEnqueueError = createErr.Error()
+				up.LastEnqueueErrorAt = now
+				updates[sc.ID] = up
+				break
+			}
+
+			up.LastTriggerKey = triggerKey
+			up.LastEnqueueAt = now
+			up.LastEnqueueError = ""
+			up.LastEnqueueErrorAt = time.Time{}
+
+			if created {
+				attemptID := ""
+				if a := task.LatestAttempt(); a != nil {
+					attemptID = a.ID
+				}
+				_ = r.Store.AppendEvent(Event{
+					TaskID:    task.ID,
+					AttemptID: attemptID,
+					Type:      "schedule.triggered",
+					Message:   "Scheduled task enqueued",
+					Data: map[string]any{
+						"schedule_id":     sc.ID,
+						"trigger_key":     triggerKey,
+						"window_start_ts": windowStart.Format(time.RFC3339Nano),
+						"misfire_policy":  sc.MisfirePolicy,
+					},
+				})
+			}
+
+			// Best-effort: if the runner is running, enqueue so it executes.
+			_ = r.Enqueue(task.ID)
+			updates[sc.ID] = up
+		}
 	}
+
+	if len(updates) == 0 {
+		return
+	}
+
+	_, _ = r.Store.UpdateGovernance(func(g *QueueGovernance) error {
+		for i := range g.Schedules {
+			sc := g.Schedules[i]
+			up, ok := updates[sc.ID]
+			if !ok {
+				continue
+			}
+
+			sc.MisfirePolicy = strings.TrimSpace(up.MisfirePolicy)
+			sc.NextRunAt = up.NextRunAt.UTC()
+			sc.UpdatedAt = up.UpdatedAt.UTC()
+			sc.LastTriggerKey = strings.TrimSpace(up.LastTriggerKey)
+			sc.LastEnqueueAt = up.LastEnqueueAt.UTC()
+			sc.LastEnqueueError = strings.TrimSpace(up.LastEnqueueError)
+			sc.LastEnqueueErrorAt = up.LastEnqueueErrorAt.UTC()
+			g.Schedules[i] = sc
+		}
+		return nil
+	})
 }
 
 func (r *TaskRunner) processTask(workspace string, taskID string) {

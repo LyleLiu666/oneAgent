@@ -20,8 +20,8 @@ type Store struct {
 	tasksDir string
 	muByTask sync.Map // map[string]*sync.Mutex
 
-	govMu     sync.Mutex
-	govCache  QueueGovernance
+	govMu      sync.Mutex
+	govCache   QueueGovernance
 	govCacheAt time.Time
 }
 
@@ -128,6 +128,84 @@ func (s *Store) CreateTask(userID, workspace, title, prompt, modelID string, lim
 	}
 
 	return task, nil
+}
+
+func (s *Store) CreateTaskWithID(taskID string, userID, workspace, title, prompt, modelID string, limits Limits) (Task, bool, error) {
+	if strings.TrimSpace(taskID) == "" {
+		return Task{}, false, errors.New("taskID is required")
+	}
+	if strings.TrimSpace(userID) == "" {
+		return Task{}, false, errors.New("userID is required")
+	}
+	if strings.TrimSpace(workspace) == "" {
+		return Task{}, false, errors.New("workspace is required")
+	}
+	normalizedWorkspace, err := scope.NormalizeWorkspaceRoot(workspace)
+	if err != nil {
+		return Task{}, false, err
+	}
+	if strings.TrimSpace(prompt) == "" {
+		return Task{}, false, errors.New("prompt is required")
+	}
+
+	now := Now()
+
+	mu := s.lock(taskID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if _, err := os.Stat(s.taskPath(taskID)); err == nil {
+		task, err := s.loadTaskLocked(taskID)
+		if err != nil {
+			return Task{}, false, err
+		}
+		return task, false, nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Task{}, false, err
+	}
+
+	attemptID := NewID()
+	task := Task{
+		ID:        taskID,
+		UserID:    userID,
+		Workspace: normalizedWorkspace,
+		Title:     strings.TrimSpace(title),
+		Prompt:    prompt,
+		ModelID:   strings.TrimSpace(modelID),
+		Limits:    limits,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Attempts: []Attempt{{
+			ID:          attemptID,
+			Status:      AttemptQueued,
+			CreatedAt:   now,
+			PrincipalID: userID,
+		}},
+	}
+
+	if err := os.MkdirAll(s.taskDir(taskID), 0o700); err != nil {
+		return Task{}, false, fmt.Errorf("create task dir: %w", err)
+	}
+
+	if err := s.writeTaskLocked(task); err != nil {
+		return Task{}, false, err
+	}
+
+	if err := touchFile(s.eventsPath(taskID), 0o600); err != nil {
+		return Task{}, false, err
+	}
+
+	if err := s.appendEventLocked(Event{
+		TS:        now,
+		TaskID:    taskID,
+		AttemptID: attemptID,
+		Type:      "task.created",
+		Message:   "Task created",
+	}); err != nil {
+		return Task{}, false, err
+	}
+
+	return task, true, nil
 }
 
 func (s *Store) GetTask(taskID string) (Task, error) {

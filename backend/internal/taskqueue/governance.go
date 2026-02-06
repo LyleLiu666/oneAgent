@@ -35,15 +35,25 @@ type Schedule struct {
 	EverySeconds int       `json:"every_seconds"`
 	NextRunAt    time.Time `json:"next_run_at"`
 
+	// MisfirePolicy controls behavior when the scheduler falls behind and misses one or more intervals.
+	// Supported values: "one_shot" (default), "catch_up", "skip" (best-effort).
+	MisfirePolicy string `json:"misfire_policy,omitempty"`
+
+	// Trigger key and error bookkeeping for best-effort idempotency and explainability.
+	LastTriggerKey     string    `json:"last_trigger_key,omitempty"`
+	LastEnqueueAt      time.Time `json:"last_enqueue_at,omitempty"`
+	LastEnqueueError   string    `json:"last_enqueue_error,omitempty"`
+	LastEnqueueErrorAt time.Time `json:"last_enqueue_error_at,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type QueueGovernance struct {
-	Global     QueueGlobalPolicy            `json:"global"`
-	Workspaces map[string]WorkspacePolicy   `json:"workspaces,omitempty"`
-	Schedules  []Schedule                   `json:"schedules,omitempty"`
-	UpdatedAt  time.Time                    `json:"updated_at"`
+	Global     QueueGlobalPolicy          `json:"global"`
+	Workspaces map[string]WorkspacePolicy `json:"workspaces,omitempty"`
+	Schedules  []Schedule                 `json:"schedules,omitempty"`
+	UpdatedAt  time.Time                  `json:"updated_at"`
 }
 
 func defaultGovernance() QueueGovernance {

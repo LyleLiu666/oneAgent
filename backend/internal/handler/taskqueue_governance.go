@@ -112,6 +112,7 @@ func CreateTaskQueueSchedule(c *gin.Context) {
 		Title         string           `json:"title,omitempty"`
 		Prompt        string           `json:"prompt"`
 		ModelID       string           `json:"model_id,omitempty"`
+		MisfirePolicy string           `json:"misfire_policy,omitempty"`
 		EverySeconds  int              `json:"every_seconds"`
 		Enabled       bool             `json:"enabled"`
 		Limits        taskqueue.Limits `json:"limits,omitempty"`
@@ -142,18 +143,19 @@ func CreateTaskQueueSchedule(c *gin.Context) {
 
 	now := time.Now().UTC()
 	schedule := taskqueue.Schedule{
-		ID:           taskqueue.NewID(),
-		Enabled:      req.Enabled,
-		UserID:       userID,
-		Workspace:    ws,
-		Title:        strings.TrimSpace(req.Title),
-		Prompt:       strings.TrimSpace(req.Prompt),
-		ModelID:      strings.TrimSpace(req.ModelID),
-		Limits:       taskqueue.ResolveLimits(req.Limits),
-		EverySeconds: req.EverySeconds,
-		NextRunAt:    now.Add(time.Duration(req.EverySeconds) * time.Second),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            taskqueue.NewID(),
+		Enabled:       req.Enabled,
+		UserID:        userID,
+		Workspace:     ws,
+		Title:         strings.TrimSpace(req.Title),
+		Prompt:        strings.TrimSpace(req.Prompt),
+		ModelID:       strings.TrimSpace(req.ModelID),
+		Limits:        taskqueue.ResolveLimits(req.Limits),
+		EverySeconds:  req.EverySeconds,
+		NextRunAt:     now.Add(time.Duration(req.EverySeconds) * time.Second),
+		MisfirePolicy: strings.TrimSpace(req.MisfirePolicy),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	g, err := rt.Tasks.UpdateGovernance(func(g *taskqueue.QueueGovernance) error {
@@ -166,4 +168,3 @@ func CreateTaskQueueSchedule(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, g)
 }
-
