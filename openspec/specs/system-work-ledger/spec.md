@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines the Work Ledger and receipt-driven evidence chain, including digest generation, SOP suggestion learning and governance, and batch follow-up creation from receipts.
-
 ## Requirements
 ### Requirement: Receipt（交付收据）必须生成且可追溯
 系统必须 (MUST) 为每次“可交付的工作尝试（attempt）”生成一个 Receipt，并持久化为：
@@ -281,3 +280,21 @@ SOP Suggestion 必须包含至少：`suggestion_id`、`title`、`description`、
 - **WHEN** 系统持久化该次交付的 receipt
 - **THEN** receipt artifacts 包含 `worktree_root`
 - **AND** receipt artifacts 包含 `base_commit_sha`
+
+### Requirement: Receipts MUST reference artifact manifest version and completeness status
+Receipt records MUST include a pointer to the attempt artifact manifest version and a completeness status, so review tools can quickly determine whether evidence is sufficient for acceptance.
+
+#### Scenario: Receipt includes manifest reference
+- **GIVEN** an attempt has generated artifact manifest v1
+- **WHEN** the system materializes the receipt
+- **THEN** the receipt references manifest version and path (or equivalent pointer)
+- **AND** includes a completeness status that is queryable by ledger consumers (best-effort)
+
+### Requirement: Evidence completeness MUST be queryable from ledger APIs (best-effort)
+Ledger and digest readers MUST be able to query whether each receipt is evidence-complete, evidence-partial, or evidence-insufficient (best-effort), without opening full artifacts manually.
+
+#### Scenario: Ledger list includes evidence completeness classification
+- **GIVEN** a user queries receipt list
+- **WHEN** the system returns receipt summaries
+- **THEN** each summary includes an evidence completeness classification (best-effort)
+

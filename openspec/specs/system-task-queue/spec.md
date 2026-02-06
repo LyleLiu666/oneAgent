@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines long-running background task execution with per-workspace FIFO scheduling, durable attempts, resumability, evidence artifacts (summary/findings/trace), and observer-based acceptance.
-
 ## Requirements
 ### Requirement: 后台任务（Task）可独立于前端连接持续运行
 系统必须 (MUST) 支持创建一个后台任务（Task），并在后台持续推进该任务执行；任务执行不得 (MUST NOT) 依赖浏览器连接或 SSE 是否保持。
@@ -479,3 +478,76 @@ Defines long-running background task execution with per-workspace FIFO schedulin
 - **WHEN** observer 首次返回截断的 XML（例如缺失 `</observer_decision>`）（best-effort）
 - **THEN** 系统不应立刻失败，而应触发一次受限重试（best-effort）
 - **AND** 当重试返回合法结构时，系统正常写入 `attempt.observer` 并继续后续流程（best-effort）
+
+### Requirement: Queue governance MUST prevent workspace starvation under sustained load (best-effort)
+When global concurrency limits are enabled, the scheduler MUST apply a fairness strategy so lower-priority workspaces are deferred but not starved forever (best-effort).
+
+#### Scenario: Deferred workspace eventually gets a run slot
+- **GIVEN** three workspaces have queued tasks and global running slots are limited
+- **WHEN** higher-priority workspace keeps receiving new tasks
+- **THEN** lower-priority workspaces are deferred
+- **AND** deferred workspaces still eventually receive run slots (best-effort)
+
+### Requirement: Scheduled enqueue MUST support misfire policy and idempotent trigger keys (best-effort)
+Scheduled task creation MUST define explicit misfire behavior and use an idempotent trigger key to avoid duplicate enqueues for the same schedule window (best-effort).
+
+#### Scenario: Duplicate trigger window does not create duplicate tasks
+- **GIVEN** a schedule window is triggered twice due to retry or clock skew
+- **WHEN** the scheduler processes both trigger events
+- **THEN** only one task is enqueued for that window (best-effort)
+
+### Requirement: Governance decisions MUST be traceable in task events (best-effort)
+The scheduler MUST record governance decisions (for example picked, deferred, skipped, paused) with reason codes in task/workspace event streams (best-effort).
+
+#### Scenario: Deferred decision includes reason code
+- **GIVEN** a workspace task is not started due to global cap
+- **WHEN** scheduler evaluates runnable tasks
+- **THEN** an event is recorded with a reason code indicating capacity deferral (best-effort)
+
+### Requirement: Worktree attempts MUST persist deterministic execution metadata for audit and rollback
+When worktree mode is enabled, each mutating attempt MUST persist deterministic execution metadata, including at least `worktree_root`, `base_commit_sha`, and lifecycle outcome of worktree cleanup.
+
+#### Scenario: Attempt artifacts include worktree metadata
+- **GIVEN** a workspace uses worktree mode
+- **WHEN** the system starts an attempt
+- **THEN** attempt artifacts include `worktree_root` and `base_commit_sha`
+- **AND** terminal artifacts/receipt record whether cleanup succeeded or failed (best-effort)
+
+### Requirement: Worktree cleanup failures MUST be recoverable and auditable
+The system MUST treat worktree cleanup as a managed lifecycle step:
+- cleanup failures MUST be recorded with actionable reason
+- repeated cleanup attempts SHOULD be supported (best-effort)
+- orphan worktrees SHOULD be reclaimed by a sweeper (best-effort)
+
+#### Scenario: Cleanup failure is recorded with actionable hint
+- **GIVEN** an attempt has reached terminal state in worktree mode
+- **AND** worktree cleanup fails due to file lock or permission issue
+- **WHEN** the system finalizes attempt artifacts
+- **THEN** it records a cleanup-failed event with actionable remediation hint
+- **AND** the attempt remains queryable and resumable
+
+### Requirement: Task attempts MUST emit a schema-versioned artifact manifest
+Each terminal attempt MUST emit an artifact manifest with an explicit schema version, so downstream APIs and UIs can consume deliverables deterministically.
+
+The manifest MUST expose stable pointers for core evidence fields:
+- `summary`
+- `findings_path`
+- `trace_log_path`
+- `changed_files_path` and/or `diff_patch_path`
+- `test_report_path` (when available)
+
+#### Scenario: Terminal attempt includes manifest version and stable fields
+- **GIVEN** an attempt reaches a terminal state
+- **WHEN** artifacts are persisted
+- **THEN** the system writes an artifact manifest with explicit `version`
+- **AND** core evidence fields are present or marked as unavailable with reasons (best-effort)
+
+### Requirement: Missing artifact pointers MUST carry actionable reason codes
+When a recommended artifact pointer is unavailable (for example non-git diff or missing test framework), the system MUST include an actionable reason code and hint instead of silent omission.
+
+#### Scenario: Non-git attempt omits diff patch with explicit reason
+- **GIVEN** an attempt runs in a non-git workspace
+- **WHEN** artifacts are finalized
+- **THEN** `diff_patch_path` may be absent
+- **AND** the manifest includes a reason code and hint explaining why diff patch is unavailable
+

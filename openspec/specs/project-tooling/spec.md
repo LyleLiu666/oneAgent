@@ -2,7 +2,6 @@
 
 ## Purpose
 Defines project-level tooling requirements, including CI coverage, release artifact workflows, and regression suites for toolcalling reliability and live-provider runs.
-
 ## Requirements
 ### Requirement: Continuous Integration coverage
 The project SHALL run backend unit tests, frontend unit tests, and an end-to-end smoke test in CI for pull requests and pushes.
@@ -106,3 +105,54 @@ Before executing a tool, the system MUST validate tool arguments against the too
 - **WHEN** the model issues a tool call without `file_path`
 - **THEN** the system rejects the call as invalid arguments
 - **AND** the tool handler is not executed
+
+### Requirement: The project MUST provide a repeatable head-to-head benchmark suite for end-to-end delivery quality
+The project MUST provide a repeatable benchmark suite that runs a fixed task set and reports objective delivery-quality metrics for comparison across versions.
+
+At minimum, the suite MUST report:
+- first pass success rate
+- recovery success rate
+- human intervention count
+- evidence completeness
+- cost per successful delivery (best-effort)
+
+#### Scenario: Benchmark run outputs a machine-readable report
+- **GIVEN** a defined benchmark task set
+- **WHEN** the benchmark suite runs
+- **THEN** it outputs a machine-readable report containing all required metrics
+- **AND** the report can be compared to a previous baseline run (best-effort)
+
+### Requirement: Benchmark suite MUST support nightly and manual execution without blocking regular PR validation
+The project MUST support scheduled and manual benchmark execution paths, and SHOULD avoid making benchmark runtime a mandatory blocker for regular PR CI.
+
+#### Scenario: Nightly benchmark run produces trend artifacts
+- **WHEN** the nightly benchmark workflow triggers
+- **THEN** the suite runs against the configured task set
+- **AND** publishes artifacts that include current values and baseline deltas (best-effort)
+
+#### Scenario: Manual benchmark run is available for release decisions
+- **WHEN** a maintainer triggers benchmark execution manually
+- **THEN** the same benchmark suite runs with the same metric schema
+
+### Requirement: OpenSpec governance checks MUST prevent placeholder purpose and status drift
+The project MUST provide an automated OpenSpec governance check that fails when capability specs keep placeholder `Purpose` values (for example `TBD`) or when roadmap status snapshots drift from command-derived status sources.
+
+#### Scenario: Placeholder Purpose is rejected
+- **GIVEN** a capability spec still contains `Purpose: TBD`
+- **WHEN** the OpenSpec governance check runs
+- **THEN** the check fails with an actionable error pointing to the spec path
+
+#### Scenario: Roadmap status drift is detected
+- **GIVEN** roadmap snapshot claims a change is active/completed
+- **AND** `openspec list` output does not match that snapshot
+- **WHEN** the OpenSpec governance check runs
+- **THEN** the check fails with an actionable diff summary (best-effort)
+
+### Requirement: OpenSpec governance checks MUST be runnable in local and CI workflows
+The project MUST expose the same OpenSpec governance checks for local developer runs and CI, so “spec truth” is enforced consistently before merge.
+
+#### Scenario: Local and CI run the same governance check entrypoint
+- **WHEN** a developer runs the documented local check command
+- **THEN** it executes the same validation logic used by CI (best-effort)
+- **AND** both paths return non-zero exit code on governance violations
+
