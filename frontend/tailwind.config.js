@@ -1,4 +1,6 @@
 /** @type {import('tailwindcss').Config} */
+import typography from '@tailwindcss/typography'
+
 export default {
     content: [
         './index.html',
@@ -86,5 +88,5 @@ export default {
             'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.37)',
         },
     },
-    plugins: [],
+    plugins: [typography],
 }
