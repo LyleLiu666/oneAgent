@@ -512,72 +512,6 @@ const sendChatFromSuggest = async () => {
   await sendChat(message)
 }
 
-type TaskCompletedEvent = {
-  taskId?: string
-  attemptId?: string
-  title?: string
-  status?: string
-  summary?: string
-  continuing?: boolean
-  nextAttemptId?: string
-  nextAttemptStatus?: string
-  observer?: {
-    reason?: string
-    next_steps?: string
-    questions_for_user?: string[]
-  }
-}
-
-const onTaskCompleted = (payload: TaskCompletedEvent) => {
-  if (!isSecretaryMode.value) return
-
-  const taskID = String(payload?.taskId || '').trim()
-  const attemptID = String(payload?.attemptId || '').trim()
-  const status = String(payload?.status || '').trim()
-  const title = String(payload?.title || '').trim()
-  const summary = truncateForChat(payload?.summary, 520)
-  const nextSteps = truncateForChat(payload?.observer?.next_steps, 360)
-  const continuing = Boolean(payload?.continuing)
-  const nextAttemptID = String(payload?.nextAttemptId || '').trim()
-  const nextAttemptStatus = String(payload?.nextAttemptStatus || '').trim()
-
-  const shortID = taskID ? taskID.slice(0, 8) : 'unknown'
-  const shortAttemptID = attemptID ? attemptID.slice(0, 8) : ''
-  const shortNextAttemptID = nextAttemptID ? nextAttemptID.slice(0, 8) : ''
-  const label = status === 'succeeded' ? '已完成' : `已结束(${status || 'unknown'})`
-
-  const lines: string[] = []
-  lines.push(
-    `后台任务${label}：${title || '任务'}（task=${shortID}${shortAttemptID ? `, attempt=${shortAttemptID}` : ''}）。`
-  )
-  if (summary) lines.push(`当前结果：${summary}`)
-  if (nextSteps) lines.push(`下一步：${nextSteps}`)
-  if (continuing) {
-    const nextHint = shortNextAttemptID
-      ? `（next_attempt=${shortNextAttemptID}${nextAttemptStatus ? `, ${nextAttemptStatus}` : ''}）`
-      : ''
-    lines.push(`我先把这版结果发你；我会继续让 worker 再跑一轮${nextHint}。`)
-  }
-  lines.push('交付已更新。')
-
-  const msg =
-    appendSecretaryLocalMessage(chatStore.currentSessionId, {
-      role: 'assistant',
-      type: 'text',
-      content: lines.join('\n'),
-      createdAt: new Date(),
-    }) ||
-    ({
-      id: Date.now(),
-      role: 'assistant',
-      type: 'text',
-      content: lines.join('\n'),
-      createdAt: new Date(),
-      isStreaming: false,
-    } as ChatMessage)
-  chatStore.addMessage(msg)
-}
-
 // Methods
 const handleDocumentClick = (event: MouseEvent) => {
   if (!toolPickerOpen.value) return
@@ -1816,13 +1750,6 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   }
 }
 
-const truncateForChat = (raw: any, maxLen: number) => {
-  const text = String(raw || '').trim()
-  if (!text) return ''
-  if (text.length <= maxLen) return text
-  return `${text.slice(0, Math.max(0, maxLen - 1))}…`
-}
-
 const schedulePersistRecoveryFocus = () => {
   if (!isSecretaryMode.value) return
 
@@ -2421,7 +2348,6 @@ onUnmounted(() => {
       <div v-if="isSecretaryMode" data-testid="secretary-task-panel" v-show="secretaryTaskPanelVisible">
         <SecretaryTaskDeliverables
           :workspace="workspacePath"
-          @task-completed="onTaskCompleted"
           @recovery-snapshot="onRecoverySnapshot"
           @task-needs-attention="onTaskNeedsAttention"
           @recovery-focus="onRecoveryFocus"

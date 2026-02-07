@@ -143,7 +143,7 @@ it('binds workspace when user replies with an absolute path for a pending worksp
   wrapper.unmount()
 })
 
-it('includes attempt summary when receiving task-completed (SecretaryChatBox)', async () => {
+it('does not inject chat messages when receiving task-completed (SecretaryChatBox)', async () => {
   const store = new Map<string, string>()
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => store.get(key) ?? null,
@@ -175,6 +175,7 @@ it('includes attempt summary when receiving task-completed (SecretaryChatBox)', 
 
   const deliverables = wrapper.findComponent({ name: 'SecretaryTaskDeliverables' })
   expect(deliverables.exists()).toBe(true)
+  const before = chat.messages.length
   deliverables.vm.$emit('task-completed', {
     taskId: 't1',
     attemptId: 'a1',
@@ -185,9 +186,8 @@ it('includes attempt summary when receiving task-completed (SecretaryChatBox)', 
   })
   await flushPromises()
 
-  expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('WEATHER_RESULT'))).toBe(
-    true
-  )
+  expect(chat.messages.length).toBe(before)
+  expect(chat.messages.some((m: any) => String(m.content || '').includes('WEATHER_RESULT'))).toBe(false)
 
   wrapper.unmount()
 })

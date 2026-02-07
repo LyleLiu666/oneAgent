@@ -657,7 +657,7 @@ it('allows multiple sends in secretary mode and debounces triage', async () => {
     }
 })
 
-it('appends an assistant message when receiving a task-completed event (secretary mode)', async () => {
+it('does not inject chat messages when receiving a task-completed event (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -692,14 +692,7 @@ it('appends an assistant message when receiving a task-completed event (secretar
     await wrapper.get('[data-testid="emit-task-completed"]').trigger('click')
     await flushPromises()
 
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.type === 'text')).toBe(true)
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('当前结果'))).toBe(
-        true
-    )
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('WEATHER_RESULT'))).toBe(
-        true
-    )
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('继续'))).toBe(true)
+    expect(chat.messages.filter((m: any) => m.role === 'assistant').length).toBe(0)
 })
 
 it('optimistically renders secretary message and prevents resubmission while pending', async () => {

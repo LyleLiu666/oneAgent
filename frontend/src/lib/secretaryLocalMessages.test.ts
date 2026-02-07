@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, expect, it } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 
 import type { ChatMessage } from '@/stores/chat'
 import {
@@ -11,7 +11,18 @@ import {
   nextSecretaryLocalMessageID,
 } from '@/lib/secretaryLocalMessages'
 
+const makeLocalStorage = () => {
+  const store = new Map<string, string>()
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, String(value)),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => void store.clear(),
+  }
+}
+
 beforeEach(() => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
   localStorage.removeItem('oneagent-secretary-local-messages-v1')
   localStorage.removeItem('oneagent-secretary-local-message-next-id-v1')
 })
@@ -34,6 +45,34 @@ it('persists and loads secretary local messages', () => {
   expect(loaded.length).toBe(1)
   expect(loaded[0].content).toBe('交付已更新。')
   expect(loaded[0].createdAt.getTime()).toBe(createdAt.getTime())
+})
+
+it('filters legacy task completion notifications', () => {
+  const sessionId = 'secretary-session-legacy'
+
+  appendSecretaryLocalMessage(sessionId, {
+    role: 'assistant',
+    type: 'text',
+    content: '后台任务已结束(failed)：任务（task=deadbeef）。\n交付已更新。',
+    createdAt: new Date('2026-02-07T00:00:00.000Z'),
+  })
+
+  appendSecretaryLocalMessage(sessionId, {
+    role: 'assistant',
+    type: 'text',
+    content: '收到。我已把这件事交给后台任务处理（task=deadbeef）。完成后你会在「交付」看到产物。',
+    createdAt: new Date('2026-02-07T00:00:01.000Z'),
+  })
+
+  const loaded = loadSecretaryLocalMessages(sessionId)
+  expect(loaded.length).toBe(1)
+  expect(loaded[0].content).toContain('收到。')
+
+  const raw = localStorage.getItem('oneagent-secretary-local-messages-v1')
+  expect(raw).toBeTruthy()
+  const parsed = JSON.parse(String(raw || '{}')) as any
+  expect(Array.isArray(parsed?.[sessionId])).toBe(true)
+  expect(parsed[sessionId].length).toBe(1)
 })
 
 it('generates unique negative ids', () => {

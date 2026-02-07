@@ -33,6 +33,21 @@ const safeDate = (raw: any): Date => {
   return new Date()
 }
 
+const isLegacyTaskCompletionNotification = (msg: PersistedMessage): boolean => {
+  const role = String((msg as any)?.role || '').trim()
+  const type = String((msg as any)?.type || '').trim()
+  if (role !== 'assistant' || type !== 'text') return false
+  const content = String((msg as any)?.content || '')
+  const normalized = content.trimStart()
+  if (
+    !normalized.startsWith('后台任务已完成') &&
+    !normalized.startsWith('后台任务已结束(')
+  ) {
+    return false
+  }
+  return normalized.includes('交付已更新')
+}
+
 export function nextSecretaryLocalMessageID(): number {
   try {
     const raw = localStorage.getItem(NEXT_ID_KEY)
@@ -57,8 +72,18 @@ export function loadSecretaryLocalMessages(sessionId: string): ChatMessage[] {
     const list = storage[sid]
     if (!Array.isArray(list) || list.length === 0) return []
 
+    const filtered = list.filter((item) => !isLegacyTaskCompletionNotification(item))
+    if (filtered.length !== list.length) {
+      try {
+        storage[sid] = filtered
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(storage))
+      } catch {
+        // ignore
+      }
+    }
+
     const out: ChatMessage[] = []
-    for (const item of list) {
+    for (const item of filtered) {
       const id = Number((item as any)?.id)
       if (!Number.isFinite(id)) continue
       const roleRaw = String((item as any)?.role || '')
@@ -184,4 +209,3 @@ export function mergeSecretaryLocalMessages(sessionId: string, base: ChatMessage
     })
     .map((x) => x.msg)
 }
-
