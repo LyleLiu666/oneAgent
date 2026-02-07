@@ -337,6 +337,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		progressSnapshot = strings.TrimSpace(snap)
 	}
 
+	carry := o.buildTriageCarryContext(msgs, state, cursor, newUserMsgs, sessionWorkspace)
+
 	// Fast path (deterministic): progress questions should not require LLM availability.
 	// Only trigger this when there is a single new user message to reduce false positives.
 	if len(newUserMsgs) == 1 && isLikelyProgressQuestion(newUserMsgs[0].Content) && strings.TrimSpace(progressSnapshot) != "" {
@@ -394,7 +396,7 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	}
 
 	// SU: plan + short-path direct answers (best-effort).
-	plan, resolvedModelID, err := o.generateTriagePlanAsSU(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
+	plan, resolvedModelID, err := o.generateTriagePlanAsSU(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs, carry)
 	if err != nil {
 		return TriageResult{}, err
 	}
@@ -441,6 +443,10 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	}
 
 	state.CursorMessageID = toID
+	var runSearchCtx *SearchContext
+	if sc := carry.SearchContextForRun(); sc != nil {
+		runSearchCtx = sc
+	}
 	state.TriageRuns = append(state.TriageRuns, TriageRun{
 		FromCursor:        cursor,
 		ToMessageID:       toID,
@@ -452,6 +458,7 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		ResumedTaskIDs:    append([]string{}, resumedTaskIDs...),
 		Questions:         append([]string{}, questions...),
 		WorkspacesCreated: append([]string{}, workspacesCreated...),
+		SearchContext:     runSearchCtx,
 		CreatedAt:         time.Now().UTC(),
 	})
 	if len(state.TriageRuns) > 20 {
@@ -1666,7 +1673,7 @@ func extractAllTagBlocks(text string, tag string) []string {
 	return out
 }
 
-func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessionID, sessionWorkspace, progressSnapshot string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
+func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessionID, sessionWorkspace, progressSnapshot string, metadata model.JSONB, msgs []model.ChatMessage, carry triageCarryContext) (triagePlan, string, error) {
 	if o.ResolveModel == nil {
 		return triagePlan{}, "", errors.New("ResolveModel is required")
 	}
@@ -1718,29 +1725,75 @@ func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessi
 	if sessionWorkspace != "" {
 		workspaceHint = sessionWorkspace
 	}
-
-	userPrompt := "Context:\n- session_workspace_root: " + workspaceHint + "\n\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input
-
-	turnContextParts := make([]string, 0, 2)
-	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SU", "SW")); injected != "" {
-		turnContextParts = append(turnContextParts, injected)
+	defaultSearchRoot := "(unset)"
+	if v := strings.TrimSpace(carry.SearchPolicy.DefaultReadonlySearchRoot); v != "" {
+		defaultSearchRoot = v
 	}
-	if snap := strings.TrimSpace(progressSnapshot); snap != "" {
-		turnContextParts = append(turnContextParts, "## 任务看板快照\n"+snap)
-	}
-	turnContext := strings.TrimSpace(strings.Join(turnContextParts, "\n\n"))
-	turnCtxMsg, hasTurnCtx := llm.BuildTurnContextMessage(turnContext)
 
-	temp := 0.2
-	maxTokens := 1500
-	requestMsgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
-	if hasTurnCtx {
-		requestMsgs = append(requestMsgs, turnCtxMsg)
+	buildUserPrompt := func(currentCarry triageCarryContext, currentInput string) string {
+		var prompt strings.Builder
+		prompt.WriteString("Context:\n")
+		prompt.WriteString("- session_workspace_root: ")
+		prompt.WriteString(workspaceHint)
+		prompt.WriteString("\n")
+		prompt.WriteString("- default_readonly_search_root: ")
+		prompt.WriteString(defaultSearchRoot)
+		prompt.WriteString("\n\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n")
+		prompt.WriteString(currentInput)
+		if block := strings.TrimSpace(currentCarry.promptContextBlock()); block != "" {
+			prompt.WriteString("\n\n补充上下文（系统生成）:\n")
+			prompt.WriteString(block)
+		}
+		return strings.TrimSpace(prompt.String())
 	}
-	requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
+
+	buildRequestMessages := func(currentCarry triageCarryContext, currentInput string) []llm.ChatMessage {
+		turnContextParts := make([]string, 0, 3)
+		if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SU", "SW")); injected != "" {
+			turnContextParts = append(turnContextParts, injected)
+		}
+		if snap := strings.TrimSpace(progressSnapshot); snap != "" {
+			turnContextParts = append(turnContextParts, "## 任务看板快照\n"+snap)
+		}
+		if block := strings.TrimSpace(currentCarry.promptContextBlock()); block != "" {
+			turnContextParts = append(turnContextParts, block)
+		}
+		turnContext := strings.TrimSpace(strings.Join(turnContextParts, "\n\n"))
+		turnCtxMsg, hasTurnCtx := llm.BuildTurnContextMessage(turnContext)
+
+		requestMsgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
+		if hasTurnCtx {
+			requestMsgs = append(requestMsgs, turnCtxMsg)
+		}
+		requestMsgs = append(requestMsgs, llm.BuildUserMessage(buildUserPrompt(currentCarry, currentInput)))
+		return requestMsgs
+	}
+
+	currentInput := input
+	requestMsgs := buildRequestMessages(carry, currentInput)
+	if sessioncompress.ApproximateContextRunes(requestMsgs) > sessioncompress.DefaultMaxContextRunes && len(carry.SemanticAnchors) > 0 {
+		carry = carry.withAnchorsDropped()
+		requestMsgs = buildRequestMessages(carry, currentInput)
+	}
+	if sessioncompress.ApproximateContextRunes(requestMsgs) > sessioncompress.DefaultMaxContextRunes {
+		// Fallback: keep the structure, trim the least critical payload.
+		carry.LastSummary = truncateString(carry.LastSummary, 400)
+		if len(carry.PendingQuestions) > 1 {
+			carry.PendingQuestions = carry.PendingQuestions[:1]
+		}
+		carry.SearchSnapshot.Candidates = nil
+		carry.SearchSnapshot.Omitted = 0
+		requestMsgs = buildRequestMessages(carry, currentInput)
+	}
+	if sessioncompress.ApproximateContextRunes(requestMsgs) > sessioncompress.DefaultMaxContextRunes {
+		currentInput = truncateString(currentInput, 12_000)
+		requestMsgs = buildRequestMessages(carry, currentInput)
+	}
 
 	tagsInstruction := buildSecretaryTriagePlanTagsInstruction()
 
+	temp := 0.2
+	maxTokens := 1500
 	var plan triagePlan
 	if agentRuntime.ToolProtocol == agent.ToolProtocolXML && len(agentRuntime.ToolDefs) > 0 {
 		loopMsgs := append([]llm.ChatMessage(nil), requestMsgs...)
@@ -1758,6 +1811,11 @@ func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessi
 			toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
 				Enabled: true,
 				Root:    ws,
+			})
+		} else if root := strings.TrimSpace(carry.SearchPolicy.DefaultReadonlySearchRoot); root != "" {
+			toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
+				Enabled: true,
+				Root:    root,
 			})
 		}
 
@@ -2754,7 +2812,7 @@ ONEAGENT_SECRETARY_SU_TRIAGE
 - 必须且只能通过 Tool Call（secretary_triage_plan）或 XML Tags（<secretary_triage_plan>）返回结构化数据。
 - 结构包含：intent（意图归类）、summary_message（给用户看的话）、tasks（后台工单，包含每个 task 的 workspace_strategy）、task_actions（对已有任务的 cancel/resume；不做物理 delete，用户说“删掉”默认用 cancel 关闭任务）、questions（阻塞问题）。
 
-# Core Operating Rules (8条核心硬规则)
+# Core Operating Rules (10条核心硬规则)
 
 1. 默认推进原则 (Bias for Action)
    - 能做决定的不问用户：遇到非关键分支（如文风、非破坏性配置），直接按最佳实践“先斩后奏”。
@@ -2790,4 +2848,13 @@ ONEAGENT_SECRETARY_SU_TRIAGE
    - new: 通用问答/无代码依赖的文档创作。
    - session: 明确需要在当前已打开的代码仓库（session_workspace_root）中操作。
    - ask: 意图涉及代码修改，但 session_workspace_root 为空且无法推断目标仓库时（此时必须并在 questions 里问路径）。
+
+9. 连续追问继承语义 (Continuity First)
+   - 看到 CONTINUITY_CONTEXT 时，必须优先把本轮输入理解为“延续上轮未决问题”的回答，而不是重开新话题。
+   - 当 continuity_followup_hint 提示“latest_user_reply_likely_answers_pending_questions”时，禁止机械反问“你要找什么”。
+
+10. 查询优先执行 + 分层扩搜 (Search Before Ask)
+   - 当 default_readonly_search_root 不为空且需求是“找目录/找文件/定位仓库”时，先查再问。
+   - 先查 home；若未命中则按 search_phase_order 扩搜（home -> common-dev -> whitelist），受限超时后再汇报候选。
+   - 默认排除系统/隐藏目录；只有用户明确要求时才放开系统深搜。
 	`

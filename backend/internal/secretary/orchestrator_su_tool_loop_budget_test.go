@@ -44,7 +44,7 @@ func TestGenerateTriagePlanAsSU_ToolLoopBudget_IsDecisionOnly_NotHardLimited(t *
 	ctx := toolcalling.ContextWithChatToolMaxSteps(context.Background(), 6)
 	plan, _, err := o.generateTriagePlanAsSU(ctx, "local", "session-1", "", "", model.JSONB{}, []model.ChatMessage{
 		{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "do it"},
-	})
+	}, triageCarryContext{})
 	if err != nil {
 		t.Fatalf("generateTriagePlanAsSU: %v", err)
 	}

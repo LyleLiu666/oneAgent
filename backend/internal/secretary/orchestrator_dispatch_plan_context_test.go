@@ -72,7 +72,7 @@ func TestGenerateDispatchPlan_IncludesSessionWorkspaceRootContext(t *testing.T) 
 
 	plan, _, err := o.generateTriagePlanAsSU(context.Background(), "local", "su", wantWorkspace, "", model.JSONB{}, []model.ChatMessage{
 		{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "do it"},
-	})
+	}, triageCarryContext{})
 	if err != nil {
 		t.Fatalf("generateTriagePlanAsSU: %v", err)
 	}
