@@ -36,15 +36,15 @@ func NewChannelRelayHandler(rt *runtime.Runtime) *ChannelRelayHandler {
 		defaultPoolRoot = filepath.Join(rt.Layout.OneAgentDir, "workspaces")
 	}
 
-		h.orch = &secretary.Orchestrator{
-			Sessions:                 rt.Sessions,
-			Tasks:                    rt.Tasks,
-			Runner:                   rt.TaskRunner,
-			Settings:                 rt.Settings,
-			Memory:                   rt.Memory,
-			DefaultWorkspacePoolRoot: defaultPoolRoot,
-			ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
-				resolved, err := chat.resolveModel(ctx, userID, modelID)
+	h.orch = &secretary.Orchestrator{
+		Sessions:                 rt.Sessions,
+		Tasks:                    rt.Tasks,
+		Runner:                   rt.TaskRunner,
+		Settings:                 rt.Settings,
+		Memory:                   rt.Memory,
+		DefaultWorkspacePoolRoot: defaultPoolRoot,
+		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {
+			resolved, err := chat.resolveModel(ctx, userID, modelID)
 			if err != nil {
 				return nil, "", err
 			}

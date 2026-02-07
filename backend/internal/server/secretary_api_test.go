@@ -97,12 +97,12 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 		case strings.Contains(system, "ONEAGENT_SECRETARY_ACK"):
 			http.Error(w, "unexpected ack request (quick-ack is disabled)", http.StatusBadRequest)
 			return
-			case strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE"):
-				args := `{"intent":"dispatch","summary_message":"我理解为 2 件事：①整理一份报告；②跑 backend 测试。我已分别安排 worker。","tasks":[{"title":"整理报告","prompt":"整理一份报告，输出 report.md，并确保内容结构清晰。","workspace_strategy":"new"},{"title":"跑 backend 测试","prompt":"在 repo 内运行 go test ./...，如失败请修复并补齐测试。","workspace_strategy":"session"}],"questions":[]}`
-				resp := map[string]any{
-					"id": "cmpl-test",
-					"choices": []any{
-						map[string]any{
+		case strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE"):
+			args := `{"intent":"dispatch","summary_message":"我理解为 2 件事：①整理一份报告；②跑 backend 测试。我已分别安排 worker。","tasks":[{"title":"整理报告","prompt":"整理一份报告，输出 report.md，并确保内容结构清晰。","workspace_strategy":"new"},{"title":"跑 backend 测试","prompt":"在 repo 内运行 go test ./...，如失败请修复并补齐测试。","workspace_strategy":"session"}],"questions":[]}`
+			resp := map[string]any{
+				"id": "cmpl-test",
+				"choices": []any{
+					map[string]any{
 						"message": map[string]any{
 							"role":    "assistant",
 							"content": "",
@@ -419,12 +419,12 @@ func TestServer_SecretaryTriage_ProgressQuery_ReturnsWorkspaceStats(t *testing.T
 		case strings.Contains(system, "ONEAGENT_SECRETARY_ACK"):
 			http.Error(w, "unexpected ack request (quick-ack is disabled)", http.StatusBadRequest)
 			return
-			case strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE"):
-				combined := all.String()
-				if !strings.Contains(combined, "排队 1") {
-					http.Error(w, "missing queued-count snapshot", http.StatusBadRequest)
-					return
-				}
+		case strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE"):
+			combined := all.String()
+			if !strings.Contains(combined, "排队 1") {
+				http.Error(w, "missing queued-count snapshot", http.StatusBadRequest)
+				return
+			}
 			if !strings.Contains(combined, "一共有") || !strings.Contains(combined, "文件") || !strings.Contains(combined, "字") {
 				http.Error(w, "missing workspace stats snapshot", http.StatusBadRequest)
 				return
@@ -725,12 +725,12 @@ func TestServer_SecretaryTriage_ProgressQuery_NoWorkspace_StillReturnsStats(t *t
 		case strings.Contains(system, "ONEAGENT_SECRETARY_ACK"):
 			http.Error(w, "unexpected ack request (quick-ack is disabled)", http.StatusBadRequest)
 			return
-			case strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE"):
-				combined := all.String()
-				if !strings.Contains(combined, "排队 1") {
-					http.Error(w, "missing queued-count snapshot", http.StatusBadRequest)
-					return
-				}
+		case strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE"):
+			combined := all.String()
+			if !strings.Contains(combined, "排队 1") {
+				http.Error(w, "missing queued-count snapshot", http.StatusBadRequest)
+				return
+			}
 			if !strings.Contains(combined, "一共有") || !strings.Contains(combined, "文件") || !strings.Contains(combined, "字") {
 				http.Error(w, "missing workspace stats snapshot", http.StatusBadRequest)
 				return

@@ -23,9 +23,9 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/model"
 	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
-	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/sessioncompress"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
@@ -1761,24 +1761,24 @@ func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessi
 			})
 		}
 
-			out, loopErr := toolxml.RunLoop(
-				toolCtx,
-				client,
-				loopMsgs,
+		out, loopErr := toolxml.RunLoop(
+			toolCtx,
+			client,
+			loopMsgs,
 			&llm.ChatCompletionOptions{
 				Temperature: &temp,
 				MaxTokens:   &maxTokens,
 			},
-				agentRuntime.ToolDefs,
-				userID,
-				nil,
-				nil,
-				nil,
-				nil,
-				nil,
-				nil,
-				nil,
-			)
+			agentRuntime.ToolDefs,
+			userID,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+		)
 		if loopErr == nil {
 			if p, ok := parseSecretaryTriagePlanTags(out); ok {
 				plan = p
