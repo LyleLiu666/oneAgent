@@ -118,6 +118,27 @@ func TestStreamFilter_Normal(t *testing.T) {
 	}
 }
 
+func TestStreamFilter_CodeFenceAcrossChunks_PreservesToolDataAndThinking(t *testing.T) {
+	filter := &streamFilter{}
+
+	input := "Example:\n```xml\n<tool_data><call><tool_name>bash</tool_name></call></tool_data>\n<thinking>code example</thinking>\n```\nDone."
+	chunks := []string{
+		"Example:\n``",
+		"`xml\n<tool_data><call><tool_name>bash</tool_name></call></tool_data>\n<thinking>code example</thinking>\n``",
+		"`\nDone.",
+	}
+
+	var sb strings.Builder
+	for _, c := range chunks {
+		sb.WriteString(filter.Feed(c))
+	}
+	sb.WriteString(filter.Flush())
+
+	if got := sb.String(); got != input {
+		t.Fatalf("expected %q, got %q", input, got)
+	}
+}
+
 func TestStreamFilter_StripsStrayToolDataCloseTag(t *testing.T) {
 	filter := &streamFilter{}
 	input := "hello </tool_data> world"

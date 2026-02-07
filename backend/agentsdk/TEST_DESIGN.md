@@ -52,6 +52,10 @@ Each scenario below should be covered by a focused test (or a small set of tests
   - Input: edge-case Unicode sequences that previously caused ToLower/index slicing bugs.
   - Expect: never panic.
   - Tests: `backend/agentsdk/xmlprotocol/stream_filter_test.go`
+- `STREAM-3 Code fences across chunk boundaries`
+  - Input: Markdown fences split across streamed chunks (e.g. "``" + "`").
+  - Expect: content inside fences is preserved (no accidental tool_data/thinking suppression).
+  - Tests: `backend/agentsdk/xmlprotocol/stream_filter_test.go`
 
 ### Safety: Markdown Code Awareness (must-have)
 
@@ -74,6 +78,10 @@ Each scenario below should be covered by a focused test (or a small set of tests
   - Input: LLM emits tool_data -> tool executes -> LLM returns final.
   - Expect: correct message history append order; combined visible output correct.
   - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
+- `LOOP-1b Multi-tool calls in a single tool_data`
+  - Input: `<tool_data>` contains multiple `<call>` blocks.
+  - Expect: tools execute in order; tool_call_id stable; tool_result contains all calls.
+  - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
 - `LOOP-2 Self-heal on tool protocol parse errors`
   - Input: invalid `<tool_data>` (e.g., empty tool name).
   - Expect: loop continues using a `tool_protocol` tool_result, then terminates.
@@ -85,6 +93,10 @@ Each scenario below should be covered by a focused test (or a small set of tests
 - `LOOP-4 Special-case truncated write_file append recovery`
   - Input: truncated tool_data where write_file append can be safely recovered.
   - Expect: write_file executed in append-only mode; warning emitted as tool_protocol result.
+  - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
+- `LOOP-5 ToolExecutor error handling`
+  - Input: tool execution returns an error.
+  - Expect: tool_result `ok=false` with both a human error and a JSON payload; loop continues.
   - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
 
 ### Observability / Replay Hooks
@@ -98,6 +110,10 @@ Each scenario below should be covered by a focused test (or a small set of tests
 - `OBS-3 JSON serializable events`
   - Expect: `json.Marshal(agentsdk.Event)` never fails for events emitted by the loop.
   - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
+- `OBS-4 Streaming callback aborts are observable`
+  - Input: OnContent returns an error mid-stream.
+  - Expect: RunLoop aborts and llm_response is logged with error text.
+  - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
 
 ## Running Tests
 
@@ -107,4 +123,3 @@ Each scenario below should be covered by a focused test (or a small set of tests
 ## References (local repos)
 
 See `backend/agentsdk/TEST_MATRIX.md` for the curated list of external test sources and why they matter.
-

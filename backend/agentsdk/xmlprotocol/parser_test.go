@@ -93,3 +93,38 @@ func TestParseToolData_RepairsToolNameClosedByFilePathTag(t *testing.T) {
 		t.Fatalf("expected filePath %q, got %q", "src/generator.py", got)
 	}
 }
+
+func TestParseToolData_MultiCall_ParsesInOrder(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>bash</tool_name>
+    <command>echo 1</command>
+  </call>
+  <call>
+    <tool_name>read_file</tool_name>
+    <filePath>a.txt</filePath>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(calls))
+	}
+
+	if calls[0].ToolName != "bash" {
+		t.Fatalf("expected call[0] tool 'bash', got %q", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["command"]; got != "echo 1" {
+		t.Fatalf("expected call[0] command %q, got %q", "echo 1", got)
+	}
+
+	if calls[1].ToolName != "read_file" {
+		t.Fatalf("expected call[1] tool 'read_file', got %q", calls[1].ToolName)
+	}
+	if got := calls[1].Fields["filePath"]; got != "a.txt" {
+		t.Fatalf("expected call[1] filePath %q, got %q", "a.txt", got)
+	}
+}

@@ -172,6 +172,175 @@ func TestRunLoop_EmitsTraceEvents_AndEventsAreJSONSerializable(t *testing.T) {
 	}
 }
 
+func TestRunLoop_MultiToolCalls_ExecutesInOrder_AndRecordsResults(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`<tool_data>
+  <call>
+    <tool_name>bash</tool_name>
+    <command>echo 1</command>
+  </call>
+  <call>
+    <tool_name>read_file</tool_name>
+    <filePath>a.txt</filePath>
+  </call>
+</tool_data>`,
+			`done`,
+		},
+	}
+	sink := &collectSink{}
+
+	var executed []ToolCall
+	var steps []StepRecord
+
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(ctx context.Context, call ToolCall) (any, error) {
+			_ = ctx
+			executed = append(executed, call)
+			return map[string]any{"ok": true, "tool": call.Name}, nil
+		}),
+		Callbacks: Callbacks{
+			EventSink:    sink,
+			ObserveStep:  func(step StepRecord) { steps = append(steps, step) },
+			ObserveFinal: func(string, string) {},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected %q, got %q", "done", combined)
+	}
+	if len(executed) != 2 {
+		t.Fatalf("expected 2 tool executions, got %d", len(executed))
+	}
+	if executed[0].ID != "xml_0_0" || executed[0].Name != "bash" || strings.TrimSpace(executed[0].Fields["command"]) != "echo 1" {
+		t.Fatalf("unexpected first tool call: %#v", executed[0])
+	}
+	if executed[1].ID != "xml_0_1" || executed[1].Name != "read_file" || strings.TrimSpace(executed[1].Fields["filePath"]) != "a.txt" {
+		t.Fatalf("unexpected second tool call: %#v", executed[1])
+	}
+
+	if len(steps) == 0 {
+		t.Fatalf("expected at least one step record")
+	}
+	first := steps[0]
+	if len(first.ToolCalls) != 2 {
+		t.Fatalf("expected 2 recorded tool calls, got %d", len(first.ToolCalls))
+	}
+	if len(first.ToolResults) != 2 {
+		t.Fatalf("expected 2 recorded tool results, got %d", len(first.ToolResults))
+	}
+	if !strings.Contains(first.ToolResultMessage, "<tool_call_id>xml_0_0</tool_call_id>") ||
+		!strings.Contains(first.ToolResultMessage, "<tool_call_id>xml_0_1</tool_call_id>") {
+		t.Fatalf("expected tool_result message to contain both call ids, got %q", first.ToolResultMessage)
+	}
+
+	toolCallEvents := 0
+	toolResultEvents := 0
+	for _, ev := range sink.events {
+		switch ev.Kind {
+		case agentsdk.EventKindToolCall:
+			toolCallEvents++
+		case agentsdk.EventKindToolResult:
+			toolResultEvents++
+		}
+	}
+	if toolCallEvents != 2 {
+		t.Fatalf("expected 2 tool_call events, got %d", toolCallEvents)
+	}
+	if toolResultEvents != 2 {
+		t.Fatalf("expected 2 tool_result events, got %d", toolResultEvents)
+	}
+}
+
+func TestRunLoop_ToolExecutorError_YieldsToolResultError_AndContinues(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`<tool_data><call><tool_name>bash</tool_name><command>echo hi</command></call></tool_data>`,
+			`done`,
+		},
+	}
+
+	var steps []StepRecord
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+			return nil, errors.New("boom")
+		}),
+		Callbacks: Callbacks{
+			ObserveStep: func(step StepRecord) { steps = append(steps, step) },
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected final content %q, got %q", "done", combined)
+	}
+	if len(steps) == 0 || len(steps[0].ToolResults) != 1 {
+		t.Fatalf("expected 1 tool result step, got %#v", steps)
+	}
+	got := steps[0].ToolResults[0]
+	if got.OK {
+		t.Fatalf("expected ok=false, got %#v", got)
+	}
+	if got.Error != "boom" {
+		t.Fatalf("expected tool error %q, got %q", "boom", got.Error)
+	}
+	if !strings.Contains(got.OutputJSON, "Tool execution failed") {
+		t.Fatalf("expected output json to contain execution failure, got %q", got.OutputJSON)
+	}
+}
+
+func TestRunLoop_OnContentError_AbortsAndIsLogged(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{`hello`},
+	}
+	sink := &collectSink{}
+
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) { return nil, nil }),
+		Callbacks: Callbacks{
+			OnContent: func(chunk string) error {
+				if chunk != "hello" {
+					t.Fatalf("unexpected streamed chunk: %q", chunk)
+				}
+				return errors.New("stop")
+			},
+			EventSink: sink,
+		},
+	})
+	if err == nil || err.Error() != "stop" {
+		t.Fatalf("expected stop error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "hello" {
+		t.Fatalf("expected combined content %q, got %q", "hello", combined)
+	}
+
+	var sawErrResp bool
+	for _, ev := range sink.events {
+		if ev.Kind != agentsdk.EventKindLLMResponse {
+			continue
+		}
+		payload, ok := ev.Payload.(agentsdk.LLMResponseEvent)
+		if !ok {
+			t.Fatalf("expected LLMResponseEvent payload, got %T", ev.Payload)
+		}
+		if payload.Error == "stop" {
+			sawErrResp = true
+		}
+	}
+	if !sawErrResp {
+		t.Fatalf("expected llm_response event with error=stop")
+	}
+}
+
 func TestRunLoop_StopsAfterMaxSteps(t *testing.T) {
 	client := &scriptedClient{
 		responses: []string{
