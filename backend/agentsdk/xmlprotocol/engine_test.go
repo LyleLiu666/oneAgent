@@ -29,6 +29,18 @@ func (c *scriptedClient) ChatCompletionStream(ctx context.Context, messages []ag
 	return callback(resp)
 }
 
+type errorClient struct {
+	err error
+}
+
+func (c *errorClient) ChatCompletionStream(ctx context.Context, messages []agentsdk.Message, opts *agentsdk.ChatCompletionOptions, callback agentsdk.StreamCallback) error {
+	_ = ctx
+	_ = messages
+	_ = opts
+	_ = callback
+	return c.err
+}
+
 type funcExecutor func(context.Context, agentsdk.ToolCall) (any, error)
 
 func (f funcExecutor) Execute(ctx context.Context, call agentsdk.ToolCall) (any, error) {
@@ -324,20 +336,32 @@ func TestRunLoop_OnContentError_AbortsAndIsLogged(t *testing.T) {
 	}
 
 	var sawErrResp bool
+	var sawErrEvent bool
 	for _, ev := range sink.events {
-		if ev.Kind != agentsdk.EventKindLLMResponse {
-			continue
-		}
-		payload, ok := ev.Payload.(agentsdk.LLMResponseEvent)
-		if !ok {
-			t.Fatalf("expected LLMResponseEvent payload, got %T", ev.Payload)
-		}
-		if payload.Error == "stop" {
-			sawErrResp = true
+		switch ev.Kind {
+		case agentsdk.EventKindLLMResponse:
+			payload, ok := ev.Payload.(agentsdk.LLMResponseEvent)
+			if !ok {
+				t.Fatalf("expected LLMResponseEvent payload, got %T", ev.Payload)
+			}
+			if payload.Error == "stop" {
+				sawErrResp = true
+			}
+		case agentsdk.EventKindError:
+			payload, ok := ev.Payload.(agentsdk.ErrorEvent)
+			if !ok {
+				t.Fatalf("expected ErrorEvent payload, got %T", ev.Payload)
+			}
+			if payload.Error == "stop" {
+				sawErrEvent = true
+			}
 		}
 	}
 	if !sawErrResp {
 		t.Fatalf("expected llm_response event with error=stop")
+	}
+	if !sawErrEvent {
+		t.Fatalf("expected error event with error=stop")
 	}
 }
 
@@ -366,6 +390,76 @@ func TestRunLoop_StopsAfterMaxSteps(t *testing.T) {
 	}
 	if client.index != 3 {
 		t.Fatalf("expected 3 llm calls, got %d", client.index)
+	}
+}
+
+func TestRunLoop_EmitsErrorEvent_OnLLMStreamError(t *testing.T) {
+	sink := &collectSink{}
+	client := &errorClient{err: errors.New("boom")}
+
+	_, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) { return nil, nil }),
+		Callbacks: Callbacks{
+			EventSink: sink,
+		},
+	})
+	if err == nil || err.Error() != "boom" {
+		t.Fatalf("expected boom error, got %v", err)
+	}
+
+	var sawErrEvent bool
+	for _, ev := range sink.events {
+		if ev.Kind != agentsdk.EventKindError {
+			continue
+		}
+		payload, ok := ev.Payload.(agentsdk.ErrorEvent)
+		if !ok {
+			t.Fatalf("expected ErrorEvent payload, got %T", ev.Payload)
+		}
+		if payload.Error == "boom" {
+			sawErrEvent = true
+		}
+	}
+	if !sawErrEvent {
+		t.Fatalf("expected error event with error=boom")
+	}
+}
+
+func TestRunLoop_MissingExecutor_EmitsErrorEvent(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{`done`},
+	}
+	sink := &collectSink{}
+
+	_, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: nil,
+		Callbacks: Callbacks{
+			EventSink: sink,
+		},
+	})
+	if err == nil || err.Error() != "missing tool executor" {
+		t.Fatalf("expected missing tool executor error, got %v", err)
+	}
+
+	var sawErrEvent bool
+	for _, ev := range sink.events {
+		if ev.Kind != agentsdk.EventKindError {
+			continue
+		}
+		payload, ok := ev.Payload.(agentsdk.ErrorEvent)
+		if !ok {
+			t.Fatalf("expected ErrorEvent payload, got %T", ev.Payload)
+		}
+		if payload.Error == "missing tool executor" {
+			sawErrEvent = true
+		}
+	}
+	if !sawErrEvent {
+		t.Fatalf("expected error event for missing tool executor")
 	}
 }
 

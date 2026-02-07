@@ -70,10 +70,14 @@ type RunLoopInput struct {
 
 func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 	if in.Client == nil {
-		return "", errors.New("missing llm client")
+		err := errors.New("missing llm client")
+		emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, 0, agentsdk.ErrorEvent{Error: err.Error()})
+		return "", err
 	}
 	if in.Executor == nil {
-		return "", errors.New("missing tool executor")
+		err := errors.New("missing tool executor")
+		emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, 0, agentsdk.ErrorEvent{Error: err.Error()})
+		return "", err
 	}
 
 	msgs := make([]agentsdk.Message, 0, len(in.Messages)+8)
@@ -140,6 +144,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 			})
 		}
 		if err != nil {
+			emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, toolStep, agentsdk.ErrorEvent{Error: err.Error()})
 			return combined.String(), err
 		}
 
@@ -165,6 +170,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 
 				protoErr := errors.New("truncated <tool_data> block")
 				trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Tool protocol error: %v", protoErr))
+				emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, toolStep, agentsdk.ErrorEvent{Error: protoErr.Error()})
 
 				toolName := "tool_protocol"
 				toolCallID := fmt.Sprintf("xml_%d_protocol", step)
@@ -213,6 +219,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 		calls, err := ParseToolData(toolBlock)
 		if err != nil {
 			trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Tool protocol parse error: %v", err))
+			emitEvent(ctx, in.Callbacks.EventSink, agentsdk.EventKindError, toolStep, agentsdk.ErrorEvent{Error: err.Error()})
 
 			toolName := "tool_protocol"
 			toolCallID := fmt.Sprintf("xml_%d_protocol", step)
