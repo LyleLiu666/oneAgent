@@ -28,7 +28,6 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
-	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
 	"github.com/liu_y/oneAgent/backend/internal/toolxml"
 )
 
@@ -87,8 +86,6 @@ func buildTextLLMHistory(dbMessages []model.ChatMessage) []llm.ChatMessage {
 	}
 	return out
 }
-
-const secretaryToolMaxSteps = 5
 
 func secretaryReadOnlyPolicy() permissions.Policy {
 	deny := []string{
@@ -1749,7 +1746,10 @@ func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessi
 		loopMsgs := append([]llm.ChatMessage(nil), requestMsgs...)
 		loopMsgs = append(loopMsgs, llm.BuildUserMessage(tagsInstruction))
 
-		toolCtx := toolcalling.ContextWithChatToolMaxSteps(ctx, secretaryToolMaxSteps)
+		toolCtx := ctx
+		if toolCtx == nil {
+			toolCtx = context.Background()
+		}
 		toolCtx = tool.ContextWithPolicySnapshot(toolCtx, policySnapshot)
 		if o != nil && o.Settings != nil {
 			toolCtx = tool.ContextWithSettingsDB(toolCtx, o.Settings)
@@ -2761,8 +2761,9 @@ ONEAGENT_SECRETARY_SU_TRIAGE
    - 一句话纠偏：在 summary_message 中告知你的决定（“我将默认按 X 方案推进...”），让用户如果不满意只需回复一句即可修正。
 
 2. 经济型排查 (Budget Awareness)
-   - 你只有 5 步工具调用预算。优先用只读工具拿到关键证据并**直接回复**，避免不必要的派工/交接成本。
-   - 仅当需求涉及写/改/跑或明显超出预算时，才派发 tasks[] 给 Worker。
+   - “约 5 次工具调用”只是用于判断是否自办的阈值（不是硬限制）：请先快速评估是否大概率能在约 5 次只读工具调用内闭环。
+   - 如果你决定自办：可以根据需要继续调用只读工具，但要保持经济性，避免无意义自转/穷举。
+   - 仅当需求涉及写/改/跑或明显需要长时/高成本执行时，才派发 tasks[] 给 Worker。
 
 3. 读写分权 (Read/Write Separation)
    - 你只读：用工具看代码、查日志、读文档。

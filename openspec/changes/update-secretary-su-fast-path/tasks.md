@@ -4,7 +4,7 @@
 - [ ] 1.3 Run `openspec validate update-secretary-su-fast-path --strict --no-interactive`
 
 ## 2. Backend
-- [ ] 2.1 Refactor secretary triage to generate plan as SU (read-only tools, <=5 steps)
+- [ ] 2.1 Refactor secretary triage to generate plan as SU (read-only tools, <=5-step decision threshold)
 - [ ] 2.2 Inject SettingsDB into secretary tool loop context
 - [ ] 2.3 Ensure SU direct answers do not create/enqueue tasks
 - [ ] 2.4 Add/adjust unit tests for direct-answer fast path and settings injection
@@ -17,4 +17,3 @@
 ## 4. Validation
 - [ ] 4.1 `go test ./...`
 - [ ] 4.2 `pnpm -C frontend test`
-
