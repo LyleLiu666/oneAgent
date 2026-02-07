@@ -7,6 +7,11 @@ import { useSecretaryChatStore } from '@/stores/secretaryChat'
 import { useUIStore } from '@/stores/ui'
 import { useRouter } from 'vue-router'
 import {
+  appendSecretaryLocalMessage,
+  clearSecretaryLocalMessages,
+  mergeSecretaryLocalMessages,
+} from '@/lib/secretaryLocalMessages'
+import {
   streamChat,
   attachChatStream,
   stopSessionStream,
@@ -226,7 +231,14 @@ const confirmSecretaryReset = async () => {
   secretaryResetSubmitting.value = true
   secretaryResetError.value = ''
   try {
-    await resetSecretarySession()
+    if (chatStore.currentSessionId) {
+      clearSecretaryLocalMessages(chatStore.currentSessionId)
+    }
+    const resetResp: any = await resetSecretarySession()
+    const resetSessionId = String(resetResp?.session_id || '').trim()
+    if (resetSessionId) {
+      clearSecretaryLocalMessages(resetSessionId)
+    }
     closeSecretaryResetConfirm(true)
     startNewSession()
     await loadSessionMessages('', false)
@@ -548,14 +560,22 @@ const onTaskCompleted = (payload: TaskCompletedEvent) => {
   }
   lines.push('交付已更新。')
 
-  chatStore.addMessage({
-    id: Date.now(),
-    role: 'assistant',
-    type: 'text',
-    content: lines.join('\n'),
-    createdAt: new Date(),
-    isStreaming: false,
-  })
+  const msg =
+    appendSecretaryLocalMessage(chatStore.currentSessionId, {
+      role: 'assistant',
+      type: 'text',
+      content: lines.join('\n'),
+      createdAt: new Date(),
+    }) ||
+    ({
+      id: Date.now(),
+      role: 'assistant',
+      type: 'text',
+      content: lines.join('\n'),
+      createdAt: new Date(),
+      isStreaming: false,
+    } as ChatMessage)
+  chatStore.addMessage(msg)
 }
 
 // Methods
@@ -891,7 +911,11 @@ const loadSessionMessages = async (
         }
       }
     }
-    chatStore.setMessages(withPlaceholders)
+    const finalMessages =
+      isSecretaryMode.value && resolvedSessionId
+        ? mergeSecretaryLocalMessages(resolvedSessionId, withPlaceholders)
+        : withPlaceholders
+    chatStore.setMessages(finalMessages)
     scrollToBottom(false)
 
     if (isSecretaryMode.value) {
@@ -2089,22 +2113,41 @@ const handoffToTask = async () => {
       model_id: String(selectedModelId.value || '').trim() || undefined,
     })
 
-    const nextIdBase = Date.now()
-    chatStore.addMessage({
-      id: nextIdBase,
-      role: 'user',
-      type: 'text',
-      content: prompt,
-      createdAt: new Date(),
-    })
-    chatStore.addMessage({
-      id: nextIdBase + 1,
-      role: 'assistant',
-      type: 'text',
-      content: `收到。我已把这件事交给后台任务处理（task=${String((created as any)?.id || '').slice(0, 8) || 'unknown'}）。完成后你会在「交付」看到产物。`,
-      createdAt: new Date(),
-      isStreaming: false,
-    })
+    const now = new Date()
+    const userMsg =
+      appendSecretaryLocalMessage(chatStore.currentSessionId, {
+        role: 'user',
+        type: 'text',
+        content: prompt,
+        createdAt: now,
+      }) ||
+      ({
+        id: Date.now(),
+        role: 'user',
+        type: 'text',
+        content: prompt,
+        createdAt: now,
+        isStreaming: false,
+      } as ChatMessage)
+
+    const ackMsg =
+      appendSecretaryLocalMessage(chatStore.currentSessionId, {
+        role: 'assistant',
+        type: 'text',
+        content: `收到。我已把这件事交给后台任务处理（task=${String((created as any)?.id || '').slice(0, 8) || 'unknown'}）。完成后你会在「交付」看到产物。`,
+        createdAt: now,
+      }) ||
+      ({
+        id: Date.now() + 1,
+        role: 'assistant',
+        type: 'text',
+        content: `收到。我已把这件事交给后台任务处理（task=${String((created as any)?.id || '').slice(0, 8) || 'unknown'}）。完成后你会在「交付」看到产物。`,
+        createdAt: now,
+        isStreaming: false,
+      } as ChatMessage)
+
+    chatStore.addMessage(userMsg)
+    chatStore.addMessage(ackMsg)
 
     inputMessage.value = ''
     if (inputEl.value) inputEl.value.style.height = ''
