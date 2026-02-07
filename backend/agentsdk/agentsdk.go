@@ -57,6 +57,15 @@ type EventSink interface {
 	OnEvent(ctx context.Context, event Event)
 }
 
+type EventSinkFunc func(ctx context.Context, event Event)
+
+func (f EventSinkFunc) OnEvent(ctx context.Context, event Event) {
+	if f == nil {
+		return
+	}
+	f(ctx, event)
+}
+
 type LLMRequestEvent struct {
 	Messages []Message
 	Options  *ChatCompletionOptions
