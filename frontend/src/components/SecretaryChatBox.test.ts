@@ -191,3 +191,55 @@ it('includes attempt summary when receiving task-completed (SecretaryChatBox)', 
 
   wrapper.unmount()
 })
+
+it('shows recovery only in task panel (no chat injection) (SecretaryChatBox)', async () => {
+  const store = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, String(value)),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => void store.clear(),
+  })
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { useSecretaryChatStore } = await import('@/stores/secretaryChat')
+  const chat = useSecretaryChatStore()
+  chat.setMessages([])
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: { initialMode: 'secretary' },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  expect(String(wrapper.get('[data-testid="secretary-task-panel"]').attributes('style') || '')).toContain('display: none')
+
+  const deliverables = wrapper.findComponent({ name: 'SecretaryTaskDeliverables' })
+  expect(deliverables.exists()).toBe(true)
+  deliverables.vm.$emit('recovery-snapshot', [
+    {
+      taskId: 't1',
+      attemptId: 'a1',
+      title: 'task1',
+      status: 'failed',
+      summary: 's1',
+      observer: { next_steps: 'n1', questions_for_user: ['q1'] },
+    },
+  ])
+  await flushPromises()
+
+  expect(chat.messages.length).toBe(0)
+  expect(String(wrapper.get('[data-testid="secretary-task-panel"]').attributes('style') || '')).not.toContain('display: none')
+
+  wrapper.unmount()
+})

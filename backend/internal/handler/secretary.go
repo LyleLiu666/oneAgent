@@ -39,6 +39,7 @@ func NewSecretaryHandler(rt *runtime.Runtime) *SecretaryHandler {
 		Sessions:                 rt.Sessions,
 		Tasks:                    rt.Tasks,
 		Runner:                   rt.TaskRunner,
+		Settings:                 rt.Settings,
 		Memory:                   rt.Memory,
 		DefaultWorkspacePoolRoot: defaultPoolRoot,
 		ResolveModel: func(ctx context.Context, userID, modelID string) (llm.Client, string, error) {

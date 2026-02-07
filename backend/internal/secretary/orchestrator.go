@@ -23,6 +23,7 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/model"
 	"github.com/liu_y/oneAgent/backend/internal/permissions"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
+	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/sessioncompress"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/taskqueue"
@@ -38,6 +39,7 @@ type Orchestrator struct {
 	Tasks    *taskqueue.Store
 	Runner   *taskqueue.TaskRunner
 	Memory   *memorydb.DB
+	Settings *settingsdb.DB
 
 	ResolveModel ResolveModelFunc
 
@@ -394,8 +396,8 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		}, nil
 	}
 
-	// SW: dispatch planning + worker coordination (best-effort).
-	plan, resolvedModelID, err := o.generateDispatchPlan(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
+	// SU: plan + short-path direct answers (best-effort).
+	plan, resolvedModelID, err := o.generateTriagePlanAsSU(ctx, userID, sessionID, sessionWorkspace, progressSnapshot, session.Metadata, newUserMsgs)
 	if err != nil {
 		return TriageResult{}, err
 	}
@@ -413,9 +415,15 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 		}
 	}
 
-	dispatch, err := o.dispatchPlanAsSW(ctx, userID, sessionID, sessionWorkspace, plan)
-	if err != nil {
-		return TriageResult{}, err
+	dispatch := dispatchResult{
+		Questions: append([]string{}, plan.Questions...),
+	}
+	if len(plan.Tasks) > 0 || len(plan.TaskActions) > 0 {
+		var dispatchErr error
+		dispatch, dispatchErr = o.dispatchPlanAsSW(ctx, userID, sessionID, sessionWorkspace, plan)
+		if dispatchErr != nil {
+			return TriageResult{}, dispatchErr
+		}
 	}
 	createdTaskIDs := dispatch.CreatedTaskIDs
 	canceledTaskIDs := dispatch.CanceledTaskIDs
@@ -424,13 +432,7 @@ func (o *Orchestrator) Triage(ctx context.Context, userID, sessionID string, cur
 	workspacesCreated := dispatch.WorkspacesCreated
 
 	summary := buildTriageSummary(plan.SummaryMessage, len(createdTaskIDs), questions)
-	if len(createdTaskIDs) > 0 || len(canceledTaskIDs) > 0 || len(resumedTaskIDs) > 0 || len(questions) > 0 {
-		if suSummary, _, suErr := o.generateSUReport(ctx, userID, sessionID, sessionWorkspace, session.Metadata, newUserMsgs, plan, dispatch, progressSnapshot); suErr == nil {
-			if trimmed := strings.TrimSpace(suSummary); trimmed != "" {
-				summary = trimmed
-			}
-		}
-	}
+	// Note: the SU triage plan is already user-facing. Avoid a second LLM call unless needed.
 
 	summaryMsg, err := o.Sessions.AppendMessage(sessionID, model.ChatMessage{
 		Role:    model.MessageRoleAssistant,
@@ -1667,13 +1669,14 @@ func extractAllTagBlocks(text string, tag string) []string {
 	return out
 }
 
-func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, sessionID, sessionWorkspace, progressSnapshot string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
+func (o *Orchestrator) generateTriagePlanAsSU(ctx context.Context, userID, sessionID, sessionWorkspace, progressSnapshot string, metadata model.JSONB, msgs []model.ChatMessage) (triagePlan, string, error) {
 	if o.ResolveModel == nil {
 		return triagePlan{}, "", errors.New("ResolveModel is required")
 	}
 	if o.Sessions == nil {
 		return triagePlan{}, "", errors.New("sessions store not initialized")
 	}
+
 	modelID := ""
 	if v, ok := metadata["model_id"].(string); ok {
 		modelID = strings.TrimSpace(v)
@@ -1695,12 +1698,12 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 		return triagePlan{}, "", errors.New("no messages to triage")
 	}
 
-	sys := strings.TrimSpace(secretaryDispatchSystemPromptSW)
+	sys := strings.TrimSpace(secretaryTriageSystemPromptSU)
 	factory := agent.NewFactory()
 	policySnapshot := permissions.ResolveSnapshot(userID, secretaryReadOnlyPolicy(), time.Now())
 	agentRuntime, err := factory.Build(agent.BuildRequest{
 		Spec: agent.AgentSpec{
-			ID:           "secretary-sw",
+			ID:           "secretary-su-triage",
 			BaseOverride: sys,
 			ToolIDs:      secretaryDefaultToolIDs(policySnapshot),
 			ToolProtocol: agent.ToolProtocolXML,
@@ -1712,6 +1715,7 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 		return triagePlan{}, "", err
 	}
 	sys = agentRuntime.FullSystemPrompt()
+
 	sessionWorkspace = strings.TrimSpace(sessionWorkspace)
 	workspaceHint := "(unset)"
 	if sessionWorkspace != "" {
@@ -1721,7 +1725,7 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	userPrompt := "Context:\n- session_workspace_root: " + workspaceHint + "\n\n以下是用户自上次归并以来的消息列表（按时间顺序）：\n" + input
 
 	turnContextParts := make([]string, 0, 2)
-	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SW", "SU")); injected != "" {
+	if injected := strings.TrimSpace(o.buildMemorySyncPrompt(ctx, userID, "SU", "SW")); injected != "" {
 		turnContextParts = append(turnContextParts, injected)
 	}
 	if snap := strings.TrimSpace(progressSnapshot); snap != "" {
@@ -1733,106 +1737,23 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 	temp := 0.2
 	maxTokens := 1500
 	requestMsgs := []llm.ChatMessage{llm.BuildSystemMessage(sys)}
-
-	swSessionID := deriveSWSessionID(sessionID)
-	if swSessionID != "" {
-		_, _ = o.Sessions.GetOrCreateSession(swSessionID, userID, secretaryModuleSW, "Secretary(Work)")
-		_, swMsgs, _ := o.Sessions.GetSessionWithMessages(swSessionID, userID)
-
-		lastSummaryIdx := -1
-		lastSummaryContent := ""
-		for i := len(swMsgs) - 1; i >= 0; i-- {
-			msg := swMsgs[i]
-			if msg.Type != model.MessageTypeText || msg.Role != model.MessageRoleAssistant {
-				continue
-			}
-			if strings.HasPrefix(strings.TrimSpace(msg.Content), sessioncompress.DefaultSummaryPrefix) {
-				lastSummaryIdx = i
-				lastSummaryContent = msg.Content
-				break
-			}
-		}
-
-		// Prefer a stable summary + tail for KV-cache. Keep SW stored messages append-only:
-		// never rewrite or renumber IDs.
-		if lastSummaryIdx >= 0 {
-			requestMsgs = append(requestMsgs, llm.BuildSessionSummaryMessage(lastSummaryContent))
-			if lastSummaryIdx+1 < len(swMsgs) {
-				requestMsgs = append(requestMsgs, buildTextLLMHistory(swMsgs[lastSummaryIdx+1:])...)
-			}
-		} else {
-			requestMsgs = append(requestMsgs, buildTextLLMHistory(swMsgs)...)
-		}
-
-		// Soft compression for the SW prompt (no ReplaceMessages). If the prompt is too large,
-		// append a new stable summary message and rebuild the prompt as:
-		// system + summary + turn context + current user prompt.
-		cOpts := sessioncompress.DefaultOptions()
-		cOpts.SummaryPrefix = sessioncompress.DefaultSummaryPrefix
-		llmMessages := append([]llm.ChatMessage{}, requestMsgs...)
-		if hasTurnCtx {
-			llmMessages = append(llmMessages, turnCtxMsg)
-		}
-		llmMessages = append(llmMessages, llm.BuildUserMessage(userPrompt))
-		if sessioncompress.ApproximateContextRunes(llmMessages) > cOpts.MaxContextRunes {
-			base := swMsgs
-			if lastSummaryIdx >= 0 && lastSummaryIdx < len(swMsgs) {
-				base = swMsgs[lastSummaryIdx:]
-			}
-			toSummarize, _ := sessioncompress.SplitForCompression(base, 0)
-			if len(toSummarize) > 0 {
-				input := sessioncompress.FormatForSummaryInput(toSummarize, cOpts)
-				summary, sumErr := sessioncompress.BuildCompressionSummary(ctx, client, input)
-				if sumErr == nil {
-					summary = strings.TrimSpace(summary)
-				}
-				if summary == "" {
-					summary = "流水账:\n- （摘要生成为空）\n\nFindings:\n- （摘要生成为空）"
-				}
-
-				summaryHeader := fmt.Sprintf("%s已压缩 %d 条历史消息\n\n", cOpts.SummaryPrefix, len(toSummarize))
-				summaryContent := summaryHeader + summary
-
-				// Best-effort: persist the SW summary as an append-only internal message.
-				_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
-					Role:    model.MessageRoleAssistant,
-					Type:    model.MessageTypeText,
-					Content: summaryContent,
-				})
-
-				requestMsgs = []llm.ChatMessage{
-					llm.BuildSystemMessage(sys),
-					llm.BuildSessionSummaryMessage(summaryContent),
-				}
-				if hasTurnCtx {
-					requestMsgs = append(requestMsgs, turnCtxMsg)
-				}
-				requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
-			} else {
-				requestMsgs = sessioncompress.BuildFallbackMessages(swMsgs, llmMessages, errors.New("SW prompt too large"), cOpts)
-			}
-		} else {
-			requestMsgs = llmMessages
-		}
-	} else {
-		if hasTurnCtx {
-			requestMsgs = append(requestMsgs, turnCtxMsg)
-		}
-		requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
+	if hasTurnCtx {
+		requestMsgs = append(requestMsgs, turnCtxMsg)
 	}
+	requestMsgs = append(requestMsgs, llm.BuildUserMessage(userPrompt))
 
 	tagsInstruction := buildSecretaryTriagePlanTagsInstruction()
 
-	var (
-		plan triagePlan
-		meta agent.StructuredOutputMeta
-	)
+	var plan triagePlan
 	if agentRuntime.ToolProtocol == agent.ToolProtocolXML && len(agentRuntime.ToolDefs) > 0 {
 		loopMsgs := append([]llm.ChatMessage(nil), requestMsgs...)
 		loopMsgs = append(loopMsgs, llm.BuildUserMessage(tagsInstruction))
 
 		toolCtx := toolcalling.ContextWithChatToolMaxSteps(ctx, secretaryToolMaxSteps)
 		toolCtx = tool.ContextWithPolicySnapshot(toolCtx, policySnapshot)
+		if o != nil && o.Settings != nil {
+			toolCtx = tool.ContextWithSettingsDB(toolCtx, o.Settings)
+		}
 		if ws := strings.TrimSpace(sessionWorkspace); ws != "" {
 			toolCtx = tool.ContextWithWorkspace(toolCtx, tool.WorkspaceConfig{
 				Enabled: true,
@@ -1840,82 +1761,27 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 			})
 		}
 
-		observeStep := func(rec toolxml.StepRecord) {
-			swSessionID := deriveSWSessionID(sessionID)
-			if swSessionID == "" {
-				return
-			}
-			if o == nil || o.Sessions == nil {
-				return
-			}
-
-			type toolCallEnvelope struct {
-				Protocol string         `json:"protocol"`
-				Calls    []llm.ToolCall `json:"tool_calls,omitempty"`
-			}
-			type toolResultEnvelope struct {
-				Protocol string               `json:"protocol"`
-				Results  []toolxml.ToolResult `json:"results,omitempty"`
-			}
-
-			callBody := ""
-			if len(rec.ToolCalls) > 0 {
-				if b, err := json.Marshal(toolCallEnvelope{Protocol: "xml", Calls: rec.ToolCalls}); err == nil {
-					callBody = string(b)
-				}
-			}
-			var callID *uint
-			if strings.TrimSpace(callBody) != "" {
-				if msg, err := o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
-					Role:    model.MessageRoleAssistant,
-					Type:    model.MessageTypeToolCall,
-					Content: callBody,
-				}); err == nil && msg.ID != 0 {
-					callID = &msg.ID
-				}
-			}
-
-			resultBody := ""
-			if len(rec.ToolResults) > 0 {
-				if b, err := json.Marshal(toolResultEnvelope{Protocol: "xml", Results: rec.ToolResults}); err == nil {
-					resultBody = string(b)
-				}
-			}
-			if strings.TrimSpace(resultBody) != "" {
-				toolMsg := model.ChatMessage{
-					Role:    model.MessageRoleTool,
-					Type:    model.MessageTypeToolResult,
-					Content: resultBody,
-				}
-				if callID != nil {
-					toolMsg.ParentID = callID
-				}
-				_, _ = o.Sessions.AppendMessage(swSessionID, toolMsg)
-			}
-		}
-
-		out, loopErr := toolxml.RunLoop(
-			toolCtx,
-			client,
-			loopMsgs,
+			out, loopErr := toolxml.RunLoop(
+				toolCtx,
+				client,
+				loopMsgs,
 			&llm.ChatCompletionOptions{
 				Temperature: &temp,
 				MaxTokens:   &maxTokens,
 			},
-			agentRuntime.ToolDefs,
-			userID,
-			nil,
-			nil,
-			nil,
-			nil,
-			observeStep,
-			nil,
-			nil,
-		)
+				agentRuntime.ToolDefs,
+				userID,
+				nil,
+				nil,
+				nil,
+				nil,
+				nil,
+				nil,
+				nil,
+			)
 		if loopErr == nil {
 			if p, ok := parseSecretaryTriagePlanTags(out); ok {
 				plan = p
-				meta = agent.StructuredOutputMeta{Mode: agent.StructuredOutputModeTags}
 			}
 		}
 	}
@@ -1924,7 +1790,7 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 		toolSpec := buildSecretaryTriagePlanTool()
 		toolInstruction := buildSecretaryTriagePlanToolInstruction()
 
-		parsed, parsedMeta, err := agent.RequestStructuredOutput[triagePlan](ctx, client, requestMsgs, &llm.ChatCompletionOptions{
+		parsed, _, err := agent.RequestStructuredOutput[triagePlan](ctx, client, requestMsgs, &llm.ChatCompletionOptions{
 			Temperature: &temp,
 			MaxTokens:   &maxTokens,
 		}, agent.StructuredOutputSpec[triagePlan]{
@@ -1953,31 +1819,9 @@ func (o *Orchestrator) generateDispatchPlan(ctx context.Context, userID, session
 			return triagePlan{}, "", err
 		}
 		plan = parsed
-		meta = parsedMeta
 	}
 
-	// Best-effort: record SW decision into the SW session (not user-facing).
-	if swSessionID := deriveSWSessionID(sessionID); swSessionID != "" {
-		_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
-			Role:    model.MessageRoleUser,
-			Type:    model.MessageTypeText,
-			Content: strings.TrimSpace("triage_input:\n" + input),
-		})
-		decision := ""
-		if b, err := json.MarshalIndent(plan, "", "  "); err == nil && len(b) > 0 {
-			decision = string(b)
-		}
-		if decision == "" {
-			decision = fmt.Sprintf("intent=%s\nsummary_message=%s\n(mode=%s)", strings.TrimSpace(plan.Intent), strings.TrimSpace(plan.SummaryMessage), meta.Mode)
-		}
-
-		_, _ = o.Sessions.AppendMessage(swSessionID, model.ChatMessage{
-			Role:    model.MessageRoleAssistant,
-			Type:    model.MessageTypeText,
-			Content: decision,
-		})
-	}
-
+	_ = sessionID // reserved for future trace hooks (best-effort)
 	return plan, resolvedID, nil
 }
 
@@ -2899,11 +2743,11 @@ ONEAGENT_SECRETARY_SU_REPORT
 请根据输入的上下文信息，运用上述思维框架进行决策与汇报。直接输出内容，无需标题或解释。
 `
 
-const secretaryDispatchSystemPromptSW = `
-ONEAGENT_SECRETARY_TRIAGE
-# Role: 智能交付经理 (SW - Secretary Work)
-你是用户的项目交付经理。你的核心职责是将用户模糊、多线程的需求，转化为精准的后台执行计划。
-你是一个“只读”的高级分析师，你拥有查看代码、搜索和逻辑推理的能力，但所有实质性的“写/改/跑”操作必须通过派发任务（Tasks）交给后台 Worker 执行。
+const secretaryTriageSystemPromptSU = `
+ONEAGENT_SECRETARY_SU_TRIAGE
+# Role: 用户的得力业务特助 (SU - Secretary User)
+你是用户注意力的守护者。你的目标是**用最小成本把事情推进到可交付**。
+你拥有“只读”的高级分析能力（查看代码、搜索、推理）；任何涉及新建文件、修改代码、删除资源、跑耗时测试等变更性操作，都必须通过派发后台任务（Tasks）交给 Worker 执行。
 
 # Output Protocol (最高优先级)
 - 绝对禁止输出任何自然语言闲聊或 Markdown 正文。
@@ -2917,8 +2761,8 @@ ONEAGENT_SECRETARY_TRIAGE
    - 一句话纠偏：在 summary_message 中告知你的决定（“我将默认按 X 方案推进...”），让用户如果不满意只需回复一句即可修正。
 
 2. 经济型排查 (Budget Awareness)
-   - 你只有 5 步工具调用预算。不要试图遍历所有信息。
-   - 仅在事实极度模糊且影响下一步决策时才查；否则依赖现有上下文或默认假设直接派单。
+   - 你只有 5 步工具调用预算。优先用只读工具拿到关键证据并**直接回复**，避免不必要的派工/交接成本。
+   - 仅当需求涉及写/改/跑或明显超出预算时，才派发 tasks[] 给 Worker。
 
 3. 读写分权 (Read/Write Separation)
    - 你只读：用工具看代码、查日志、读文档。

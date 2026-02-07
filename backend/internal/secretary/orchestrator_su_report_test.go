@@ -12,7 +12,6 @@ import (
 
 type suReportStreamClient struct {
 	streamResponses []string
-	chatResponses   []string
 
 	streamCalls [][]llm.ChatMessage
 	chatCalls   [][]llm.ChatMessage
@@ -22,12 +21,7 @@ func (c *suReportStreamClient) ChatCompletion(ctx context.Context, messages []ll
 	_ = ctx
 	_ = opts
 	c.chatCalls = append(c.chatCalls, messages)
-	if len(c.chatResponses) == 0 {
-		return "", nil
-	}
-	out := c.chatResponses[0]
-	c.chatResponses = c.chatResponses[1:]
-	return out, nil
+	return "", nil
 }
 
 func (c *suReportStreamClient) ChatCompletionStream(ctx context.Context, messages []llm.ChatMessage, opts *llm.ChatCompletionOptions, callback llm.StreamCallback) error {
@@ -42,7 +36,7 @@ func (c *suReportStreamClient) ChatCompletionStream(ctx context.Context, message
 	return callback(out)
 }
 
-func TestTriage_UsesSUReportWhenAvailable(t *testing.T) {
+func TestTriage_BuildsSummaryFromPlan_WhenQuestionsExist(t *testing.T) {
 	sessions, err := sessionstore.New(t.TempDir())
 	if err != nil {
 		t.Fatalf("new sessionstore: %v", err)
@@ -64,7 +58,6 @@ func TestTriage_UsesSUReportWhenAvailable(t *testing.T) {
   </questions>
 </secretary_triage_plan>`,
 		},
-		chatResponses: []string{"SU_OK"},
 	}
 
 	o := &Orchestrator{
@@ -84,16 +77,13 @@ func TestTriage_UsesSUReportWhenAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Triage: %v", err)
 	}
-	if strings.TrimSpace(got.SummaryMessage) != "SU_OK" {
-		t.Fatalf("expected SU report to be used, got %q", got.SummaryMessage)
+	if !strings.Contains(got.SummaryMessage, "sw_summary") {
+		t.Fatalf("expected summary to include plan summary, got %q", got.SummaryMessage)
 	}
-	if len(client.chatCalls) == 0 {
-		t.Fatalf("expected ChatCompletion to be called for SU report")
+	if !strings.Contains(got.SummaryMessage, "请把仓库根目录路径发我") {
+		t.Fatalf("expected summary to include question, got %q", got.SummaryMessage)
 	}
-	if len(client.chatCalls[0]) == 0 || client.chatCalls[0][0].Role != "system" {
-		t.Fatalf("expected first SU report message to be system prompt, got %+v", client.chatCalls[0])
-	}
-	if !strings.Contains(client.chatCalls[0][0].Content, "ONEAGENT_SECRETARY_SU_REPORT") {
-		t.Fatalf("expected SU system prompt to include marker, got %q", client.chatCalls[0][0].Content)
+	if len(client.chatCalls) != 0 {
+		t.Fatalf("expected triage to not require non-streaming ChatCompletion, got %d calls", len(client.chatCalls))
 	}
 }

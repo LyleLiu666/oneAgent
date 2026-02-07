@@ -26,7 +26,7 @@ func (c scriptedClient) ChatCompletion(ctx context.Context, messages []llm.ChatM
 	switch {
 	case strings.Contains(sys, "会话压缩器"):
 		return "流水账:\n- 压缩测试\n\nFindings:\n- ok", nil
-	case strings.Contains(sys, "ONEAGENT_SECRETARY_TRIAGE"):
+	case strings.Contains(sys, "ONEAGENT_SECRETARY_SU_TRIAGE"):
 		return `{"summary_message":"ok","tasks":[],"questions":[]}`, nil
 	case strings.Contains(sys, "ONEAGENT_SECRETARY_ACK"):
 		return "收到", nil
@@ -45,7 +45,7 @@ func (c scriptedClient) ChatCompletionWithTools(ctx context.Context, messages []
 	}
 
 	switch {
-	case strings.Contains(sys, "ONEAGENT_SECRETARY_TRIAGE"):
+	case strings.Contains(sys, "ONEAGENT_SECRETARY_SU_TRIAGE"):
 		return llm.ChatCompletionResult{
 			ToolCalls: []llm.ToolCall{
 				{
@@ -164,11 +164,16 @@ func TestOrchestrator_CompressSW_DoesNotTouchSU(t *testing.T) {
 	_, _ = store.AppendMessage(swSessionID, model.ChatMessage{Role: model.MessageRoleAssistant, Type: model.MessageTypeText, Content: big})
 	_, _ = store.AppendMessage(swSessionID, model.ChatMessage{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: big})
 
-	plan, _, err := o.generateDispatchPlan(context.Background(), "local", suSessionID, "", "", model.JSONB{}, []model.ChatMessage{
+	_, beforeSW, err := store.GetSessionWithMessages(swSessionID, "local")
+	if err != nil {
+		t.Fatalf("load sw messages before: %v", err)
+	}
+
+	plan, _, err := o.generateTriagePlanAsSU(context.Background(), "local", suSessionID, "", "", model.JSONB{}, []model.ChatMessage{
 		{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "do it"},
 	})
 	if err != nil {
-		t.Fatalf("generateDispatchPlan: %v", err)
+		t.Fatalf("generateTriagePlanAsSU: %v", err)
 	}
 	if strings.TrimSpace(plan.SummaryMessage) != "ok" {
 		t.Fatalf("expected plan summary ok, got %q", plan.SummaryMessage)
@@ -186,20 +191,7 @@ func TestOrchestrator_CompressSW_DoesNotTouchSU(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load sw messages: %v", err)
 	}
-	if len(swMsgs) != 8 {
-		t.Fatalf("expected SW to append a summary + triage input + decision, got %d messages", len(swMsgs))
-	}
-	if strings.HasPrefix(strings.TrimSpace(swMsgs[0].Content), sessioncompress.DefaultSummaryPrefix) {
-		t.Fatalf("expected SW to remain append-only (no rewrite/compression)")
-	}
-	hasSummary := false
-	for _, msg := range swMsgs {
-		if msg.Role == model.MessageRoleAssistant && msg.Type == model.MessageTypeText && strings.HasPrefix(strings.TrimSpace(msg.Content), sessioncompress.DefaultSummaryPrefix) {
-			hasSummary = true
-			break
-		}
-	}
-	if !hasSummary {
-		t.Fatalf("expected SW to append a compression summary message")
+	if len(swMsgs) != len(beforeSW) {
+		t.Fatalf("expected SW to remain unchanged, got %d messages (before=%d)", len(swMsgs), len(beforeSW))
 	}
 }

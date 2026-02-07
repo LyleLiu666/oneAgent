@@ -408,6 +408,7 @@ const refresh = async () => {
 
 const recoverySubmittingTaskId = ref<string>('')
 const recoveryError = ref<string>('')
+const recoveryNotes = ref<Record<string, string>>({})
 
 const onFocus = (card: RecoveryCard) => {
   if (!card) return
@@ -420,10 +421,15 @@ const onResume = async (card: RecoveryCard) => {
   if (!id || !attemptID) return
   if (recoverySubmittingTaskId.value) return
 
+  const notesKey = makeDismissKey(id, attemptID)
+  const notes = String(recoveryNotes.value[notesKey] || '').trim()
+
   recoverySubmittingTaskId.value = id
   recoveryError.value = ''
   try {
-    await resumeTask(id, { source: 'secretary-recovery' })
+    const payload: { source: string; review_notes?: string } = { source: 'secretary-recovery' }
+    if (notes) payload.review_notes = notes
+    await resumeTask(id, payload)
     emit('recovery-action', {
       action: 'resume',
       taskId: id,
@@ -431,6 +437,11 @@ const onResume = async (card: RecoveryCard) => {
       title: String(card?.task?.title || '').trim() || undefined,
       status: String(card?.attempt?.status || '').trim() || undefined,
     })
+    if (notesKey && recoveryNotes.value[notesKey] !== undefined) {
+      const next = { ...recoveryNotes.value }
+      delete next[notesKey]
+      recoveryNotes.value = next
+    }
     await refresh()
   } catch (e: any) {
     const msg = e?.data?.error || e?.message || 'Failed to resume task.'
@@ -444,6 +455,12 @@ const onDismiss = (card: RecoveryCard) => {
   const id = String(card?.task?.id || '').trim()
   const attemptID = String(card?.attempt?.id || '').trim()
   if (!id || !attemptID) return
+  const notesKey = makeDismissKey(id, attemptID)
+  if (notesKey && recoveryNotes.value[notesKey] !== undefined) {
+    const next = { ...recoveryNotes.value }
+    delete next[notesKey]
+    recoveryNotes.value = next
+  }
   dismissAttempt(id, attemptID)
   emit('recovery-action', {
     action: 'dismiss',
@@ -719,10 +736,33 @@ onUnmounted(() => {
                 {{ card.attempt.summary }}
               </div>
               <div
+                v-if="
+                  Array.isArray(card.attempt.observer?.questions_for_user) &&
+                  card.attempt.observer?.questions_for_user?.length
+                "
+                class="rounded-xl border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-300 whitespace-pre-wrap"
+              >
+                <div class="text-[11px] font-semibold text-surface-200">需要你确认</div>
+                <ul class="mt-2 space-y-1">
+                  <li v-for="q in card.attempt.observer!.questions_for_user" :key="q">{{ q }}</li>
+                </ul>
+              </div>
+              <div
                 v-if="card.attempt.observer?.next_steps"
                 class="rounded-xl border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-300 whitespace-pre-wrap"
               >
                 {{ card.attempt.observer.next_steps }}
+              </div>
+              <div class="rounded-xl border border-surface-800/60 bg-surface-950/40 p-3" @click.stop>
+                <div class="text-[11px] text-surface-500">你的补充/决定（可选）</div>
+                <textarea
+                  v-model="recoveryNotes[makeDismissKey(card.task.id, card.attempt.id)]"
+                  data-testid="secretary-task-recovery-notes"
+                  rows="2"
+                  class="mt-2 w-full resize-none rounded-lg border border-surface-800/60 bg-surface-950/40 px-3 py-2 text-xs text-surface-200 placeholder:text-surface-600 focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                  placeholder="例如：继续用方案 A；不要改动 X；把输出写到 Y…"
+                  @click.stop
+                />
               </div>
             </div>
 

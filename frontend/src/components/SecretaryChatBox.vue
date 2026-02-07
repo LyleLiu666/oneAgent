@@ -18,7 +18,6 @@ import {
   chooseWorkspaceDir,
   getConfig,
   createTask,
-  resumeTask,
   appendSecretaryInboxMessage,
   secretaryTriage,
   getSecretaryState,
@@ -100,7 +99,6 @@ const taskHandoffSuggestOpen = ref(false)
 
 const secretaryCursorMessageId = ref(0)
 const secretaryInboxSubmitting = ref(false)
-const secretaryRecoverySubmitting = ref(false)
 const secretaryTriageSubmitting = ref(false)
 const secretaryTriageQueued = ref(false)
 let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
@@ -110,24 +108,6 @@ const secretaryPendingQuestionsModalOpen = ref(false)
 const secretaryResetConfirmOpen = ref(false)
 const secretaryResetSubmitting = ref(false)
 const secretaryResetError = ref('')
-
-type SecretaryRecoveryItem = {
-  taskId: string
-  attemptId: string
-  title?: string
-  status?: string
-  summary?: string
-  error?: string
-  observer?: {
-    reason?: string
-    next_steps?: string
-    questions_for_user?: string[]
-  }
-}
-
-const secretaryRecoveryQueue = ref<SecretaryRecoveryItem[]>([])
-const secretaryRecoverySeenKeys = ref<Set<string>>(new Set())
-const secretaryRecoveryAwaitingReply = ref(false)
 const secretaryRecoveryFocusedKey = ref('')
 let secretaryRecoveryFocusPersistTimer: ReturnType<typeof setTimeout> | undefined
 let secretaryRecoveryFocusLastPersistedKey = ''
@@ -433,7 +413,7 @@ const canSend = computed(
     if (loadingHistory.value) return false
     if (workspaceOnboardingBlocking.value) return false
     if (!isSecretaryMode.value && chatStore.isLoading) return false
-    if (isSecretaryMode.value && (secretaryInboxSubmitting.value || secretaryRecoverySubmitting.value)) return false
+    if (isSecretaryMode.value && secretaryInboxSubmitting.value) return false
     return true
   }
 )
@@ -978,9 +958,6 @@ const startNewSession = () => {
   secretaryPendingQuestionsModalOpen.value = false
   secretaryTriageSubmitting.value = false
   secretaryTriageQueued.value = false
-  secretaryRecoveryQueue.value = []
-  secretaryRecoverySeenKeys.value = new Set()
-  secretaryRecoveryAwaitingReply.value = false
   secretaryRecoveryFocusedKey.value = ''
   secretaryRecoveryFocusLastPersistedKey = ''
   if (secretaryRecoveryFocusPersistTimer) {
@@ -1822,13 +1799,6 @@ const truncateForChat = (raw: any, maxLen: number) => {
   return `${text.slice(0, Math.max(0, maxLen - 1))}…`
 }
 
-const recoveryKeyOf = (item: SecretaryRecoveryItem) => {
-  const tid = String(item?.taskId || '').trim()
-  const aid = String(item?.attemptId || '').trim()
-  if (!tid || !aid) return ''
-  return `${tid}:${aid}`
-}
-
 const schedulePersistRecoveryFocus = () => {
   if (!isSecretaryMode.value) return
 
@@ -1856,134 +1826,39 @@ const schedulePersistRecoveryFocus = () => {
   }, 120)
 }
 
-const enqueueRecoveryItems = (rawItems: any) => {
-  const items = Array.isArray(rawItems) ? rawItems : []
-  if (items.length === 0) return
-
-  const nextQueue = [...secretaryRecoveryQueue.value]
-  const seen = new Set(secretaryRecoverySeenKeys.value)
-
-  for (const it of items) {
-    const item: SecretaryRecoveryItem = {
-      taskId: String((it as any)?.taskId || (it as any)?.task_id || '').trim(),
-      attemptId: String((it as any)?.attemptId || (it as any)?.attempt_id || '').trim(),
-      title: String((it as any)?.title || '').trim(),
-      status: String((it as any)?.status || '').trim(),
-      summary: typeof (it as any)?.summary === 'string' ? (it as any).summary : undefined,
-      error: typeof (it as any)?.error === 'string' ? (it as any).error : undefined,
-      observer: (it as any)?.observer,
-    }
-
-    const key = recoveryKeyOf(item)
-    if (!key) continue
-    if (seen.has(key)) continue
-    seen.add(key)
-    nextQueue.push(item)
-  }
-
-  secretaryRecoverySeenKeys.value = seen
-  secretaryRecoveryQueue.value = nextQueue
-  if (!secretaryRecoveryFocusedKey.value && nextQueue.length > 0) {
-    const firstKey = recoveryKeyOf(nextQueue[0])
-    if (firstKey) secretaryRecoveryFocusedKey.value = firstKey
-    schedulePersistRecoveryFocus()
-  }
-
-  const focused = String(secretaryRecoveryFocusedKey.value || '').trim()
-  if (focused) {
-    const idx = nextQueue.findIndex((i) => recoveryKeyOf(i) === focused)
-    if (idx > 0) {
-      const reordered = [...nextQueue]
-      const [selected] = reordered.splice(idx, 1)
-      reordered.unshift(selected)
-      secretaryRecoveryQueue.value = reordered
-    }
-  }
-}
-
-const formatRecoveryAsk = (item: SecretaryRecoveryItem, otherTitles: string[]) => {
-  const title = String(item?.title || '').trim() || '任务'
-  const status = String(item?.status || '').trim()
-
-  const reason = truncateForChat(item?.error || item?.observer?.reason || item?.summary, 180)
-  const nextSteps = truncateForChat(item?.observer?.next_steps, 240)
-  const questions = Array.isArray(item?.observer?.questions_for_user)
-    ? item.observer!.questions_for_user!.map((q) => String(q || '').trim()).filter(Boolean)
-    : []
-
-  const lines: string[] = []
-  lines.push(`需要你确认才能继续：${title}`)
-  if (status) lines.push(`状态：${status}`)
-  if (reason) lines.push(`原因：${reason}`)
-  if (questions.length > 0) {
-    lines.push('需要你确认：')
-    for (const q of questions) lines.push(`- ${truncateForChat(q, 120)}`)
-  }
-  if (nextSteps) lines.push(`下一步：${nextSteps}`)
-  if (otherTitles.length > 0) {
-    lines.push(`其他待处理：${otherTitles.map((t) => truncateForChat(t, 40)).join('、')}`)
-  }
-  lines.push('直接回复你的补充/决定，我会把它作为 review_notes 继续推进。')
-  lines.push('证据入口在上方「需要处理」面板（更多 → Findings/Trace/Diff）。')
-  return lines.join('\n')
-}
-
-const maybeStartRecoveryConversation = () => {
-  if (!isSecretaryMode.value) return
-  if (secretaryRecoverySubmitting.value) return
-  if (secretaryRecoveryQueue.value.length === 0) return
-  if (secretaryRecoveryAwaitingReply.value) return
-
-  const item = secretaryRecoveryQueue.value[0]
-  if (!item) return
-  const others = secretaryRecoveryQueue.value
-    .slice(1)
-    .map((i) => String(i?.title || '').trim())
-    .filter(Boolean)
-    .slice(0, 3)
-  const ask = formatRecoveryAsk(item, others)
-  chatStore.addMessage({
-    id: Date.now(),
-    role: 'assistant',
-    type: 'text',
-    content: ask,
-    createdAt: new Date(),
-    isStreaming: false,
-  })
-  secretaryRecoveryAwaitingReply.value = true
-  scrollToBottom()
+const normalizeRecoveryKey = (raw: any): string => {
+  const tid = String((raw as any)?.taskId || (raw as any)?.task_id || '').trim()
+  const aid = String((raw as any)?.attemptId || (raw as any)?.attempt_id || '').trim()
+  if (!tid || !aid) return ''
+  return `${tid}:${aid}`
 }
 
 const onRecoverySnapshot = (items: any) => {
-  enqueueRecoveryItems(items)
-  maybeStartRecoveryConversation()
+  if (!isSecretaryMode.value) return
+  secretaryTaskPanelVisible.value = true
+
+  if (String(secretaryRecoveryFocusedKey.value || '').trim()) return
+
+  const list = Array.isArray(items) ? items : []
+  if (list.length === 0) return
+
+  const key = normalizeRecoveryKey(list[0])
+  if (!key) return
+  secretaryRecoveryFocusedKey.value = key
+  schedulePersistRecoveryFocus()
 }
 
 const onTaskNeedsAttention = (item: any) => {
-  enqueueRecoveryItems([item])
-  // New item wins focus (latest wins).
+  if (!isSecretaryMode.value) return
+  secretaryTaskPanelVisible.value = true
   onRecoveryFocus(item)
-  maybeStartRecoveryConversation()
 }
 
 const onRecoveryFocus = (raw: any) => {
   if (!isSecretaryMode.value) return
-
-  const tid = String((raw as any)?.taskId || (raw as any)?.task_id || '').trim()
-  const aid = String((raw as any)?.attemptId || (raw as any)?.attempt_id || '').trim()
-  if (!tid || !aid) return
-
-  const key = `${tid}:${aid}`
-  const idx = secretaryRecoveryQueue.value.findIndex((i) => recoveryKeyOf(i) === key)
-  if (idx < 0) return
-
+  const key = normalizeRecoveryKey(raw)
+  if (!key) return
   secretaryRecoveryFocusedKey.value = key
-  if (idx > 0) {
-    const next = [...secretaryRecoveryQueue.value]
-    const [selected] = next.splice(idx, 1)
-    next.unshift(selected)
-    secretaryRecoveryQueue.value = next
-  }
   schedulePersistRecoveryFocus()
 }
 
@@ -1991,130 +1866,13 @@ const onRecoveryAction = (raw: any) => {
   if (!isSecretaryMode.value) return
 
   const action = String((raw as any)?.action || '').trim()
-  const taskId = String((raw as any)?.taskId || (raw as any)?.task_id || '').trim()
-  const attemptId = String((raw as any)?.attemptId || (raw as any)?.attempt_id || '').trim()
-  if (!action || !taskId || !attemptId) return
-
-  const title = String((raw as any)?.title || '').trim() || '任务'
-  const shortID = taskId.slice(0, 8)
-
-  const key = `${taskId}:${attemptId}`
-  const nextQueue = secretaryRecoveryQueue.value.filter((i) => recoveryKeyOf(i) !== key)
-  secretaryRecoveryQueue.value = nextQueue
+  const key = normalizeRecoveryKey(raw)
+  if (!action || !key) return
 
   const focused = String(secretaryRecoveryFocusedKey.value || '').trim()
   if (focused && focused === key) {
-    const nextKey = nextQueue.length > 0 ? recoveryKeyOf(nextQueue[0]) : ''
-    secretaryRecoveryFocusedKey.value = nextKey
-  }
-  if (nextQueue.length === 0) secretaryRecoveryFocusedKey.value = ''
-  schedulePersistRecoveryFocus()
-
-  secretaryRecoveryAwaitingReply.value = false
-
-  if (action === 'resume') {
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'assistant',
-      type: 'text',
-      content: `已继续：${title}（task=${shortID}）。`,
-      createdAt: new Date(),
-      isStreaming: false,
-    })
-  }
-  if (action === 'dismiss') {
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'assistant',
-      type: 'text',
-      content: `已暂缓：${title}（task=${shortID}）。`,
-      createdAt: new Date(),
-      isStreaming: false,
-    })
-  }
-
-  // If there are more queued items, ask the next one (best-effort).
-  if (secretaryRecoveryQueue.value.length > 0 && !secretaryRecoverySubmitting.value) {
-    maybeStartRecoveryConversation()
-  }
-}
-
-const sendRecoveryReply = async (rawMessage: string) => {
-  const message = String(rawMessage || '').trim()
-  if (!message) return
-  if (loadingHistory.value) return
-  if (secretaryRecoverySubmitting.value) return
-
-  const focused = String(secretaryRecoveryFocusedKey.value || '').trim()
-  const item =
-    secretaryRecoveryQueue.value.find((i) => recoveryKeyOf(i) === focused) || secretaryRecoveryQueue.value[0]
-  const taskId = String(item?.taskId || '').trim()
-  if (!taskId) return
-
-  // Render user reply as a normal user message (traceable in chat).
-  chatStore.addMessage({
-    id: Date.now(),
-    role: 'user',
-    type: 'text',
-    content: message,
-    createdAt: new Date(),
-    isStreaming: false,
-  })
-  scrollToBottom()
-
-  secretaryRecoverySubmitting.value = true
-  try {
-    await resumeTask(taskId, { review_notes: message, source: 'secretary-recovery' })
-    const shortID = taskId.slice(0, 8)
-    const title = String(item?.title || '').trim() || '任务'
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'assistant',
-      type: 'text',
-      content: `已继续：${title}（task=${shortID}）。`,
-      createdAt: new Date(),
-      isStreaming: false,
-    })
-
-    // Advance queue (remove the resumed item).
-    secretaryRecoveryAwaitingReply.value = false
-    const key = recoveryKeyOf(item)
-    secretaryRecoveryQueue.value = secretaryRecoveryQueue.value.filter((i) => recoveryKeyOf(i) !== key)
-    if (secretaryRecoveryQueue.value.length > 0) {
-      const next = secretaryRecoveryQueue.value[0]
-      secretaryRecoveryFocusedKey.value = recoveryKeyOf(next)
-      const others = secretaryRecoveryQueue.value
-        .slice(1)
-        .map((i) => String(i?.title || '').trim())
-        .filter(Boolean)
-        .slice(0, 3)
-      const ask = formatRecoveryAsk(next, others)
-      chatStore.addMessage({
-        id: Date.now(),
-        role: 'assistant',
-        type: 'text',
-        content: ask,
-        createdAt: new Date(),
-        isStreaming: false,
-      })
-      secretaryRecoveryAwaitingReply.value = true
-    } else {
-      secretaryRecoveryFocusedKey.value = ''
-    }
+    secretaryRecoveryFocusedKey.value = ''
     schedulePersistRecoveryFocus()
-  } catch (error) {
-    console.error('Failed to resume task from secretary recovery:', error)
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'system',
-      type: 'text',
-      content: '继续失败，请稍后再试。',
-      createdAt: new Date(),
-      isStreaming: false,
-    })
-  } finally {
-    secretaryRecoverySubmitting.value = false
-    scrollToBottom()
   }
 }
 
@@ -2127,10 +1885,6 @@ const sendMessage = async () => {
   if (inputEl.value) inputEl.value.style.height = ''
 
   if (isSecretaryMode.value) {
-    if (secretaryRecoveryAwaitingReply.value || secretaryRecoverySubmitting.value) {
-      await sendRecoveryReply(message)
-      return
-    }
     await sendSecretaryMessage(message)
     return
   }
@@ -2849,7 +2603,7 @@ onUnmounted(() => {
                 "
                 rows="1"
                 class="w-full px-4 py-3 pr-12 text-base leading-6 overflow-y-auto bg-surface-800 rounded-xl text-surface-50 placeholder-surface-500 resize-y focus:outline-none focus:ring-2 focus:ring-primary-500/50 transition-all border border-surface-700"
-                :disabled="workspaceOnboardingBlocking || (!isSecretaryMode && chatStore.isLoading) || (isSecretaryMode && (secretaryInboxSubmitting || secretaryRecoverySubmitting))"
+                :disabled="workspaceOnboardingBlocking || (!isSecretaryMode && chatStore.isLoading) || (isSecretaryMode && secretaryInboxSubmitting)"
               />
             </div>
             <button

@@ -70,11 +70,11 @@ func TestGenerateDispatchPlan_IncludesSessionWorkspaceRootContext(t *testing.T) 
 		},
 	}
 
-	plan, _, err := o.generateDispatchPlan(context.Background(), "local", "su", wantWorkspace, "", model.JSONB{}, []model.ChatMessage{
+	plan, _, err := o.generateTriagePlanAsSU(context.Background(), "local", "su", wantWorkspace, "", model.JSONB{}, []model.ChatMessage{
 		{Role: model.MessageRoleUser, Type: model.MessageTypeText, Content: "do it"},
 	})
 	if err != nil {
-		t.Fatalf("generateDispatchPlan: %v", err)
+		t.Fatalf("generateTriagePlanAsSU: %v", err)
 	}
 	if strings.TrimSpace(plan.SummaryMessage) != "ok" {
 		t.Fatalf("expected plan summary ok, got %q", plan.SummaryMessage)

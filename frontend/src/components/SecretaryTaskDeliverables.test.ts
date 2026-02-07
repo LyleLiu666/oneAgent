@@ -279,6 +279,67 @@ it("surfaces failed tasks and allows resuming from secretary mode", async () => 
   wrapper.unmount();
 });
 
+it("passes review_notes when resuming a failed task from secretary mode", async () => {
+  vi.stubGlobal("localStorage", makeLocalStorage());
+
+  const pinia = createPinia();
+  setActivePinia(pinia);
+
+  const { useUIStore } = await import("@/stores/ui");
+  const ui = useUIStore();
+  ui.setMode("secretary");
+
+  mocks.listTasks.mockResolvedValueOnce([
+    {
+      id: "t1",
+      user_id: "u1",
+      workspace: "/tmp/ws",
+      title: "task1",
+      prompt: "p",
+      created_at: "2026-02-01T00:00:00Z",
+      updated_at: "2026-02-01T00:00:02Z",
+      attempts: [
+        {
+          id: "a1",
+          status: "failed",
+          created_at: "2026-02-01T00:00:01Z",
+          finished_at: "2026-02-01T00:00:02Z",
+          summary: "failed",
+          observer: {
+            pass: false,
+            next_steps: "need decision",
+            questions_for_user: ["q1"],
+          },
+        },
+      ],
+    },
+  ]);
+
+  const { default: SecretaryTaskDeliverables } = await import(
+    "@/components/SecretaryTaskDeliverables.vue"
+  );
+  const wrapper = mount(SecretaryTaskDeliverables, {
+    props: { workspace: "/tmp/ws", pollIntervalMs: 0 },
+    global: { plugins: [pinia] },
+  });
+
+  await flushPromises();
+
+  await wrapper.get('[data-testid="secretary-task-recovery-more"]').trigger("click");
+  await flushPromises();
+
+  await wrapper.get('[data-testid="secretary-task-recovery-notes"]').setValue("继续，但请保持 X 不变");
+  await wrapper.get('[data-testid="secretary-task-recovery-resume"]').trigger("click");
+  await flushPromises();
+
+  expect(mocks.resumeTask).toHaveBeenCalledWith("t1", {
+    source: "secretary-recovery",
+    review_notes: "继续，但请保持 X 不变",
+  });
+
+  wrapper.unmount();
+});
+
 it("enters full mode and navigates to tasks when troubleshooting from secretary mode", async () => {
   vi.stubGlobal("localStorage", makeLocalStorage());
 

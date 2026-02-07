@@ -213,7 +213,7 @@ it('renders streaming token count while waiting for content', async () => {
     expect(wrapper.text()).toContain('7 tokens')
 })
 
-it('recovery ask prefers error over summary (secretary mode)', async () => {
+it('does not write recovery prompts into chat message list (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -254,8 +254,7 @@ it('recovery ask prefers error over summary (secretary mode)', async () => {
 
     await flushPromises()
 
-    expect(wrapper.text()).toContain('原因：invalid observer output (expected JSON)')
-    expect(wrapper.text()).not.toContain('原因：subagent finished')
+    expect(chat.messages.length).toBe(0)
 })
 
 it('shows a stop button while streaming and calls stop endpoint', async () => {
@@ -763,7 +762,7 @@ it('optimistically renders secretary message and prevents resubmission while pen
     expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
 })
 
-it('starts recovery conversation on initial recovery snapshot (secretary mode)', async () => {
+it('does not start a recovery conversation in chat (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -802,10 +801,10 @@ it('starts recovery conversation on initial recovery snapshot (secretary mode)',
     await wrapper.get('[data-testid="emit-recovery-snapshot"]').trigger('click')
     await flushPromises()
 
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('需要你确认才能继续：task1'))).toBe(true)
+    expect(chat.messages.length).toBe(0)
 })
 
-it('handles recovery focus switching and resumes via chat reply (secretary mode)', async () => {
+it('does not hijack chat input to resume tasks (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -819,8 +818,6 @@ it('handles recovery focus switching and resumes via chat reply (secretary mode)
 
     const { useChatStore } = await import('@/stores/chat')
     const chat = useChatStore()
-
-    ;(apiClient.resumeTask as any).mockResolvedValue({})
 
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
     const wrapper = shallowMount(ChatBox, {
@@ -846,8 +843,6 @@ it('handles recovery focus switching and resumes via chat reply (secretary mode)
     await wrapper.get('[data-testid="emit-task2"]').trigger('click')
     await flushPromises()
 
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content || '').includes('task1'))).toBe(true)
-
     // Switch focus to task2 before replying.
     await wrapper.get('[data-testid="focus-task2"]').trigger('click')
     await flushPromises()
@@ -856,27 +851,10 @@ it('handles recovery focus switching and resumes via chat reply (secretary mode)
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
     await flushPromises()
 
-    expect(apiClient.resumeTask).toHaveBeenCalledTimes(1)
-    expect(apiClient.resumeTask).toHaveBeenCalledWith('t2', { review_notes: '先处理第二个', source: 'secretary-recovery' })
-    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(0)
-
-    // Remaining item can still be resumed afterwards.
-    await wrapper.get('textarea').setValue('再处理第一个')
-    await wrapper.get('[data-testid="chat-send"]').trigger('click')
-    await flushPromises()
-
-    expect(apiClient.resumeTask).toHaveBeenCalledTimes(2)
-    expect(apiClient.resumeTask).toHaveBeenLastCalledWith('t1', { review_notes: '再处理第一个', source: 'secretary-recovery' })
-
-    // After the queue drains, messages go back to normal secretary sending.
-    await wrapper.get('textarea').setValue('正常聊天')
-    await wrapper.get('[data-testid="chat-send"]').trigger('click')
-    await flushPromises()
-
     expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
 })
 
-it('records direct recovery actions as secretary receipts (dismiss clears recovery mode)', async () => {
+it('does not write recovery action receipts into chat message list (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
         getItem: (key: string) => store.get(key) ?? null,
@@ -914,10 +892,9 @@ it('records direct recovery actions as secretary receipts (dismiss clears recove
     await wrapper.get('[data-testid="emit-recovery-dismiss"]').trigger('click')
     await flushPromises()
 
-    // Receipt exists and recovery mode is cleared (next send uses inbox append, not resume).
     const { useChatStore } = await import('@/stores/chat')
     const chat = useChatStore()
-    expect(chat.messages.some((m: any) => m.role === 'assistant' && m.content.includes('已暂缓'))).toBe(true)
+    expect(chat.messages.length).toBe(0)
 
     await wrapper.get('textarea').setValue('正常聊天')
     await wrapper.get('[data-testid="chat-send"]').trigger('click')
