@@ -19,6 +19,9 @@ Tests here are treated as the contract: if the tests are strong, the SDK is stro
   - Streaming chunking correctness (fences): `src/agents/pi-embedded-subscribe.subscribe-embedded-pi-session.reopens-fenced-blocks-splitting-inside-them.test.ts`
 - openagentic-sdk (lower priority): `/Users/liu_y/code/opensource/openagentic-sdk`
   - Event serialization roundtrip: `tests/test_user_message_event.py`
+- nanoclaw (harness patterns): `/Users/liu_y/code/opensource/nanoclaw`
+  - Robust output delimiting via sentinel markers (and fallback parsing): `src/container-runner.ts`
+  - Backoff + concurrency queueing patterns: `src/group-queue.ts`
 
 ## What We Test (high priority)
 
@@ -62,4 +65,3 @@ Tests here are treated as the contract: if the tests are strong, the SDK is stro
   - Inspired by OpenClaw `session-write-lock` tests.
 - Conformance tests for any public interfaces
   - E.g. "SDK implements required interface methods" style tests (like opencode ACP conformance).
-

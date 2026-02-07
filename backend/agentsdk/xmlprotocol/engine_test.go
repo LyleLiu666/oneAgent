@@ -105,6 +105,73 @@ func TestRunLoop_EmitsEventSink(t *testing.T) {
 	}
 }
 
+func TestRunLoop_EmitsTraceEvents_AndEventsAreJSONSerializable(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`<tool_data><call><tool_name>bash</tool_name><command>echo hi</command></call></tool_data>`,
+			`done`,
+		},
+	}
+	sink := &collectSink{}
+
+	var traces []string
+	combined, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+			return map[string]any{"stdout": "hi"}, nil
+		}),
+		Callbacks: Callbacks{
+			OnTrace: func(msg string) { traces = append(traces, msg) },
+			EventSink: sink,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected %q, got %q", "done", combined)
+	}
+
+	var sawTrace bool
+	var sawToolCall bool
+	var sawToolResult bool
+	for _, ev := range sink.events {
+		if _, err := json.Marshal(ev); err != nil {
+			t.Fatalf("expected event to be json-serializable (kind=%s), got %v", ev.Kind, err)
+		}
+
+		switch ev.Kind {
+		case agentsdk.EventKindTrace:
+			sawTrace = true
+			payload, ok := ev.Payload.(agentsdk.TraceEvent)
+			if !ok {
+				t.Fatalf("expected TraceEvent payload, got %T", ev.Payload)
+			}
+			if payload.Message == "" {
+				t.Fatalf("expected trace message to be non-empty")
+			}
+		case agentsdk.EventKindToolCall:
+			sawToolCall = true
+		case agentsdk.EventKindToolResult:
+			sawToolResult = true
+		}
+	}
+
+	if len(traces) == 0 {
+		t.Fatalf("expected OnTrace to be called")
+	}
+	if !sawTrace {
+		t.Fatalf("expected at least one trace event")
+	}
+	if !sawToolCall {
+		t.Fatalf("expected at least one tool_call event")
+	}
+	if !sawToolResult {
+		t.Fatalf("expected at least one tool_result event")
+	}
+}
+
 func TestRunLoop_StopsAfterMaxSteps(t *testing.T) {
 	client := &scriptedClient{
 		responses: []string{
