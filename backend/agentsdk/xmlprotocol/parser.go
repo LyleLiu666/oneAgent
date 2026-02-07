@@ -201,7 +201,7 @@ func parseCall(callInner string, raw string) (Call, error) {
 
 	fields := map[string]string{}
 
-	toolName, ok := firstTagValueLoose(callInner, []string{"tool_name", "toolName", "tool", "name"})
+	toolName, toolNameTag, ok := toolNameAndTag(callInner)
 	if !ok {
 		return Call{}, errors.New("missing <tool_name>")
 	}
@@ -210,72 +210,10 @@ func parseCall(callInner string, raw string) (Call, error) {
 		return Call{}, errors.New("empty <tool_name>")
 	}
 
-	for _, tag := range []string{
-		"command",
-		"timeout_ms",
-		"action",
-		"job_id",
-		"jobId",
-		"wait_seconds",
-		"waitSeconds",
-		"wait_ms",
-		"waitMs",
-		"max_runtime_seconds",
-		"maxRuntimeSeconds",
-		"max_runtime_ms",
-		"maxRuntimeMs",
-		"max_log_bytes",
-		"maxLogBytes",
-		"stdout_offset",
-		"stdoutOffset",
-		"stderr_offset",
-		"stderrOffset",
-		"max_delta_bytes",
-		"maxDeltaBytes",
-		"task",
-		"context_summary",
-		"contextSummary",
-		"tool_ids",
-		"toolIds",
-		"scope",
-		"max_steps",
-		"maxSteps",
-		"k_skills",
-		"kSkills",
-		"skill_ids",
-		"skillIds",
-		"filePath",
-		"file_path",
-		"offset_lines",
-		"offsetLines",
-		"limit_lines",
-		"limitLines",
-		"max_bytes",
-		"maxBytes",
-		"oldcontent",
-		"newcontent",
-		"replaceAll",
-		"replace_all",
-		"content",
-		"append",
-		"pattern",
-		"path",
-		"query",
-		"count",
-		"freshness",
-		"max_results",
-		"maxResults",
-		"fixed_strings",
-		"fixedStrings",
-		"task_id",
-		"taskId",
-		"template",
-		"overwrite",
-		"name",
-		"skill_id",
-		"id",
-		"edits",
-	} {
+	for _, tag := range topLevelTagNames(callInner) {
+		if toolNameTag != "" && strings.EqualFold(tag, toolNameTag) {
+			continue
+		}
 		if value, ok := tagValue(callInner, tag); ok {
 			fields[tag] = value
 		}
@@ -284,6 +222,9 @@ func parseCall(callInner string, raw string) (Call, error) {
 	// Normalize common aliases.
 	if _, ok := fields["filePath"]; !ok {
 		if v, ok := fields["file_path"]; ok {
+			fields["filePath"] = v
+		}
+		if v, ok := fields["filepath"]; ok {
 			fields["filePath"] = v
 		}
 	}
@@ -398,6 +339,165 @@ func parseCall(callInner string, raw string) (Call, error) {
 		Fields:   fields,
 		Raw:      raw,
 	}, nil
+}
+
+func toolNameAndTag(callInner string) (name string, tag string, ok bool) {
+	tags := []string{"tool_name", "toolName", "tool", "name"}
+	for _, open := range tags {
+		if v, ok := tagValueWithAnyClose(callInner, open, tags); ok {
+			return v, open, true
+		}
+	}
+	return "", "", false
+}
+
+func topLevelTagNames(input string) []string {
+	if input == "" {
+		return nil
+	}
+
+	type void struct{}
+	seen := map[string]void{}
+	out := make([]string, 0, 8)
+
+	depth := 0
+	inCDATA := false
+
+	i := 0
+	for i < len(input) {
+		if inCDATA {
+			if strings.HasPrefix(input[i:], "]]>") {
+				inCDATA = false
+				i += len("]]>")
+				continue
+			}
+			i++
+			continue
+		}
+
+		if strings.HasPrefix(input[i:], "<![CDATA[") {
+			inCDATA = true
+			i += len("<![CDATA[")
+			continue
+		}
+
+		if input[i] != '<' {
+			i++
+			continue
+		}
+
+		if strings.HasPrefix(input[i:], "<!--") {
+			end := strings.Index(input[i+len("<!--"):], "-->")
+			if end == -1 {
+				return out
+			}
+			i += len("<!--") + end + len("-->")
+			continue
+		}
+
+		if strings.HasPrefix(input[i:], "<?") {
+			end := strings.Index(input[i+len("<?"):], "?>")
+			if end == -1 {
+				return out
+			}
+			i += len("<?") + end + len("?>")
+			continue
+		}
+
+		// Skip other declarations like <!DOCTYPE ...>.
+		if strings.HasPrefix(input[i:], "<!") && !strings.HasPrefix(input[i:], "<![CDATA[") {
+			gt := strings.IndexByte(input[i:], '>')
+			if gt == -1 {
+				return out
+			}
+			i += gt + 1
+			continue
+		}
+
+		if i+1 < len(input) && input[i+1] == '/' {
+			j := i + 2
+			_ = readXMLName(input, &j)
+			gt := strings.IndexByte(input[j:], '>')
+			if gt == -1 {
+				return out
+			}
+			i = j + gt + 1
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+
+		j := i + 1
+		if j >= len(input) || !isXMLNameStart(input[j]) {
+			i++
+			continue
+		}
+		name := readXMLName(input, &j)
+		if name != "" && depth == 0 {
+			if _, ok := seen[name]; !ok {
+				seen[name] = void{}
+				out = append(out, name)
+			}
+		}
+
+		gt := strings.IndexByte(input[j:], '>')
+		if gt == -1 {
+			return out
+		}
+		tagEnd := j + gt
+
+		// Detect "<tag ... />" self-closing.
+		selfClosing := false
+		k := tagEnd - 1
+		for k > i && isXMLSpace(input[k]) {
+			k--
+		}
+		if k > i && input[k] == '/' {
+			selfClosing = true
+		}
+
+		i = tagEnd + 1
+		if !selfClosing {
+			depth++
+		}
+	}
+
+	return out
+}
+
+func readXMLName(input string, idx *int) string {
+	start := *idx
+	for *idx < len(input) {
+		if !isXMLNameChar(input[*idx]) {
+			break
+		}
+		*idx++
+	}
+	if *idx <= start {
+		return ""
+	}
+	return input[start:*idx]
+}
+
+func isXMLNameStart(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '_'
+}
+
+func isXMLNameChar(b byte) bool {
+	if isXMLNameStart(b) {
+		return true
+	}
+	return (b >= '0' && b <= '9') || b == '-' || b == ':' || b == '.'
+}
+
+func isXMLSpace(b byte) bool {
+	switch b {
+	case ' ', '\n', '\r', '\t':
+		return true
+	default:
+		return false
+	}
 }
 
 func repairMissingFilePathOpenTag(input string) string {

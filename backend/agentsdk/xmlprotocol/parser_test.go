@@ -128,3 +128,54 @@ func TestParseToolData_MultiCall_ParsesInOrder(t *testing.T) {
 		t.Fatalf("expected call[1] filePath %q, got %q", "a.txt", got)
 	}
 }
+
+func TestParseToolData_CapturesUnknownFields(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>custom</tool_name>
+    <alpha>1</alpha>
+    <beta>two</beta>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].ToolName != "custom" {
+		t.Fatalf("expected tool 'custom', got %q", calls[0].ToolName)
+	}
+	if got := calls[0].Fields["alpha"]; got != "1" {
+		t.Fatalf("expected alpha %q, got %q", "1", got)
+	}
+	if got := calls[0].Fields["beta"]; got != "two" {
+		t.Fatalf("expected beta %q, got %q", "two", got)
+	}
+}
+
+func TestParseToolData_DoesNotTreatTagsInsideCDATATextAsFields(t *testing.T) {
+	input := `<tool_data>
+  <call>
+    <tool_name>write_file</tool_name>
+    <filePath>a.txt</filePath>
+    <content><![CDATA[<foo>bar</foo>]]></content>
+  </call>
+</tool_data>`
+
+	calls, err := ParseToolData(input)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if got := calls[0].Fields["content"]; got != "<foo>bar</foo>" {
+		t.Fatalf("expected content %q, got %q", "<foo>bar</foo>", got)
+	}
+	if _, ok := calls[0].Fields["foo"]; ok {
+		t.Fatalf("expected nested CDATA tags to not be treated as fields")
+	}
+}
