@@ -29,9 +29,9 @@ func (c *scriptedClient) ChatCompletionStream(ctx context.Context, messages []ag
 	return callback(resp)
 }
 
-type funcExecutor func(context.Context, ToolCall) (any, error)
+type funcExecutor func(context.Context, agentsdk.ToolCall) (any, error)
 
-func (f funcExecutor) Execute(ctx context.Context, call ToolCall) (any, error) {
+func (f funcExecutor) Execute(ctx context.Context, call agentsdk.ToolCall) (any, error) {
 	return f(ctx, call)
 }
 
@@ -53,7 +53,7 @@ func TestRunLoop_EmitsEventSink(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return nil, nil
 		}),
 		Callbacks: Callbacks{
@@ -118,11 +118,11 @@ func TestRunLoop_EmitsTraceEvents_AndEventsAreJSONSerializable(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return map[string]any{"stdout": "hi"}, nil
 		}),
 		Callbacks: Callbacks{
-			OnTrace: func(msg string) { traces = append(traces, msg) },
+			OnTrace:   func(msg string) { traces = append(traces, msg) },
 			EventSink: sink,
 		},
 	})
@@ -190,13 +190,13 @@ func TestRunLoop_MultiToolCalls_ExecutesInOrder_AndRecordsResults(t *testing.T) 
 	}
 	sink := &collectSink{}
 
-	var executed []ToolCall
+	var executed []agentsdk.ToolCall
 	var steps []StepRecord
 
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(ctx context.Context, call ToolCall) (any, error) {
+		Executor: funcExecutor(func(ctx context.Context, call agentsdk.ToolCall) (any, error) {
 			_ = ctx
 			executed = append(executed, call)
 			return map[string]any{"ok": true, "tool": call.Name}, nil
@@ -268,7 +268,7 @@ func TestRunLoop_ToolExecutorError_YieldsToolResultError_AndContinues(t *testing
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return nil, errors.New("boom")
 		}),
 		Callbacks: Callbacks{
@@ -305,7 +305,7 @@ func TestRunLoop_OnContentError_AbortsAndIsLogged(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) { return nil, nil }),
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) { return nil, nil }),
 		Callbacks: Callbacks{
 			OnContent: func(chunk string) error {
 				if chunk != "hello" {
@@ -353,7 +353,7 @@ func TestRunLoop_StopsAfterMaxSteps(t *testing.T) {
 	_, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return nil, errors.New("unknown tool")
 		}),
 		MaxSteps: 3,
@@ -383,7 +383,7 @@ func TestRunLoop_SelfHeal_TruncatedToolData(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return map[string]any{"ok": true}, nil
 		}),
 		Callbacks: Callbacks{
@@ -425,7 +425,7 @@ func TestRunLoop_SelfHeal_ParseToolDataError(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return map[string]any{"ok": true}, nil
 		}),
 	})
@@ -477,7 +477,7 @@ world`,
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(ctx context.Context, call ToolCall) (any, error) {
+		Executor: funcExecutor(func(ctx context.Context, call agentsdk.ToolCall) (any, error) {
 			_ = ctx
 			if canonicalToolName(call.Name) != "write_file" {
 				return nil, errors.New("unknown tool")
@@ -571,7 +571,7 @@ hello`,
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			t.Fatalf("executor should not be called for non-recoverable truncated write_file")
 			return nil, nil
 		}),
@@ -647,7 +647,7 @@ func TestRunLoop_ExecutesToolAndReturnsJSONOutput(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			return map[string]any{"stdout_delta": "hi\n"}, nil
 		}),
 		Callbacks: Callbacks{

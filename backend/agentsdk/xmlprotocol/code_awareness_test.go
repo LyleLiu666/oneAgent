@@ -82,7 +82,7 @@ func TestRunLoop_DoesNotExecuteToolDataInsideCodeFence(t *testing.T) {
 	combined, err := RunLoop(context.Background(), RunLoopInput{
 		Client:   client,
 		Messages: []agentsdk.Message{{Role: "user", Content: "show example"}},
-		Executor: funcExecutor(func(context.Context, ToolCall) (any, error) {
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
 			executed++
 			return nil, errors.New("should not execute")
 		}),
@@ -103,4 +103,3 @@ func TestRunLoop_DoesNotExecuteToolDataInsideCodeFence(t *testing.T) {
 		t.Fatalf("expected combined output to contain final text, got %q", combined)
 	}
 }
-

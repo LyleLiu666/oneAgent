@@ -18,21 +18,10 @@ const (
 
 type FailureRecorder func(toolName, toolCallID, args string, err error)
 
-type ToolExecutor interface {
-	Execute(ctx context.Context, call ToolCall) (any, error)
-}
-
-type ToolCall struct {
-	ID      string
-	Name    string
-	Fields  map[string]string
-	RawCall string
-}
-
 type StepRecord struct {
 	VisibleContent    string
 	AssistantContent  string
-	ToolCalls         []ToolCall
+	ToolCalls         []agentsdk.ToolCall
 	ToolResults       []ToolResult
 	ToolResultMessage string
 }
@@ -70,7 +59,7 @@ type RunLoopInput struct {
 	// LLMOptions are forwarded verbatim to Client.ChatCompletionStream.
 	LLMOptions *agentsdk.ChatCompletionOptions
 
-	Executor ToolExecutor
+	Executor agentsdk.ToolExecutor
 
 	// MaxSteps is the upper bound of tool-loop iterations.
 	// When <= 0, DefaultMaxSteps is used.
@@ -202,7 +191,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 					in.Callbacks.ObserveStep(StepRecord{
 						VisibleContent:    stepVisible,
 						AssistantContent:  assistantForHistory,
-						ToolCalls:         []ToolCall{{ID: toolCallID, Name: toolName}},
+						ToolCalls:         []agentsdk.ToolCall{{ID: toolCallID, Name: toolName}},
 						ToolResults:       []ToolResult{result},
 						ToolResultMessage: toolResultMsg,
 					})
@@ -250,7 +239,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 				in.Callbacks.ObserveStep(StepRecord{
 					VisibleContent:    stepVisible,
 					AssistantContent:  assistantForHistory,
-					ToolCalls:         []ToolCall{{ID: toolCallID, Name: toolName}},
+					ToolCalls:         []agentsdk.ToolCall{{ID: toolCallID, Name: toolName}},
 					ToolResults:       []ToolResult{result},
 					ToolResultMessage: toolResultMsg,
 				})
@@ -266,7 +255,7 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 		msgs = append(msgs, agentsdk.Message{Role: "assistant", Content: assistantForHistory})
 
 		results := make([]ToolResult, 0, len(calls))
-		recordedCalls := make([]ToolCall, 0, len(calls))
+		recordedCalls := make([]agentsdk.ToolCall, 0, len(calls))
 		for idx, call := range calls {
 			toolName := strings.TrimSpace(call.ToolName)
 			toolCallID := fmt.Sprintf("xml_%d_%d", step, idx)
@@ -276,20 +265,20 @@ func RunLoop(ctx context.Context, in RunLoopInput) (string, error) {
 				Fields: cloneFields(call.Fields),
 				Raw:    call.Raw,
 			})
-			recordedCalls = append(recordedCalls, ToolCall{
-				ID:      toolCallID,
-				Name:    toolName,
-				Fields:  call.Fields,
-				RawCall: call.Raw,
+			recordedCalls = append(recordedCalls, agentsdk.ToolCall{
+				ID:     toolCallID,
+				Name:   toolName,
+				Fields: call.Fields,
+				Raw:    call.Raw,
 			})
 
 			trace(ctx, in.Callbacks, toolStep, fmt.Sprintf("Running tool: %s", toolName))
 
-			payload, toolErr := in.Executor.Execute(ctx, ToolCall{
-				ID:      toolCallID,
-				Name:    toolName,
-				Fields:  call.Fields,
-				RawCall: call.Raw,
+			payload, toolErr := in.Executor.Execute(ctx, agentsdk.ToolCall{
+				ID:     toolCallID,
+				Name:   toolName,
+				Fields: call.Fields,
+				Raw:    call.Raw,
 			})
 			if toolErr != nil {
 				payload = map[string]string{"error": fmt.Sprintf("Tool execution failed: %v", toolErr)}
@@ -408,7 +397,7 @@ func (in RunLoopInput) recoverTruncatedWriteFileAppend(
 		Raw: "",
 	})
 
-	payload, toolErr := in.Executor.Execute(ctx, ToolCall{
+	payload, toolErr := in.Executor.Execute(ctx, agentsdk.ToolCall{
 		ID:     toolCallID,
 		Name:   toolName,
 		Fields: map[string]string{"filePath": recovered.FilePath, "content": recovered.Content, "append": "true"},
@@ -489,7 +478,7 @@ func (in RunLoopInput) recoverTruncatedWriteFileAppend(
 		in.Callbacks.ObserveStep(StepRecord{
 			VisibleContent:    stepVisible,
 			AssistantContent:  recovered.RepairedAssistantContent,
-			ToolCalls:         []ToolCall{{ID: toolCallID, Name: toolName}, {ID: protoToolCallID, Name: protoToolName}},
+			ToolCalls:         []agentsdk.ToolCall{{ID: toolCallID, Name: toolName}, {ID: protoToolCallID, Name: protoToolName}},
 			ToolResults:       results,
 			ToolResultMessage: toolResultMsg,
 		})
