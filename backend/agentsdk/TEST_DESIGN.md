@@ -9,6 +9,7 @@ Treat tests as the contract: a change that breaks these tests is considered a br
 - Safety: never execute tool calls that appear inside Markdown code spans or fenced code blocks.
 - Robustness: tolerate malformed / streaming / truncated model output without panics.
 - Observability: emit enough structured events to make runs fully inspectable and replayable.
+- Ergonomics: provide SDK-owned helpers (e.g. ToolRegistry) so consumers can ship reliably with less glue code.
 - Portability: keep the SDK loop independent from oneAgent internals (extractable module later).
 
 ## Non-goals
@@ -99,6 +100,13 @@ Each scenario below should be covered by a focused test (or a small set of tests
   - Expect: tool_result `ok=false` with both a human error and a JSON payload; loop continues.
   - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
 
+### Tool Execution Helpers
+
+- `TOOL-1 ToolRegistry dispatch`
+  - Input: tool name + args routed through `ToolRegistry`.
+  - Expect: correct handler invoked; missing tool is explicit (`ErrToolNotFound`) unless overridden.
+  - Tests: `backend/agentsdk/tool_registry_test.go`
+
 ### Observability / Replay Hooks
 
 - `OBS-1 EventSink emits a complete timeline`
@@ -112,7 +120,7 @@ Each scenario below should be covered by a focused test (or a small set of tests
   - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
 - `OBS-4 Streaming callback aborts are observable`
   - Input: OnContent returns an error mid-stream.
-  - Expect: RunLoop aborts and llm_response is logged with error text.
+  - Expect: RunLoop aborts; llm_response is logged with error text; error event is emitted.
   - Tests: `backend/agentsdk/xmlprotocol/engine_test.go`
 
 ## Running Tests

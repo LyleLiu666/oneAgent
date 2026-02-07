@@ -29,7 +29,12 @@ Tests here are treated as the contract: if the tests are strong, the SDK is stro
   - Tolerate common malformed XML from LLMs (tag typos, missing open tags, stray CDATA markers).
   - Multiple `<call>` blocks in one `<tool_data>`.
   - Stable field normalization for common aliases.
+  - Capture arbitrary top-level fields without an allowlist (unknown tags are still surfaced to tools).
   - Existing: `backend/agentsdk/xmlprotocol/parser_test.go`.
+- Tool execution helpers
+  - Dispatch by tool name via a registry (SDK consumer doesn't need a custom executor for simple cases).
+  - Missing-tool behavior is explicit and testable (`ErrToolNotFound` or OnMissing hook).
+  - Existing: `backend/agentsdk/tool_registry_test.go`.
 - Streaming visibility filter
   - Never leak `<tool_data>...</tool_data>` into user-visible stream.
   - Never leak thinking blocks (`<thinking>`, `<think>`, etc) into user-visible stream.
@@ -49,6 +54,7 @@ Tests here are treated as the contract: if the tests are strong, the SDK is stro
 
 - Observability + replay hooks
   - Every step emits structured, append-only events (`llm_request`, `llm_response`, `tool_call`, `tool_result`, `error`).
+  - Error events cover all terminal failures (and tool-protocol anomalies where we self-heal).
   - Events must be JSON-serializable (or the SDK must provide a canonical serialization).
   - Existing (partial): `backend/agentsdk/xmlprotocol/engine_test.go`.
 - Tool output size control
