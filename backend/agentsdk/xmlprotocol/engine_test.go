@@ -117,6 +117,67 @@ func TestRunLoop_EmitsEventSink(t *testing.T) {
 	}
 }
 
+func TestRunLoop_LLMRequestIncludesFullMessageHistoryAcrossSteps(t *testing.T) {
+	client := &scriptedClient{
+		responses: []string{
+			`<tool_data><call><tool_name>bash</tool_name><command>echo hi</command></call></tool_data>`,
+			`done`,
+		},
+	}
+	sink := &collectSink{}
+
+	_, err := RunLoop(context.Background(), RunLoopInput{
+		Client:   client,
+		Messages: []agentsdk.Message{{Role: "user", Content: "run"}},
+		Executor: funcExecutor(func(context.Context, agentsdk.ToolCall) (any, error) {
+			return map[string]any{"stdout": "hi"}, nil
+		}),
+		Callbacks: Callbacks{
+			EventSink: sink,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	var reqs []agentsdk.LLMRequestEvent
+	for _, ev := range sink.events {
+		if ev.Kind != agentsdk.EventKindLLMRequest {
+			continue
+		}
+		payload, ok := ev.Payload.(agentsdk.LLMRequestEvent)
+		if !ok {
+			t.Fatalf("expected LLMRequestEvent payload, got %T", ev.Payload)
+		}
+		reqs = append(reqs, payload)
+	}
+
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 llm_request events, got %d", len(reqs))
+	}
+
+	if len(reqs[0].Messages) != 1 {
+		t.Fatalf("expected step0 request to include 1 message, got %d", len(reqs[0].Messages))
+	}
+	if reqs[0].Messages[0].Role != "user" || reqs[0].Messages[0].Content != "run" {
+		t.Fatalf("unexpected step0 request messages: %#v", reqs[0].Messages)
+	}
+
+	// Step 1 request MUST include full history: initial user message + tool call assistant message + tool_result user message.
+	if len(reqs[1].Messages) != 3 {
+		t.Fatalf("expected step1 request to include 3 messages, got %d (%#v)", len(reqs[1].Messages), reqs[1].Messages)
+	}
+	if reqs[1].Messages[0].Role != "user" || reqs[1].Messages[0].Content != "run" {
+		t.Fatalf("unexpected step1 message[0]: %#v", reqs[1].Messages[0])
+	}
+	if reqs[1].Messages[1].Role != "assistant" || !strings.Contains(reqs[1].Messages[1].Content, "<tool_data") {
+		t.Fatalf("unexpected step1 message[1]: %#v", reqs[1].Messages[1])
+	}
+	if reqs[1].Messages[2].Role != "user" || !strings.Contains(reqs[1].Messages[2].Content, "<tool_result>") {
+		t.Fatalf("unexpected step1 message[2]: %#v", reqs[1].Messages[2])
+	}
+}
+
 func TestRunLoop_EmitsTraceEvents_AndEventsAreJSONSerializable(t *testing.T) {
 	client := &scriptedClient{
 		responses: []string{
