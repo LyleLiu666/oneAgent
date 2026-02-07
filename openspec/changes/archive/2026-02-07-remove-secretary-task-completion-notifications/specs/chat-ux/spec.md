@@ -1,6 +1,12 @@
 # chat-ux Spec Delta
 
-## MODIFIED Requirements
+## REMOVED Requirements
+
+### Requirement: Secretary mode MUST notify in chat when a background task completes (best-effort)
+**Reason**: 该通知会在重试/多任务场景下造成刷屏，污染 secretary chat message list 与模型心智；任务状态/交付入口应集中在任务面板中呈现，主对话区保持自然语言对话。
+**Migration**: 任务完成/失败的查看与交付入口由任务面板/交付卡片承载；UI 可 best-effort 过滤已落盘的旧版完成回执模板，避免升级后回放刷屏。
+
+## ADDED Requirements
 
 ### Requirement: Secretary mode MUST NOT inject task completion notifications into chat (best-effort)
 系统必须 (MUST) 在 Chat 的秘书模式下，避免在后台任务进入终态（完成/失败）时自动向 chat message list 追加过程性 `assistant text` 通知（best-effort）。任务状态与交付入口应集中在任务面板/交付卡片中呈现（best-effort），以保持主对话区为自然语言对话。
@@ -19,4 +25,3 @@
 - **WHEN** UI 加载 secretary local messages（best-effort）
 - **THEN** 这些旧回执不被渲染到对话区（best-effort）
 - **AND** 系统 best-effort 清理本地存储中对应条目（best-effort）
-

@@ -50,24 +50,6 @@ Defines requirements for the chat UI experience, including secretary mode behavi
 - **THEN** 系统输出一条秘书式汇报，覆盖这批消息的归并理解（best-effort）
 - **AND** 汇报必须明确下一步（继续推进什么 / 用户需要回复什么）（best-effort）
 
-### Requirement: Secretary mode MUST notify in chat when a background task completes (best-effort)
-系统必须 (MUST) 在 Chat 的秘书模式下，在后台任务完成/失败时以低噪声方式通知用户（best-effort），以强化“微信心智”的确定性，并减少用户去任务工作台查看的心智负担。
-
-通知策略至少包括（best-effort）：
-- 仅对“本次进入页面后发生的状态跃迁”提示（避免首次加载刷屏）
-- 当任务 latest attempt 从 `queued/running` 进入终态时，追加一条助手消息提示“已完成/已失败 + 交付已更新”
-
-#### Scenario: No history replay on first load
-- **GIVEN** 用户进入秘书模式并加载任务列表
-- **AND** 存在一些历史已完成任务
-- **WHEN** 首次渲染完成
-- **THEN** 系统不回放历史完成通知（best-effort）
-
-#### Scenario: Chat notifies when a running task finishes
-- **GIVEN** 某任务 latest attempt 处于 `running`
-- **WHEN** 下一次轮询中该任务进入终态（例如 `succeeded` 或 `failed`）
-- **THEN** 对话区追加一条助手通知（best-effort）
-
 ### Requirement: Secretary mode MUST suggest background task handoff for long-running requests (best-effort)
 系统必须 (MUST) 在 Chat 的秘书模式下，对“明显是长任务/需要交付物”的消息给出低噪声引导（best-effort），优先建议交给后台任务队列执行，并允许用户选择“仍作为即时聊天发送”（best-effort）。
 
@@ -90,54 +72,16 @@ Defines requirements for the chat UI experience, including secretary mode behavi
 ### Requirement: Secretary mode MUST surface low-noise recovery actions for failed tasks (best-effort)
 系统必须 (MUST) 在 Chat 的秘书模式下，以低噪声方式提示“需要处理”的失败任务，并提供可恢复动作（best-effort），避免用户在“只聊天”心智下错过失败与下一步。
 
-至少包括（best-effort）：
-- 失败任务的提示（基于 Task Queue 中终态且非 `succeeded` 的 attempt）
-- **秘书转达**：在对话区转达“发生了什么 + 下一步 + 需要用户确认的问题（若有）”，并附可追溯引用（findings/trace/diff，best-effort）
-- 一键继续（`POST /api/tasks/:id/resume`；支持携带 `review_notes`，best-effort）
-- 排障入口（优先在秘书模式内打开 trace；无 trace 时再进入完全模式排障，best-effort）
-- **直通入口折叠**：findings/diff/trace 等细节入口不得默认显式展示；应放在“更多/展开”中（progressive disclosure，best-effort）
-- **具体而非报数**：当同一时间存在多个待处理事项时，系统不得只报数量；必须给出每个事项的具体“原因/下一步/需要你确认什么”（best-effort）
+为避免过程性提示污染 secretary chat message list 与模型心智，recovery brief 应遵循（best-effort）：
+- recovery brief **仅在面板/卡片中展示**（panel-only）
+- 不应 (SHOULD NOT) 将该 recovery brief 作为普通 `assistant text` 消息写入 chat message list（best-effort）
+- 需要可追溯引用入口（findings/trace/diff），但默认折叠（best-effort）
 
-#### Scenario: Failed task is surfaced in secretary mode
-- **GIVEN** `GET /api/tasks` 返回至少 1 个任务，其 latest attempt 处于失败终态（非 `queued/running` 且非 `succeeded`）
-- **WHEN** 用户处于秘书模式并停留在对话主界面
-- **THEN** 页面展示该任务的低噪声“需要处理”提示（best-effort）
-
-#### Scenario: Secretary relays failure reason and next steps in chat (best-effort)
-- **GIVEN** 某任务 latest attempt 从 `queued/running` 跃迁到“需要处理终态”（例如 `failed/limit_exceeded/timed_out/interrupted`，best-effort）
-- **AND** 用户处于秘书模式且该跃迁发生在本次进入页面之后（不回放历史，best-effort）
-- **WHEN** UI 刷新任务列表并检测到该跃迁（best-effort）
-- **THEN** 对话区追加一条低噪声 assistant 消息用于“秘书转达”（best-effort）
-- **AND** 该消息包含用户可读的原因与下一步（优先使用 `attempt.summary` 与 `attempt.observer.next_steps`，best-effort）
-- **AND** 该消息包含可追溯引用入口（例如 findings/trace/diff），但这些入口必须默认折叠（best-effort）
-
-#### Scenario: User can reply to resume a failed task with review_notes (best-effort)
-- **GIVEN** 对话区存在一条与 task T 绑定的“秘书转达”消息（best-effort）
-- **WHEN** 用户在对话区回复一条消息作为补充信息/决策（best-effort）
-- **THEN** 系统调用 `POST /api/tasks/:id/resume` 且 `id=T`（best-effort）
-- **AND** 系统将用户回复注入该次 resume 的 `review_notes`（best-effort）
-- **AND** 对话区追加一条低噪声回执消息，留痕“已继续推进 + 绑定的 task/attempt”（best-effort）
-
-#### Scenario: Multiple failed tasks are surfaced with a focused current item (best-effort)
-- **GIVEN** 用户处于秘书模式（best-effort）
-- **AND** 同一时间存在 N 个“需要处理”的任务（N>=2，best-effort）
-- **WHEN** UI 检测到这些任务需要用户介入（best-effort）
-- **THEN** 对话区至少追加 1 条“秘书转达”消息，且每个事项包含原因/下一步/问题（best-effort）
-- **AND** UI 默认聚焦到一个当前事项（例如最新/最相关，best-effort），并允许用户切换要处理的事项（best-effort）
-
-#### Scenario: Troubleshoot opens trace inline when available (best-effort)
-- **GIVEN** 失败任务提示已展示（best-effort）
-- **AND** 该 attempt 存在 `trace_log_path`（best-effort）
-- **WHEN** 用户点击“排障”
-- **THEN** UI 在秘书模式内打开 trace 预览（best-effort）
-- **AND** 不切换到完全模式（best-effort）
-
-#### Scenario: Troubleshoot enters full mode when no trace is available (best-effort)
-- **GIVEN** 失败任务提示已展示（best-effort）
-- **AND** 该 attempt 不存在 `trace_log_path`（best-effort）
-- **WHEN** 用户点击“排障”
-- **THEN** 系统切换到完全模式（best-effort）
-- **AND** 跳转到任务工作台页面（例如 `/tasks`，best-effort）
+#### Scenario: Recovery brief is visible but not persisted into chat message list (best-effort)
+- **GIVEN** 某任务 latest attempt 跃迁到“需要处理终态”（例如 `failed/limit_exceeded/timed_out/interrupted`，best-effort）
+- **WHEN** 用户处于秘书模式并停留在对话主界面（best-effort）
+- **THEN** UI 在面板中展示该任务的低噪声 recovery brief（best-effort）
+- **AND** 不向 chat message list 追加新的 `assistant text` 消息（best-effort）
 
 ### Requirement: Secretary mode MUST surface low-noise deliverable cards for completed task artifacts (best-effort)
 系统必须 (MUST) 在 Chat 的秘书模式下，以低噪声方式呈现 Task Queue 已完成任务的“可交付产物入口”（best-effort），且交付卡片范围仅覆盖任务产物（Task artifacts），不引入额外的管理系统信息结构。
@@ -296,16 +240,16 @@ When a tool call is running, Chat UI MUST show a compact “working” indicator
 - **THEN** UI 通过恢复 secretary state 再次显示这些待确认问题（best-effort）
 
 ### Requirement: Secretary recovery messages MUST use a concrete action template (best-effort)
-Secretary-mode recovery messages MUST follow a concrete template that includes:
+Secretary-mode recovery briefs (panel-only) MUST follow a concrete template that includes:
 - what failed
 - what the system already tried (best-effort)
 - what the user can do next
 - traceable references (`task_id` / `attempt_id`)
 
-#### Scenario: Recovery message includes concrete next action
+#### Scenario: Recovery brief includes concrete next action (best-effort)
 - **GIVEN** a task enters a needs-attention terminal state
-- **WHEN** secretary posts a recovery brief
-- **THEN** the message includes a concrete next action and traceable references (best-effort)
+- **WHEN** secretary surfaces a recovery brief (panel-only)
+- **THEN** the brief includes a concrete next action and traceable references (best-effort)
 
 ### Requirement: Secretary mode MUST avoid count-only pending prompts when actionable details exist (best-effort)
 When there are pending confirmations or recovery items, secretary mode MUST avoid count-only notifications as the only surfaced content if actionable details are available.
@@ -315,4 +259,22 @@ When there are pending confirmations or recovery items, secretary mode MUST avoi
 - **WHEN** secretary mode surfaces them in chat
 - **THEN** each surfaced item includes an actionable summary (best-effort)
 - **AND** the UI does not only show a raw count
+
+### Requirement: Secretary mode MUST NOT inject task completion notifications into chat (best-effort)
+系统必须 (MUST) 在 Chat 的秘书模式下，避免在后台任务进入终态（完成/失败）时自动向 chat message list 追加过程性 `assistant text` 通知（best-effort）。任务状态与交付入口应集中在任务面板/交付卡片中呈现（best-effort），以保持主对话区为自然语言对话。
+
+#### Scenario: Task completion does not append chat messages (best-effort)
+- **GIVEN** 某任务 latest attempt 从 `queued/running` 进入终态（best-effort）
+- **WHEN** UI 在下一次轮询/刷新中观察到该状态跃迁（best-effort）
+- **THEN** chat message list 不追加新的 `assistant text` 消息（best-effort）
+- **AND** 用户可在任务面板/交付卡片中查看交付物入口（best-effort）
+
+### Requirement: Secretary local messages MUST filter legacy completion receipts (best-effort)
+系统必须 (MUST) 对历史已落盘的“任务完成/失败回执模板”做 best-effort 过滤，避免升级后回放刷屏（best-effort）。过滤仅针对旧版固定模板，不影响用户手动输入或正常对话回执（best-effort）。
+
+#### Scenario: Legacy receipts are hidden and cleaned up (best-effort)
+- **GIVEN** 本地存储存在旧版任务完成回执（best-effort）
+- **WHEN** UI 加载 secretary local messages（best-effort）
+- **THEN** 这些旧回执不被渲染到对话区（best-effort）
+- **AND** 系统 best-effort 清理本地存储中对应条目（best-effort）
 

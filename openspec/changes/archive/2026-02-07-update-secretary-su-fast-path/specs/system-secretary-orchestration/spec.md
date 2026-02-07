@@ -59,6 +59,8 @@
 - **AND** SW 不产生额外的 chat messages（best-effort）
 - **AND** 系统仍保留可追溯证据（例如 triage run 记录、policy snapshot hash 等；best-effort）
 
+## ADDED Requirements
+
 ### Requirement: Secretary MUST provide home-rooted readonly search first, then layered expansion when needed (best-effort)
 当会话未绑定 workspace 且用户意图是“查找目录/文件/仓库路径”时，系统必须 (MUST) 采用分层只读搜索策略（best-effort）：
 - 默认搜索根为当前用户 `home`（best-effort）。
