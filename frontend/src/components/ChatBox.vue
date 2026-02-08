@@ -1556,8 +1556,17 @@ const sendSecretaryMessage = async (rawMessage: string) => {
     if (Number.isFinite(serverUserID) && serverUserID > 0) {
       const optimistic = chatStore.messages.find((m) => Number(m?.id) === optimisticMessageId)
       if (optimistic && optimistic.role === 'user' && String(optimistic.content || '').trim() === message) {
-        optimistic.id = serverUserID
-        optimistic.serverId = serverUserID
+        const persisted = chatStore.messages.find(
+          (m) =>
+            m !== optimistic &&
+            (Number(m?.serverId) === serverUserID || Number(m?.id) === serverUserID)
+        )
+        if (persisted) {
+          chatStore.setMessages(chatStore.messages.filter((m) => m !== optimistic))
+        } else {
+          optimistic.id = serverUserID
+          optimistic.serverId = serverUserID
+        }
       } else {
         upsertServerTextMessage(serverUserID, 'user', message)
       }

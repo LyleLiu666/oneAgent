@@ -719,6 +719,77 @@ it('optimistically renders secretary message and prevents resubmission while pen
     expect(chat.messages.some((m: any) => m.role === 'assistant')).toBe(false)
 })
 
+it('deduplicates optimistic secretary user message when stream insert arrives before inbox response', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+
+    let onEvent: ((event: any) => void) | undefined
+    ;(apiClient.attachSecretarySessionStream as any).mockImplementation(async (cb: any) => {
+        onEvent = cb
+    })
+
+    let resolveAppend: ((value: any) => void) | undefined
+    const appendPromise = new Promise((resolve) => {
+        resolveAppend = resolve
+    })
+    ;(apiClient.appendSecretaryInboxMessage as any).mockImplementation(() => appendPromise)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('还有没完成的任务吗?')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    onEvent?.({
+        type: 'msg',
+        data: JSON.stringify({
+            op: 'insert',
+            id: '101',
+            role: 'user',
+            msg_type: 'text',
+            delta: '还有没完成的任务吗?',
+        }),
+    })
+    await flushPromises()
+
+    resolveAppend?.({
+        session_id: 's1',
+        message_id: 101,
+        ack_message_id: 0,
+        ack_text: '',
+    })
+    await flushPromises()
+
+    const userMessages = chat.messages.filter(
+        (m: any) => m.role === 'user' && String(m.content) === '还有没完成的任务吗?'
+    )
+    expect(userMessages.length).toBe(1)
+    expect(Number(userMessages[0]?.serverId || userMessages[0]?.id)).toBe(101)
+
+    wrapper.unmount()
+})
+
 it('does not start a recovery conversation in chat (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
