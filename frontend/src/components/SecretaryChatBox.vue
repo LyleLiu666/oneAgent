@@ -7,13 +7,9 @@ import { useSecretaryChatStore } from '@/stores/secretaryChat'
 import { useUIStore } from '@/stores/ui'
 import { useRouter } from 'vue-router'
 import {
-  appendSecretaryLocalMessage,
-  clearSecretaryLocalMessages,
-  mergeSecretaryLocalMessages,
-} from '@/lib/secretaryLocalMessages'
-import {
   streamChat,
   attachChatStream,
+  attachSecretarySessionStream,
   stopSessionStream,
   getSessions,
   getSession,
@@ -22,9 +18,8 @@ import {
   getTools,
   chooseWorkspaceDir,
   getConfig,
-  createTask,
+  secretaryHandoff,
   appendSecretaryInboxMessage,
-  secretaryTriage,
   getSecretaryState,
   setSecretaryRecoveryFocus,
   getSecretarySession,
@@ -102,11 +97,7 @@ const taskHandoffError = ref('')
 const taskHandoffSuccess = ref('')
 const taskHandoffSuggestOpen = ref(false)
 
-const secretaryCursorMessageId = ref(0)
 const secretaryInboxSubmitting = ref(false)
-const secretaryTriageSubmitting = ref(false)
-const secretaryTriageQueued = ref(false)
-let secretaryTriageTimer: ReturnType<typeof setTimeout> | undefined
 const secretaryTaskPanelVisible = ref(false)
 const secretaryPendingQuestions = ref<string[]>([])
 const secretaryPendingQuestionsModalOpen = ref(false)
@@ -231,14 +222,7 @@ const confirmSecretaryReset = async () => {
   secretaryResetSubmitting.value = true
   secretaryResetError.value = ''
   try {
-    if (chatStore.currentSessionId) {
-      clearSecretaryLocalMessages(chatStore.currentSessionId)
-    }
-    const resetResp: any = await resetSecretarySession()
-    const resetSessionId = String(resetResp?.session_id || '').trim()
-    if (resetSessionId) {
-      clearSecretaryLocalMessages(resetSessionId)
-    }
+    await resetSecretarySession()
     closeSecretaryResetConfirm(true)
     startNewSession()
     await loadSessionMessages('', false)
@@ -707,7 +691,6 @@ const loadSessionMessages = async (
   if (showLoading) loadingHistory.value = true
   try {
     const raw: any = isSecretaryMode.value ? await getSecretarySession() : await getSession(sessionId)
-    console.log('[ChatBox] loaded session raw:', raw)
     const resolvedSessionId = String((raw as any)?.id || sessionId || '').trim()
     if (resolvedSessionId && resolvedSessionId !== chatStore.currentSessionId) {
       chatStore.setCurrentSession(resolvedSessionId)
@@ -728,7 +711,6 @@ const loadSessionMessages = async (
     } else {
       selectedToolProtocol.value = 'json'
     }
-    const sessionSystemPrompt = raw?.metadata?.system_prompt
     const policyID = raw?.metadata?.policy_id
     const policyHash = raw?.metadata?.policy_hash
     const policyResolvedAt = raw?.metadata?.policy_resolved_at
@@ -815,25 +797,9 @@ const loadSessionMessages = async (
           trace: normalizeTrace(msg.trace),
           isStreaming: false,
         }
-      })
+      }).filter((m: ChatMessage) => m.role !== 'system')
 
-    const withSystemPrompt: ChatMessage[] =
-      typeof sessionSystemPrompt === 'string' && sessionSystemPrompt.trim()
-        ? [
-            {
-              id: -1,
-              role: 'system',
-              type: 'text',
-              rawRole: 'system',
-              rawType: 'text',
-              content: sessionSystemPrompt,
-              createdAt: new Date(raw?.created_at ?? raw?.createdAt ?? Date.now()),
-              isStreaming: false,
-            },
-            ...mapped,
-          ]
-        : mapped
-    const withPlaceholders = withSystemPrompt
+    const withPlaceholders = mapped
     const fallback = (fallbackAssistantTrace ?? '').trim()
     if (fallback) {
       for (let i = withPlaceholders.length - 1; i >= 0; i--) {
@@ -845,40 +811,16 @@ const loadSessionMessages = async (
         }
       }
     }
-    const finalMessages =
-      isSecretaryMode.value && resolvedSessionId
-        ? mergeSecretaryLocalMessages(resolvedSessionId, withPlaceholders)
-        : withPlaceholders
-    chatStore.setMessages(finalMessages)
+    chatStore.setMessages(withPlaceholders)
     scrollToBottom(false)
 
     if (isSecretaryMode.value) {
-      try {
-        const st: any = await getSecretaryState()
-        const focus = (st as any)?.recovery_focus
-        const focusTaskId = String(focus?.task_id || focus?.taskId || '').trim()
-        const focusAttemptId = String(focus?.attempt_id || focus?.attemptId || '').trim()
-        if (focusTaskId && focusAttemptId) {
-          secretaryRecoveryFocusedKey.value = `${focusTaskId}:${focusAttemptId}`
-          secretaryRecoveryFocusLastPersistedKey = secretaryRecoveryFocusedKey.value
-        } else {
-          secretaryRecoveryFocusedKey.value = ''
-          secretaryRecoveryFocusLastPersistedKey = ''
-        }
-
-        const cursor = Number((st as any)?.cursor_message_id)
-        secretaryCursorMessageId.value = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
-        const runs = Array.isArray((st as any)?.triage_runs) ? ((st as any).triage_runs as any[]) : []
-        const lastRun = runs.length > 0 ? runs[runs.length - 1] : null
-        secretaryPendingQuestions.value = normalizeSecretaryQuestions((lastRun as any)?.questions)
-      } catch (error) {
-        secretaryCursorMessageId.value = 0
-        secretaryPendingQuestions.value = []
-        console.warn('Failed to load secretary state:', error)
-      }
+      await refreshSecretaryState()
     } else {
-      secretaryCursorMessageId.value = 0
       secretaryPendingQuestions.value = []
+      secretaryPendingQuestionsModalOpen.value = false
+      secretaryRecoveryFocusedKey.value = ''
+      secretaryRecoveryFocusLastPersistedKey = ''
     }
   } catch (error) {
     console.error('Failed to load session:', error)
@@ -911,20 +853,13 @@ const startNewSession = () => {
   sessionPolicyHash.value = ''
   sessionPolicyResolvedAt.value = ''
   workspaceOnboardingDismissed.value = false
-  secretaryCursorMessageId.value = 0
   secretaryPendingQuestions.value = []
   secretaryPendingQuestionsModalOpen.value = false
-  secretaryTriageSubmitting.value = false
-  secretaryTriageQueued.value = false
   secretaryRecoveryFocusedKey.value = ''
   secretaryRecoveryFocusLastPersistedKey = ''
   if (secretaryRecoveryFocusPersistTimer) {
     clearTimeout(secretaryRecoveryFocusPersistTimer)
     secretaryRecoveryFocusPersistTimer = undefined
-  }
-  if (secretaryTriageTimer) {
-    clearTimeout(secretaryTriageTimer)
-    secretaryTriageTimer = undefined
   }
   applyWorkspaceDefaultsForNewSession()
 }
@@ -1255,9 +1190,9 @@ const attachIfNeeded = async (sessionIdRaw: string) => {
           } else if (!sawMsgEvents) {
             chatStore.addMessage({
               id: Date.now(),
-              role: 'system',
+              role: 'assistant',
               type: 'text',
-              content: suffix,
+              content: suffix.trim() || '[Error] Request failed.',
               createdAt: new Date(),
               isStreaming: false,
             })
@@ -1539,9 +1474,9 @@ const sendChat = async (rawMessage: string) => {
           } else if (!sawMsgEvents) {
             chatStore.addMessage({
               id: Date.now(),
-              role: 'system',
+              role: 'assistant',
               type: 'text',
-              content: suffix,
+              content: suffix.trim() || '[Error] Request failed.',
               createdAt: new Date(),
               isStreaming: false,
             })
@@ -1566,9 +1501,9 @@ const sendChat = async (rawMessage: string) => {
     console.error('Chat error:', error)
     chatStore.addMessage({
       id: Date.now(),
-      role: 'system',
+      role: 'assistant',
       type: 'text',
-      content: 'Failed to send message. Please try again.',
+      content: '抱歉，发送失败，请稍后再试。',
       createdAt: new Date(),
       isStreaming: false,
     })
@@ -1615,58 +1550,121 @@ const upsertServerTextMessage = (serverIdRaw: any, role: ChatMessage['role'], co
   })
 }
 
-const scheduleSecretaryTriage = () => {
-  if (secretaryTriageTimer) clearTimeout(secretaryTriageTimer)
-  secretaryTriageTimer = setTimeout(() => {
-    void runSecretaryTriage()
-  }, 900)
+const refreshSecretaryState = async () => {
+  if (!isSecretaryMode.value) return
+
+  try {
+    const st: any = await getSecretaryState()
+    const focus = (st as any)?.recovery_focus
+    const focusTaskId = String(focus?.task_id || focus?.taskId || '').trim()
+    const focusAttemptId = String(focus?.attempt_id || focus?.attemptId || '').trim()
+    if (focusTaskId && focusAttemptId) {
+      secretaryRecoveryFocusedKey.value = `${focusTaskId}:${focusAttemptId}`
+      secretaryRecoveryFocusLastPersistedKey = secretaryRecoveryFocusedKey.value
+    } else {
+      secretaryRecoveryFocusedKey.value = ''
+      secretaryRecoveryFocusLastPersistedKey = ''
+    }
+
+    const runs = Array.isArray((st as any)?.triage_runs) ? (st as any).triage_runs : []
+    if (runs.length > 0) {
+      const lastRun = runs[runs.length - 1]
+      secretaryPendingQuestions.value = normalizeSecretaryQuestions((lastRun as any)?.questions)
+    } else {
+      secretaryPendingQuestions.value = []
+    }
+
+    if (secretaryPendingQuestions.value.length === 0) {
+      secretaryPendingQuestionsModalOpen.value = false
+    }
+  } catch (error) {
+    console.warn('Failed to load secretary state:', error)
+    secretaryPendingQuestions.value = []
+    secretaryPendingQuestionsModalOpen.value = false
+    secretaryRecoveryFocusedKey.value = ''
+    secretaryRecoveryFocusLastPersistedKey = ''
+  }
 }
 
-const runSecretaryTriage = async () => {
-  if (secretaryTriageSubmitting.value) {
-    secretaryTriageQueued.value = true
-    return
-  }
+const attachSecretaryStream = () => {
+  if (!isSecretaryMode.value) return
 
-  secretaryTriageSubmitting.value = true
+  const abort = new AbortController()
   try {
-    const payload: any = {
-      cursor_message_id: Number(secretaryCursorMessageId.value || 0),
-    }
-    const res: any = await secretaryTriage(payload)
-
-    const serverSessionId = String(res?.session_id || '').trim()
-    if (serverSessionId && serverSessionId !== chatStore.currentSessionId) {
-      chatStore.setCurrentSession(serverSessionId)
-    }
-
-    const nextCursor = Number(res?.cursor_message_id)
-    if (Number.isFinite(nextCursor) && nextCursor >= 0) {
-      secretaryCursorMessageId.value = nextCursor
-    }
-
-    upsertServerTextMessage(res?.summary_message_id, 'assistant', res?.summary_message)
-    const nextQuestions = normalizeSecretaryQuestions(res?.questions)
-    secretaryPendingQuestions.value = nextQuestions
-    if (nextQuestions.length === 0) secretaryPendingQuestionsModalOpen.value = false
-    loadSessions()
-  } catch (error) {
-    console.error('Failed to triage secretary inbox:', error)
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'system',
-      type: 'text',
-      content: '秘书归并失败，请稍后再试。',
-      createdAt: new Date(),
-      isStreaming: false,
-    })
-  } finally {
-    secretaryTriageSubmitting.value = false
-    if (secretaryTriageQueued.value) {
-      secretaryTriageQueued.value = false
-      scheduleSecretaryTriage()
-    }
+    activeStreamAbort.value?.abort()
+  } catch {
+    // ignore
   }
+  activeStreamAbort.value = abort
+
+  type StreamMsgEvent = {
+    op: 'start' | 'delta' | 'final' | 'insert'
+    id: string
+    role?: string
+    msg_type?: string
+    delta?: string
+  }
+
+  const normalizeRole = (raw: string | undefined): ChatMessage['role'] => {
+    const role = String(raw || '').toLowerCase()
+    if (role === 'user') return 'user'
+    if (role === 'assistant') return 'assistant'
+    if (role === 'tool') return 'tool'
+    if (role === 'system') return 'system'
+    return 'system'
+  }
+
+  const normalizeType = (raw: string | undefined): ChatMessage['type'] => {
+    const type = String(raw || '').toLowerCase()
+    if (type === 'tool_call') return 'tool_call'
+    if (type === 'tool_result') return 'tool_result'
+    return 'text'
+  }
+
+  void attachSecretarySessionStream(
+    (event) => {
+      if (event.type === 'session') {
+        const sid = String(event.data || '').trim()
+        if (sid) chatStore.setCurrentSession(sid)
+        return
+      }
+      if (event.type !== 'msg') return
+
+      const payload = safeJsonParse<StreamMsgEvent>(event.data)
+      if (!payload || payload.op !== 'insert' || !payload.id) return
+
+      const serverId = Number(payload.id)
+      if (!Number.isFinite(serverId) || serverId <= 0) return
+      if (chatStore.messages.some((m) => Number(m.serverId) === serverId || Number(m.id) === serverId)) return
+
+      const rawRole = payload.role
+      const rawType = payload.msg_type
+      const role = normalizeRole(rawRole)
+      const type = normalizeType(rawType)
+      const content = typeof payload.delta === 'string' ? payload.delta : ''
+
+      chatStore.addMessage({
+        id: serverId,
+        serverId,
+        role,
+        type,
+        rawRole,
+        rawType,
+        content,
+        createdAt: new Date(),
+        isStreaming: false,
+      })
+      scrollToBottom(false)
+
+      if (role === 'assistant') {
+        void refreshSecretaryState()
+      }
+    },
+    (error) => {
+      console.error('Secretary stream error:', error)
+    },
+    abort.signal
+  )
 }
 
 const sendSecretaryMessage = async (rawMessage: string) => {
@@ -1728,8 +1726,6 @@ const sendSecretaryMessage = async (rawMessage: string) => {
       sessionWorkspace.value = workspaceToBind
       workspacePath.value = workspaceToBind
     }
-
-    scheduleSecretaryTriage()
   } catch (error) {
     console.error('Failed to append secretary inbox message:', error)
     // Mark the optimistic message as failed (best-effort).
@@ -1739,7 +1735,7 @@ const sendSecretaryMessage = async (rawMessage: string) => {
     }
     chatStore.addMessage({
       id: Date.now(),
-      role: 'system',
+      role: 'assistant',
       type: 'text',
       content: '发送失败，请稍后再试。',
       createdAt: new Date(),
@@ -2034,47 +2030,20 @@ const handoffToTask = async () => {
       return
     }
 
-    const created = await createTask({
+    const res: any = await secretaryHandoff({
       workspace: ws,
       prompt,
       model_id: String(selectedModelId.value || '').trim() || undefined,
     })
 
-    const now = new Date()
-    const userMsg =
-      appendSecretaryLocalMessage(chatStore.currentSessionId, {
-        role: 'user',
-        type: 'text',
-        content: prompt,
-        createdAt: now,
-      }) ||
-      ({
-        id: Date.now(),
-        role: 'user',
-        type: 'text',
-        content: prompt,
-        createdAt: now,
-        isStreaming: false,
-      } as ChatMessage)
+    const serverSessionId = String(res?.session_id || '').trim()
+    if (serverSessionId && serverSessionId !== chatStore.currentSessionId) {
+      chatStore.setCurrentSession(serverSessionId)
+    }
 
-    const ackMsg =
-      appendSecretaryLocalMessage(chatStore.currentSessionId, {
-        role: 'assistant',
-        type: 'text',
-        content: `收到。我已把这件事交给后台任务处理（task=${String((created as any)?.id || '').slice(0, 8) || 'unknown'}）。完成后你会在「交付」看到产物。`,
-        createdAt: now,
-      }) ||
-      ({
-        id: Date.now() + 1,
-        role: 'assistant',
-        type: 'text',
-        content: `收到。我已把这件事交给后台任务处理（task=${String((created as any)?.id || '').slice(0, 8) || 'unknown'}）。完成后你会在「交付」看到产物。`,
-        createdAt: now,
-        isStreaming: false,
-      } as ChatMessage)
-
-    chatStore.addMessage(userMsg)
-    chatStore.addMessage(ackMsg)
+    upsertServerTextMessage(res?.user_message_id, 'user', prompt)
+    upsertServerTextMessage(res?.assistant_message_id, 'assistant', res?.receipt_text)
+    loadSessions()
 
     inputMessage.value = ''
     if (inputEl.value) inputEl.value.style.height = ''
@@ -2097,18 +2066,8 @@ onMounted(async () => {
   await loadSessions()
 
   if (isSecretaryMode.value) {
-    try {
-      const st: any = await getSecretaryState()
-      const sid = String(st?.session_id || '').trim()
-      if (sid) {
-        await loadSessionMessages(sid)
-      } else {
-        chatStore.clearMessages()
-      }
-    } catch (error) {
-      console.warn('Failed to bootstrap secretary session:', error)
-      chatStore.clearMessages()
-    }
+    await loadSessionMessages('')
+    attachSecretaryStream()
   } else {
     const persistedId = chatStore.currentSessionId
     if (persistedId) {
@@ -2133,10 +2092,6 @@ onUnmounted(() => {
     // ignore
   } finally {
     activeStreamAbort.value = null
-  }
-  if (secretaryTriageTimer) {
-    clearTimeout(secretaryTriageTimer)
-    secretaryTriageTimer = undefined
   }
   if (secretaryRecoveryFocusPersistTimer) {
     clearTimeout(secretaryRecoveryFocusPersistTimer)

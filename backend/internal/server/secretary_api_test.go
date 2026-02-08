@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
@@ -329,6 +332,449 @@ func TestServer_SecretaryInboxAndTriage_SmokeAndIdempotency(t *testing.T) {
 	}
 	if len(st.TriageRuns) == 0 {
 		t.Fatalf("expected triage_runs in state")
+	}
+}
+
+func TestServer_SecretaryHandoff_PersistsReceiptWithoutInjectingSystemMessages(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	// Minimal task runner to satisfy handoff dependencies.
+	rt.TaskRunner = &taskqueue.TaskRunner{
+		Store: rt.Tasks,
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, _ *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+	}
+	if err := rt.TaskRunner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	workspace := t.TempDir()
+
+	var handoff struct {
+		SessionID          string `json:"session_id"`
+		TaskID             string `json:"task_id"`
+		UserMessageID      uint   `json:"user_message_id"`
+		AssistantMessageID uint   `json:"assistant_message_id"`
+		ReceiptText        string `json:"receipt_text"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/handoff", map[string]any{
+		"workspace": workspace,
+		"prompt":    "do the thing",
+	}, &handoff)
+
+	if strings.TrimSpace(handoff.SessionID) == "" || strings.TrimSpace(handoff.TaskID) == "" {
+		t.Fatalf("unexpected handoff response: %+v", handoff)
+	}
+	if handoff.UserMessageID == 0 || handoff.AssistantMessageID == 0 {
+		t.Fatalf("expected message ids, got %+v", handoff)
+	}
+	if strings.TrimSpace(handoff.ReceiptText) == "" {
+		t.Fatalf("expected non-empty receipt text, got %+v", handoff)
+	}
+
+	if _, err := rt.Tasks.GetTask(handoff.TaskID); err != nil {
+		t.Fatalf("expected created task %q, err=%v", handoff.TaskID, err)
+	}
+
+	sessionBody := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
+	var sess struct {
+		ID       string `json:"id"`
+		Messages []struct {
+			ID      uint   `json:"id"`
+			Role    string `json:"role"`
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(sessionBody, &sess); err != nil {
+		t.Fatalf("unmarshal session: %v", err)
+	}
+	if sess.ID != handoff.SessionID {
+		t.Fatalf("expected secretary session id=%q, got %q", handoff.SessionID, sess.ID)
+	}
+
+	var foundUser, foundAssistant bool
+	for _, m := range sess.Messages {
+		if m.ID == handoff.UserMessageID {
+			foundUser = true
+			if m.Role != "user" {
+				t.Fatalf("expected user role for message %d, got %q", m.ID, m.Role)
+			}
+			if strings.TrimSpace(m.Content) != "do the thing" {
+				t.Fatalf("unexpected user receipt content: %q", m.Content)
+			}
+			if m.Type == "text" {
+				t.Fatalf("expected handoff receipt message to not be triaged as text, got type=%q", m.Type)
+			}
+		}
+		if m.ID == handoff.AssistantMessageID {
+			foundAssistant = true
+			if m.Role != "assistant" {
+				t.Fatalf("expected assistant role for message %d, got %q", m.ID, m.Role)
+			}
+			if strings.TrimSpace(m.Content) != strings.TrimSpace(handoff.ReceiptText) {
+				t.Fatalf("unexpected assistant receipt content: %q", m.Content)
+			}
+		}
+		if m.Role == "system" {
+			t.Fatalf("expected no system messages in secretary receipt, got %+v", m)
+		}
+	}
+	if !foundUser || !foundAssistant {
+		t.Fatalf("missing receipt messages in session, got %+v", sess.Messages)
+	}
+
+	// Ensure triage ignores the handoff receipt messages.
+	var triage struct {
+		SummaryMessage   string   `json:"summary_message"`
+		SummaryMessageID uint     `json:"summary_message_id"`
+		CursorMessageID  uint     `json:"cursor_message_id"`
+		CreatedTaskIDs   []string `json:"created_task_ids"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/triage", map[string]any{}, &triage)
+	if strings.TrimSpace(triage.SummaryMessage) != "" || triage.SummaryMessageID != 0 || triage.CursorMessageID != 0 {
+		t.Fatalf("expected empty triage after handoff, got %+v", triage)
+	}
+	if len(triage.CreatedTaskIDs) != 0 {
+		t.Fatalf("expected no created_task_ids from triage, got %+v", triage.CreatedTaskIDs)
+	}
+}
+
+func TestServer_SecretaryAutoTriage_DebouncedAppendsSummary(t *testing.T) {
+	poolRoot := t.TempDir()
+	t.Setenv("ONEAGENT_WORKSPACE_POOL_DIR", poolRoot)
+	t.Setenv("ONEAGENT_SECRETARY_AUTOTRIAGE_DEBOUNCE_MS", "10")
+
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	// Stub task runner so tests don't require a real subagent/tool environment.
+	rt.TaskRunner = &taskqueue.TaskRunner{
+		Store: rt.Tasks,
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, _ *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+	}
+	if err := rt.TaskRunner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+
+	// Mock OpenAI-compatible endpoint for triage.
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		system := ""
+		for _, m := range req.Messages {
+			if m.Role == "system" && system == "" {
+				system = m.Content
+			}
+		}
+
+		if !strings.Contains(system, "ONEAGENT_SECRETARY_SU_TRIAGE") {
+			http.Error(w, "unexpected system prompt", http.StatusBadRequest)
+			return
+		}
+
+		args := `{"intent":"dispatch","summary_message":"我理解为 2 件事：①整理一份报告；②跑 backend 测试。我已分别安排 worker。","tasks":[{"title":"整理报告","prompt":"整理一份报告，输出 report.md，并确保内容结构清晰。","workspace_strategy":"new"},{"title":"跑 backend 测试","prompt":"在 repo 内运行 go test ./...，如失败请修复并补齐测试。","workspace_strategy":"session"}],"questions":[]}`
+		resp := map[string]any{
+			"id": "cmpl-test",
+			"choices": []any{
+				map[string]any{
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "",
+						"tool_calls": []any{
+							map[string]any{
+								"id":   "call_1",
+								"type": "function",
+								"function": map[string]any{
+									"name":      "secretary_triage_plan",
+									"arguments": args,
+								},
+							},
+						},
+					},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(mock.Close)
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
+
+	workspace := t.TempDir()
+
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content":   "帮我整理一份报告",
+		"workspace": workspace,
+	}, nil)
+
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content": "另外也跑一下 backend 测试",
+	}, nil)
+
+	deadline := time.Now().Add(3 * time.Second)
+	var sess struct {
+		ID       string `json:"id"`
+		Messages []struct {
+			ID      uint   `json:"id"`
+			Role    string `json:"role"`
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+
+	for {
+		body := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
+		if err := json.Unmarshal(body, &sess); err != nil {
+			t.Fatalf("unmarshal session: %v", err)
+		}
+
+		assistantCount := 0
+		for _, m := range sess.Messages {
+			if m.Role == "assistant" && m.Type == "text" && strings.TrimSpace(m.Content) != "" {
+				assistantCount++
+			}
+		}
+
+		if assistantCount >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for auto triage summary, got %+v", sess.Messages)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	userCount := 0
+	assistantCount := 0
+	summarySeen := false
+	for _, m := range sess.Messages {
+		switch m.Role {
+		case "user":
+			userCount++
+		case "assistant":
+			assistantCount++
+			if strings.Contains(m.Content, "我理解为 2 件事") {
+				summarySeen = true
+			}
+		}
+	}
+	if userCount != 2 {
+		t.Fatalf("expected 2 user messages, got %d: %+v", userCount, sess.Messages)
+	}
+	if assistantCount != 1 {
+		t.Fatalf("expected 1 assistant summary, got %d: %+v", assistantCount, sess.Messages)
+	}
+	if !summarySeen {
+		t.Fatalf("expected summary to mention mock content, got %+v", sess.Messages)
+	}
+
+	tasks, _ := rt.Tasks.ListTasks("local", "")
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks created, got %d", len(tasks))
+	}
+}
+
+func TestServer_SecretarySessionStream_BroadcastsInboxMessages(t *testing.T) {
+	t.Setenv("ONEAGENT_SECRETARY_AUTOTRIAGE_DEBOUNCE_MS", "0")
+
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/secretary/session/stream", nil)
+	if err != nil {
+		t.Fatalf("new stream request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+rt.AuthToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("stream status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	type streamMsgWithID struct {
+		Op      string `json:"op"`
+		ID      string `json:"id"`
+		Role    string `json:"role,omitempty"`
+		MsgType string `json:"msg_type,omitempty"`
+		Delta   string `json:"delta,omitempty"`
+	}
+
+	ready := make(chan struct{})
+	got := make(chan streamMsgWithID, 1)
+
+	go func() {
+		defer close(got)
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if strings.HasPrefix(line, ":") {
+				continue
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			var evt streamEvent
+			if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+				continue
+			}
+			if evt.Type == "session" {
+				select {
+				case <-ready:
+				default:
+					close(ready)
+				}
+				continue
+			}
+			if evt.Type != "msg" || strings.TrimSpace(evt.Data) == "" {
+				continue
+			}
+			var msg streamMsgWithID
+			if err := json.Unmarshal([]byte(evt.Data), &msg); err != nil {
+				continue
+			}
+			if msg.Op != "insert" {
+				continue
+			}
+			got <- msg
+			return
+		}
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for stream readiness")
+	}
+
+	var inboxResp struct {
+		MessageID uint `json:"message_id"`
+	}
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content": "hi",
+	}, &inboxResp)
+	if inboxResp.MessageID == 0 {
+		t.Fatalf("expected message_id, got %+v", inboxResp)
+	}
+
+	select {
+	case msg := <-got:
+		if msg.Role != "user" || msg.MsgType != "text" || strings.TrimSpace(msg.Delta) != "hi" {
+			t.Fatalf("unexpected stream msg: %+v", msg)
+		}
+		if strings.TrimSpace(msg.ID) != fmt.Sprintf("%d", inboxResp.MessageID) {
+			t.Fatalf("expected stream msg id=%d, got %+v", inboxResp.MessageID, msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for insert msg")
 	}
 }
 

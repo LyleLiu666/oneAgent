@@ -74,10 +74,12 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 
 		secretaryHandler := handler.NewSecretaryHandler(rt)
 		api.POST("/secretary/inbox/messages", secretaryHandler.AppendInboxMessage)
+		api.POST("/secretary/handoff", secretaryHandler.HandoffTask)
 		api.POST("/secretary/triage", secretaryHandler.Triage)
 		api.GET("/secretary/state", secretaryHandler.GetState)
 		api.POST("/secretary/recovery/focus", secretaryHandler.SetRecoveryFocus)
 		api.GET("/secretary/session", secretaryHandler.GetSession)
+		api.GET("/secretary/session/stream", secretaryHandler.AttachSessionStream)
 		api.POST("/secretary/session/reset", secretaryHandler.ResetSession)
 
 		channelRelayHandler := handler.NewChannelRelayHandler(rt)

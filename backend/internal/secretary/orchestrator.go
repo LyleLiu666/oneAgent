@@ -2459,6 +2459,13 @@ func (o *Orchestrator) buildProgressReply(userID, workspace string, st State) (s
 			created[id] = true
 		}
 	}
+	for _, id := range st.TrackedTaskIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		created[id] = true
+	}
 
 	running := 0
 	queued := 0

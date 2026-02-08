@@ -256,6 +256,38 @@ export async function attachChatStream(
   }
 }
 
+/**
+ * Attach to the secretary session stream (best-effort).
+ */
+export async function attachSecretarySessionStream(
+  onEvent: (event: StreamEvent) => void,
+  onError: (error: Error) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const authStore = useAuthStore();
+
+  try {
+    const response = await fetch(`${API_BASE}/api/secretary/session/stream`, {
+      method: "GET",
+      signal,
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${authStore.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    await consumeSSE(response, onEvent);
+  } catch (error) {
+    const e = error as any;
+    if (e?.name === "AbortError") return;
+    onError(error as Error);
+  }
+}
+
 export async function stopSessionStream(sessionId: string) {
   const id = String(sessionId || "").trim();
   if (!id) throw new Error("sessionId is required");
@@ -320,6 +352,23 @@ export async function appendSecretaryInboxMessage(payload: {
   workspace?: string;
 }): Promise<SecretaryInboxAppendResponse> {
   return api("/api/secretary/inbox/messages", { method: "POST", body: payload });
+}
+
+export interface SecretaryHandoffResponse {
+  session_id: string;
+  task_id: string;
+  user_message_id: number;
+  assistant_message_id: number;
+  receipt_text: string;
+}
+
+export async function secretaryHandoff(payload: {
+  workspace: string;
+  prompt: string;
+  model_id?: string;
+  limits?: TaskLimits;
+}): Promise<SecretaryHandoffResponse> {
+  return api("/api/secretary/handoff", { method: "POST", body: payload });
 }
 
 export interface SecretaryTriageResponse {

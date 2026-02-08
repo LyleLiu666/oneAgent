@@ -9,6 +9,7 @@ import * as apiClient from '@/api/client'
 vi.mock('@/api/client', () => ({
     streamChat: vi.fn(),
     attachChatStream: vi.fn(),
+    attachSecretarySessionStream: vi.fn(),
     stopSessionStream: vi.fn(),
     appendSecretaryInboxMessage: vi.fn(),
     secretaryTriage: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('@/api/client', () => ({
     denyToolApproval: vi.fn(),
     // Task queue (used by TaskQueuePanel).
     createTask: vi.fn(),
+    secretaryHandoff: vi.fn(),
     listTasks: vi.fn(async () => []),
     getTask: vi.fn(),
     getTaskEvents: vi.fn(async () => []),
@@ -368,16 +370,16 @@ it('hands off input to task queue in secretary mode', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
 
-    ;(apiClient.createTask as any).mockResolvedValueOnce({
-        id: 't1',
-        user_id: 'local',
-        workspace: '/tmp/workspace',
-        title: 'T1',
-        prompt: 'do the thing',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        attempts: [],
+    ;(apiClient.secretaryHandoff as any).mockResolvedValueOnce({
+        session_id: 's1',
+        task_id: 't1',
+        user_message_id: 101,
+        assistant_message_id: 102,
+        receipt_text: '已交给后台处理，交付物会出现在交付区。',
     })
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
 
     const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
@@ -395,13 +397,18 @@ it('hands off input to task queue in secretary mode', async () => {
     await flushPromises()
 
     expect(apiClient.chooseWorkspaceDir).toHaveBeenCalledTimes(1)
-    expect(apiClient.createTask).toHaveBeenCalledTimes(1)
-    expect(apiClient.createTask).toHaveBeenCalledWith({
+    expect(apiClient.secretaryHandoff).toHaveBeenCalledTimes(1)
+    expect(apiClient.secretaryHandoff).toHaveBeenCalledWith({
         workspace: '/tmp/workspace',
         prompt: 'do the thing',
         model_id: undefined,
     })
+    expect(apiClient.createTask).not.toHaveBeenCalled()
     expect(apiClient.streamChat).not.toHaveBeenCalled()
+
+    expect(chat.messages.some((m: any) => m.role === 'user' && m.content === 'do the thing')).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content).includes('交付区'))).toBe(true)
+    expect(chat.messages.some((m: any) => m.role === 'system')).toBe(false)
 
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
 })
@@ -435,7 +442,7 @@ it('does not handoff to task queue when workspace selection is canceled', async 
     await wrapper.get('[data-testid="chat-handoff-task"]').trigger('click')
     await flushPromises()
 
-    expect(apiClient.createTask).not.toHaveBeenCalled()
+    expect(apiClient.secretaryHandoff).not.toHaveBeenCalled()
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('do the thing')
 })
 
@@ -481,180 +488,137 @@ it('sends messages via secretary inbox API in secretary mode', async () => {
 })
 
 it('surfaces pending triage questions in a modal (secretary mode)', async () => {
-    vi.useFakeTimers()
-    try {
-        const flush = async () => {
-            const p = flushPromises()
-            vi.advanceTimersByTime(0)
-            await p
-        }
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
 
-        const store = new Map<string, string>()
-        vi.stubGlobal('localStorage', {
-            getItem: (key: string) => store.get(key) ?? null,
-            setItem: (key: string, value: string) => void store.set(key, String(value)),
-            removeItem: (key: string) => void store.delete(key),
-            clear: () => void store.clear(),
-        })
+    const pinia = createPinia()
+    setActivePinia(pinia)
 
-        const pinia = createPinia()
-        setActivePinia(pinia)
+    let onEvent: ((event: any) => void) | undefined
+    ;(apiClient.attachSecretarySessionStream as any).mockImplementation(async (cb: any) => {
+        onEvent = cb
+    })
 
-        ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+    ;(apiClient.getSecretaryState as any)
+        .mockResolvedValueOnce({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })
+        .mockResolvedValueOnce({
             session_id: 's1',
-            message_id: 1,
-            ack_message_id: 0,
-            ack_text: '',
-        })
-
-        ;(apiClient.secretaryTriage as any).mockResolvedValueOnce({
-            session_id: 's1',
-            summary_message: '我这边卡在一个点，需要你确认。',
-            summary_message_id: 10,
             cursor_message_id: 1,
-            created_task_ids: [],
-            questions: ['用哪个目录来做？'],
-            workspaces_created: [],
+            triage_runs: [
+                {
+                    from_cursor: 0,
+                    to_message_id: 1,
+                    questions: ['用哪个目录来做？'],
+                },
+            ],
         })
 
-        const { default: ChatBox } = await import('@/components/ChatBox.vue')
+    ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+        session_id: 's1',
+        message_id: 1,
+        ack_message_id: 0,
+        ack_text: '',
+    })
 
-        const wrapper = shallowMount(ChatBox, {
-            props: { initialMode: 'secretary' },
-            global: {
-                plugins: [pinia],
-            },
-        })
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
-        await flush()
-        await flush()
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
 
-        await wrapper.get('textarea').setValue('帮我修一下测试')
-        await wrapper.get('[data-testid="chat-send"]').trigger('click')
-        await flush()
-        await flush()
+    await flushPromises()
+    await flushPromises()
 
-        expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
+    expect(apiClient.attachSecretarySessionStream).toHaveBeenCalledTimes(1)
 
-        await vi.advanceTimersByTimeAsync(900)
-        await flush()
+    await wrapper.get('textarea').setValue('帮我修一下测试')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
 
-        expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
-        expect(wrapper.find('[data-testid="secretary-pending-questions"]').exists()).toBe(true)
-        expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(1)
+    expect(apiClient.secretaryTriage).not.toHaveBeenCalled()
 
-        await wrapper.get('[data-testid="secretary-pending-questions"]').trigger('click')
-        await flush()
-        expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
-        expect(wrapper.text()).toContain('用哪个目录来做？')
+    onEvent?.({
+        type: 'msg',
+        data: JSON.stringify({
+            op: 'insert',
+            id: '10',
+            role: 'assistant',
+            msg_type: 'text',
+            delta: '我这边卡在一个点，需要你确认。',
+        }),
+    })
 
-        await wrapper.get('[data-testid="secretary-pending-questions-modal-close"]').trigger('click')
-        await flush()
-        expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+    await flushPromises()
+    await flushPromises()
 
-        wrapper.unmount()
-    } finally {
-        vi.useRealTimers()
-    }
+    expect(wrapper.find('[data-testid="secretary-pending-questions"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="secretary-pending-questions"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('用哪个目录来做？')
+
+    await wrapper.get('[data-testid="secretary-pending-questions-modal-close"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
+
+    wrapper.unmount()
 })
 
-it('allows multiple sends in secretary mode and debounces triage', async () => {
-    vi.useFakeTimers()
-    try {
-        const flush = async () => {
-            const p = flushPromises()
-            vi.advanceTimersByTime(0)
-            await p
-        }
+it('allows multiple sends in secretary mode without calling triage', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
 
-        const store = new Map<string, string>()
-        vi.stubGlobal('localStorage', {
-            getItem: (key: string) => store.get(key) ?? null,
-            setItem: (key: string, value: string) => void store.set(key, String(value)),
-            removeItem: (key: string) => void store.delete(key),
-            clear: () => void store.clear(),
-        })
+    const pinia = createPinia()
+    setActivePinia(pinia)
 
-        const pinia = createPinia()
-        setActivePinia(pinia)
+    ;(apiClient.appendSecretaryInboxMessage as any)
+        .mockResolvedValueOnce({ session_id: 's1', message_id: 1, ack_message_id: 0, ack_text: '' })
+        .mockResolvedValueOnce({ session_id: 's1', message_id: 3, ack_message_id: 0, ack_text: '' })
+        .mockResolvedValueOnce({ session_id: 's1', message_id: 5, ack_message_id: 0, ack_text: '' })
 
-        ;(apiClient.appendSecretaryInboxMessage as any)
-            .mockResolvedValueOnce({ session_id: 's1', message_id: 1, ack_message_id: 0, ack_text: '' })
-            .mockResolvedValueOnce({ session_id: 's1', message_id: 3, ack_message_id: 0, ack_text: '' })
-            .mockResolvedValueOnce({ session_id: 's1', message_id: 5, ack_message_id: 0, ack_text: '' })
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
 
-        let resolveFirstTriage: (value: any) => void
-        const firstTriage = new Promise((resolve) => {
-            resolveFirstTriage = resolve
-        })
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
 
-        ;(apiClient.secretaryTriage as any)
-            .mockReturnValueOnce(firstTriage)
-            .mockResolvedValueOnce({
-                summary_message: 'sum2',
-                summary_message_id: 20,
-                cursor_message_id: 5,
-                created_task_ids: [],
-                questions: [],
-                workspaces_created: [],
-            })
+    await flushPromises()
 
-        const { default: ChatBox } = await import('@/components/ChatBox.vue')
+    await wrapper.get('textarea').setValue('m1')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
 
-        const wrapper = shallowMount(ChatBox, {
-            props: { initialMode: 'secretary' },
-            global: {
-                plugins: [pinia],
-            },
-        })
+    await wrapper.get('textarea').setValue('m2')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
 
-        await flush()
+    await wrapper.get('textarea').setValue('m3')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
 
-        await wrapper.get('textarea').setValue('m1')
-        await wrapper.get('[data-testid="chat-send"]').trigger('click')
-        await flush()
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(3)
+    expect(apiClient.secretaryTriage).not.toHaveBeenCalled()
 
-        await wrapper.get('textarea').setValue('m2')
-        await wrapper.get('[data-testid="chat-send"]').trigger('click')
-        await flush()
-
-        expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(2)
-
-        // Debounce: only one triage call after the burst.
-        vi.advanceTimersByTime(900)
-        await flush()
-        expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
-
-        // While triage is still in-flight, sending another message should still work.
-        await wrapper.get('textarea').setValue('m3')
-        await wrapper.get('[data-testid="chat-send"]').trigger('click')
-        await flush()
-        expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledTimes(3)
-
-        // Let the queued debounce fire while triage is still in-flight.
-        vi.advanceTimersByTime(900)
-        await flush()
-        expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
-
-        // Finish first triage, then queued triage should run once more.
-        resolveFirstTriage!({
-            summary_message: 'sum1',
-            summary_message_id: 10,
-            cursor_message_id: 4,
-            created_task_ids: [],
-            questions: [],
-            workspaces_created: [],
-        })
-        await flush()
-
-        vi.advanceTimersByTime(900)
-        await flush()
-        expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(2)
-
-        wrapper.unmount()
-    } finally {
-        vi.useRealTimers()
-    }
+    wrapper.unmount()
 })
 
 it('does not inject chat messages when receiving a task-completed event (secretary mode)', async () => {

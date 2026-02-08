@@ -24,6 +24,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/api/client', () => ({
   streamChat: vi.fn(),
   attachChatStream: vi.fn(),
+  attachSecretarySessionStream: vi.fn(),
   stopSessionStream: vi.fn(),
   getSessions: vi.fn(async () => []),
   getSession: vi.fn(async () => ({ id: 's-full', messages: [], metadata: {} })),
@@ -33,6 +34,7 @@ vi.mock('@/api/client', () => ({
   chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
   createTask: vi.fn(),
+  secretaryHandoff: vi.fn(),
   resumeTask: vi.fn(),
   appendSecretaryInboxMessage: vi.fn(),
   secretaryTriage: vi.fn(),
@@ -60,6 +62,59 @@ vi.mock('@/api/client', () => ({
   listTaskAttemptFiles: vi.fn(),
   readTaskAttemptFileSnapshot: vi.fn(),
 }))
+
+it('hands off input to task queue and appends a persisted receipt (SecretaryChatBox)', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  ;(apiClient.secretaryHandoff as any).mockResolvedValueOnce({
+    session_id: 's1',
+    task_id: 't1',
+    user_message_id: 11,
+    assistant_message_id: 12,
+    receipt_text: '已交给后台处理，交付物会出现在交付区。',
+  })
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { useSecretaryChatStore } = await import('@/stores/secretaryChat')
+  const chat = useSecretaryChatStore()
+  chat.setMessages([])
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  await wrapper.get('textarea').setValue('do the thing')
+  await wrapper.get('[data-testid="chat-handoff-task"]').trigger('click')
+  await flushPromises()
+
+  expect(apiClient.chooseWorkspaceDir).toHaveBeenCalledTimes(1)
+  expect(apiClient.secretaryHandoff).toHaveBeenCalledTimes(1)
+  expect(apiClient.secretaryHandoff).toHaveBeenCalledWith({
+    workspace: '/tmp/workspace',
+    prompt: 'do the thing',
+    model_id: undefined,
+  })
+  expect(apiClient.createTask).not.toHaveBeenCalled()
+
+  expect(chat.messages.some((m: any) => m.role === 'user' && m.content === 'do the thing')).toBe(true)
+  expect(chat.messages.some((m: any) => m.role === 'assistant' && String(m.content).includes('交付区'))).toBe(true)
+  expect(chat.messages.some((m: any) => m.role === 'system')).toBe(false)
+
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+
+  wrapper.unmount()
+})
 
 it('closes reset modal after confirming reset', async () => {
   vi.stubGlobal('localStorage', makeLocalStorage())

@@ -5,6 +5,7 @@ import "time"
 type State struct {
 	CursorMessageID uint        `json:"cursor_message_id"`
 	TriageRuns      []TriageRun `json:"triage_runs,omitempty"`
+	TrackedTaskIDs  []string    `json:"tracked_task_ids,omitempty"`
 
 	RecoveryFocus *RecoveryFocus `json:"recovery_focus,omitempty"`
 }
@@ -60,6 +61,7 @@ type TriageResult struct {
 type StateResult struct {
 	CursorMessageID uint        `json:"cursor_message_id"`
 	TriageRuns      []TriageRun `json:"triage_runs,omitempty"`
+	TrackedTaskIDs  []string    `json:"tracked_task_ids,omitempty"`
 
 	RecoveryFocus *RecoveryFocus `json:"recovery_focus,omitempty"`
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
@@ -14,6 +14,7 @@ vi.mock('vue-router', () => ({
 
 vi.mock('@/api/client', () => ({
   streamChat: vi.fn(),
+  attachSecretarySessionStream: vi.fn(),
   appendSecretaryInboxMessage: vi.fn(),
   secretaryTriage: vi.fn(),
   getSecretaryState: vi.fn(async () => ({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })),
@@ -39,6 +40,11 @@ vi.mock('@/api/client', () => ({
 }))
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  routerPush.mockReset()
+})
 
 const stubLocalStorage = () => {
   const store = new Map<string, string>()
@@ -120,18 +126,15 @@ it('hides low-frequency UI in secretary mode and keeps full mode discoverable', 
 })
 
 it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
-  vi.useFakeTimers()
-
-  const flush = async () => {
-    const p = flushPromises()
-    vi.advanceTimersByTime(0)
-    await p
-  }
-
   stubLocalStorage()
 
   const pinia = createPinia()
   setActivePinia(pinia)
+
+  let onEvent: ((event: any) => void) | undefined
+  ;(apiClient.attachSecretarySessionStream as any).mockImplementation(async (cb: any) => {
+    onEvent = cb
+  })
 
   ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
     session_id: 's1',
@@ -140,15 +143,19 @@ it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
     ack_text: '',
   })
 
-  ;(apiClient.secretaryTriage as any).mockResolvedValueOnce({
-    session_id: 's1',
-    summary_message: '我这边卡在一个点，需要你确认。',
-    summary_message_id: 10,
-    cursor_message_id: 1,
-    created_task_ids: [],
-    questions: ['用哪个目录来做？'],
-    workspaces_created: [],
-  })
+  ;(apiClient.getSecretaryState as any)
+    .mockResolvedValueOnce({ session_id: 's1', cursor_message_id: 0, triage_runs: [] })
+    .mockResolvedValueOnce({
+      session_id: 's1',
+      cursor_message_id: 1,
+      triage_runs: [
+        {
+          from_cursor: 0,
+          to_message_id: 1,
+          questions: ['用哪个目录来做？'],
+        },
+      ],
+    })
 
   const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
   const wrapper = shallowMount(SecretaryChatBox, {
@@ -160,37 +167,48 @@ it('shows pending triage questions in a modal (SecretaryChatBox)', async () => {
     },
   })
 
-  await flush()
+  await flushPromises()
+  await flushPromises()
+
+  expect(apiClient.attachSecretarySessionStream).toHaveBeenCalledTimes(1)
 
   await wrapper.get('textarea').setValue('帮我修一下测试')
   await wrapper.get('[data-testid="chat-send"]').trigger('click')
-  await flush()
+  await flushPromises()
 
   const appendArgs = (apiClient.appendSecretaryInboxMessage as any).mock.calls[0]?.[0]
   expect(appendArgs).toBeTruthy()
   expect(appendArgs).not.toHaveProperty('session_id')
 
-  vi.advanceTimersByTime(900)
-  await flush()
+  expect(apiClient.secretaryTriage).not.toHaveBeenCalled()
 
-  expect(apiClient.secretaryTriage).toHaveBeenCalledTimes(1)
-  const triageArgs = (apiClient.secretaryTriage as any).mock.calls[0]?.[0]
-  expect(triageArgs).toBeTruthy()
-  expect(triageArgs).not.toHaveProperty('session_id')
+  onEvent?.({
+    type: 'msg',
+    data: JSON.stringify({
+      op: 'insert',
+      id: '10',
+      role: 'assistant',
+      msg_type: 'text',
+      delta: '我这边卡在一个点，需要你确认。',
+    }),
+  })
+
+  await flushPromises()
+  await flushPromises()
+
   expect(wrapper.find('[data-testid="secretary-pending-questions"]').exists()).toBe(true)
   expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
 
   await wrapper.get('[data-testid="secretary-pending-questions"]').trigger('click')
-  await flush()
+  await flushPromises()
   expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(true)
   expect(wrapper.text()).toContain('用哪个目录来做？')
 
   await wrapper.get('[data-testid="secretary-pending-questions-modal-close"]').trigger('click')
-  await flush()
+  await flushPromises()
   expect(wrapper.find('[data-testid="secretary-pending-questions-modal"]').exists()).toBe(false)
 
   wrapper.unmount()
-  vi.useRealTimers()
 })
 
 it('shows in-flight tool call progress in secretary mode', async () => {
