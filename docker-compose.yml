@@ -27,6 +27,7 @@ services:
         memorysdk: /Users/liu_y/code/goProject/AgentAll/memorySdk
     container_name: oneagent-backend
     environment:
+      ONEAGENT_HOME: /data
       PORT: "8080"
       MEMORYSDK_POSTGRES_DSN: postgres://postgres:postgres123@postgres:5432/oneagent?sslmode=disable
       MEMORYSDK_PRE_RECALL_POLICY: auto
