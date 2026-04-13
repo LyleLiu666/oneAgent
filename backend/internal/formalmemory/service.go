@@ -2,8 +2,6 @@ package formalmemory
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -293,15 +291,6 @@ func buildHostContext(req PreRecallRequest, policy agentsdkbridge.PreRecallPolic
 		RememberScopeAllowlist: allowlist,
 		PreRecallPolicy:        policy,
 	}
-}
-
-func projectScopeIDFromWorkspaceRoot(workspaceRoot string) string {
-	normalized := strings.TrimSpace(workspaceRoot)
-	if normalized == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(normalized))
-	return "workspace:" + hex.EncodeToString(sum[:])
 }
 
 func hostContextFromContext(ctx context.Context) (agentsdkbridge.HostMemoryContext, error) {

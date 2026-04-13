@@ -27,6 +27,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		return nil, err
 	}
 	learning.StartDailyScheduler(rt)
+	runtime.StartFormalMemoryWorker(rt)
 
 	router := gin.Default()
 	router.Use(middleware.InjectRuntime(rt))
