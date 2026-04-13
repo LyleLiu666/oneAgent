@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.4
+
 # Frontend build stage
 FROM node:22-alpine AS frontend-builder
 
@@ -19,15 +21,21 @@ COPY frontend/ ./
 RUN pnpm build
 
 # Backend build stage
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.25.3-alpine AS backend-builder
 
 RUN apk add --no-cache git
 
 WORKDIR /app
 
+# Bring external SDK workspaces into the build without copying them into this repo.
+COPY --from=agentsdk . /ext/agentsdk
+COPY --from=memorysdk . /ext/memorysdk
+
 # Copy go mod files
 COPY backend/go.mod backend/go.sum* ./
-RUN go mod download || true
+RUN go mod edit -replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git=/ext/agentsdk \
+    && go mod edit -replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git=/ext/memorysdk \
+    && go mod download
 
 # Copy backend source
 COPY backend/ ./
@@ -37,21 +45,19 @@ RUN mkdir -p cmd/server/static
 COPY --from=frontend-builder /app/frontend/dist/ ./cmd/server/static/
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
+RUN go mod edit -replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git=/ext/agentsdk \
+    && go mod edit -replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git=/ext/memorysdk \
+    && CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 
 # Final stage
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Use Tsinghua mirror for apt
-RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list \
-    && sed -i 's/security.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list \
-    && sed -i 's/ports.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list
-
 # Install system dependencies and Python
 # Install basic system utilities
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     curl \
@@ -69,7 +75,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libssl-dev \
@@ -78,7 +85,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install application dependencies
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
     nodejs \
     pandoc \
     poppler-utils \
@@ -108,7 +115,7 @@ RUN groupadd -r app && useradd -r -g app -d /app -s /bin/bash -m app \
 WORKDIR /app
 
 # Install Python libraries
-RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir \
+RUN pip3 install --no-cache-dir --retries 5 --timeout 120 \
     requests \
     pandas \
     numpy \
