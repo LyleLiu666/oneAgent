@@ -198,6 +198,31 @@ it('binds workspace when user replies with an absolute path for a pending worksp
   wrapper.unmount()
 })
 
+it('shows setup guidance when no model is configured in secretary mode', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="secretary-model-setup-banner"]').exists()).toBe(true)
+  expect(wrapper.get('[data-testid="secretary-open-settings"]').attributes('href')).toBe('/settings')
+
+  wrapper.unmount()
+})
+
 it('deduplicates optimistic user message when stream insert arrives before inbox response', async () => {
   const store = new Map<string, string>()
   vi.stubGlobal('localStorage', {

@@ -86,6 +86,18 @@ func classifyAPIError(status int, err error) (code string, msg string, hint stri
 		strings.Contains(lower, "default_deny") {
 		return "tool_permission_denied", "操作被策略拒绝", "请前往“工具权限”页面调整 policy/profile 后重试"
 	}
+	if strings.Contains(lower, "no llm model configured") {
+		return "llm_model_missing", "还没有配置可用的大模型", "请前往“设置”添加 Provider，并至少设置一个默认 Model"
+	}
+	if strings.Contains(lower, "model not found") {
+		return "llm_model_not_found", "找不到当前模型配置", "请前往“设置”重新选择，或重新设置默认 Model"
+	}
+	if strings.Contains(lower, "provider not found") {
+		return "llm_provider_not_found", "找不到当前供应商配置", "请前往“设置”重新配置 Provider 和 Model"
+	}
+	if strings.Contains(lower, "provider base_url or api_key is missing") {
+		return "llm_provider_incomplete", "当前供应商配置不完整", "请前往“设置”补全 Base URL 和 API Key"
+	}
 
 	switch status {
 	case http.StatusBadRequest:

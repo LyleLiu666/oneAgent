@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/liu_y/oneAgent/backend/internal/llm"
 	"github.com/liu_y/oneAgent/backend/internal/middleware"
+	"github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 )
 
@@ -236,6 +238,7 @@ func UpdateProvider(c *gin.Context) {
 	}
 
 	models, _ := rt.Settings.ListModels(c.Request.Context(), userID, provider.ID)
+	triggerPendingSecretaryTriageRetry(rt, userID)
 	c.JSON(http.StatusOK, toProviderResponse(provider, models))
 }
 
@@ -351,6 +354,7 @@ func CreateModel(c *gin.Context) {
 		return
 	}
 
+	triggerPendingSecretaryTriageRetry(rt, userID)
 	c.JSON(http.StatusCreated, toModelResponse(llmModel, nil))
 }
 
@@ -415,6 +419,7 @@ func UpdateModel(c *gin.Context) {
 		return
 	}
 
+	triggerPendingSecretaryTriageRetry(rt, userID)
 	c.JSON(http.StatusOK, toModelResponse(updated, nil))
 }
 
@@ -458,6 +463,20 @@ func toProviderResponse(provider settingsdb.Provider, models []settingsdb.Model)
 	}
 
 	return resp
+}
+
+func triggerPendingSecretaryTriageRetry(rt *runtime.Runtime, userID string) {
+	if rt == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "local"
+	}
+
+	rt.Go(func(ctx context.Context) {
+		rt.RetryPendingSecretaryAutoTriage(ctx, userID)
+	})
 }
 
 func toModelResponse(m settingsdb.Model, provider *providerSlim) modelResponse {

@@ -656,6 +656,410 @@ func TestServer_SecretaryAutoTriage_DebouncedAppendsSummary(t *testing.T) {
 	}
 }
 
+func TestServer_SecretaryAutoTriage_AppendsActionableErrorWhenModelMissing(t *testing.T) {
+	t.Setenv("ONEAGENT_SECRETARY_AUTOTRIAGE_DEBOUNCE_MS", "10")
+
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	rt.TaskRunner = &taskqueue.TaskRunner{
+		Store: rt.Tasks,
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, _ *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+	}
+	if err := rt.TaskRunner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content": "你好",
+	}, nil)
+
+	deadline := time.Now().Add(3 * time.Second)
+	var sess struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Type    string `json:"type"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+
+	for {
+		body := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/session")
+		if err := json.Unmarshal(body, &sess); err != nil {
+			t.Fatalf("unmarshal session: %v", err)
+		}
+
+		seen := false
+		for _, m := range sess.Messages {
+			if m.Role != "assistant" || m.Type != "text" {
+				continue
+			}
+			if strings.Contains(m.Content, "还没有配置可用的大模型") {
+				if !strings.Contains(m.Content, "/settings") {
+					t.Fatalf("expected setup guidance link in message, got %q", m.Content)
+				}
+				seen = true
+				break
+			}
+		}
+
+		if seen {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for actionable auto triage error, got %+v", sess.Messages)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestServer_SecretaryAutoTriage_RetriesPendingMessagesAfterModelBecomesAvailable(t *testing.T) {
+	t.Setenv("ONEAGENT_SECRETARY_AUTOTRIAGE_DEBOUNCE_MS", "10")
+
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	rt.TaskRunner = &taskqueue.TaskRunner{
+		Store: rt.Tasks,
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, _ *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+	}
+	if err := rt.TaskRunner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		args := `{"intent":"dispatch","summary_message":"我已经继续处理刚才那条待办。","tasks":[],"task_actions":[],"questions":[]}`
+		resp := map[string]any{
+			"id": "cmpl-test",
+			"choices": []any{
+				map[string]any{
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "",
+						"tool_calls": []any{
+							map[string]any{
+								"id":   "call_1",
+								"type": "function",
+								"function": map[string]any{
+									"name":      "secretary_triage_plan",
+									"arguments": args,
+								},
+							},
+						},
+					},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(mock.Close)
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content": "帮我记住：等会儿跑测试",
+	}, nil)
+
+	deadline := time.Now().Add(3 * time.Second)
+	var beforeState struct {
+		CursorMessageID uint `json:"cursor_message_id"`
+	}
+	for {
+		body := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/state")
+		if err := json.Unmarshal(body, &beforeState); err != nil {
+			t.Fatalf("unmarshal state: %v", err)
+		}
+		if beforeState.CursorMessageID == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected cursor to remain 0 before model config, got %d", beforeState.CursorMessageID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
+
+	var state struct {
+		CursorMessageID uint `json:"cursor_message_id"`
+		TriageRuns      []struct {
+			SummaryMessage string `json:"summary_message"`
+		} `json:"triage_runs"`
+	}
+	for {
+		body := mustGet(t, srv.URL, rt.AuthToken, "/api/secretary/state")
+		if err := json.Unmarshal(body, &state); err != nil {
+			t.Fatalf("unmarshal state: %v", err)
+		}
+		if state.CursorMessageID > 0 && len(state.TriageRuns) > 0 {
+			break
+		}
+		if time.Now().After(deadline.Add(3 * time.Second)) {
+			t.Fatalf("timeout waiting for retry triage, got %+v", state)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if !strings.Contains(state.TriageRuns[len(state.TriageRuns)-1].SummaryMessage, "继续处理刚才那条待办") {
+		t.Fatalf("expected retry summary to mention resumed work, got %+v", state.TriageRuns)
+	}
+}
+
+func TestServer_SecretaryAutoTriage_RetryBroadcastsSummaryToExistingStream(t *testing.T) {
+	t.Setenv("ONEAGENT_SECRETARY_AUTOTRIAGE_DEBOUNCE_MS", "10")
+
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:          "local",
+		Bind:             "127.0.0.1",
+		Port:             "0",
+		Home:             home,
+		AuthMode:         "none",
+		LogRetentionDays: 1,
+	}
+
+	rt, err := oneruntime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	rt.TaskRunner = &taskqueue.TaskRunner{
+		Store: rt.Tasks,
+		ExecuteAttempt: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt, _ *taskqueue.Attempt) (taskqueue.AttemptResult, error) {
+			return taskqueue.AttemptResult{}, nil
+		},
+		DecideOutcome: func(ctx context.Context, task taskqueue.Task, attempt taskqueue.Attempt) (taskqueue.ObserverDecision, error) {
+			return taskqueue.ObserverDecision{Pass: true, Reason: "ok"}, nil
+		},
+	}
+	if err := rt.TaskRunner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		args := `{"intent":"dispatch","summary_message":"我已经继续处理刚才那条待办。","tasks":[],"task_actions":[],"questions":[]}`
+		resp := map[string]any{
+			"id": "cmpl-test",
+			"choices": []any{
+				map[string]any{
+					"message": map[string]any{
+						"role":    "assistant",
+						"content": "",
+						"tool_calls": []any{
+							map[string]any{
+								"id":   "call_1",
+								"type": "function",
+								"function": map[string]any{
+									"name":      "secretary_triage_plan",
+									"arguments": args,
+								},
+							},
+						},
+					},
+					"finish_reason": "stop",
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	t.Cleanup(mock.Close)
+
+	router, err := NewRouter(rt)
+	if err != nil {
+		t.Fatalf("new router: %v", err)
+	}
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/secretary/session/stream", nil)
+	if err != nil {
+		t.Fatalf("new stream request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+rt.AuthToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stream request: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("stream status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	type streamMsgWithID struct {
+		Op      string `json:"op"`
+		ID      string `json:"id"`
+		Role    string `json:"role,omitempty"`
+		MsgType string `json:"msg_type,omitempty"`
+		Delta   string `json:"delta,omitempty"`
+	}
+
+	ready := make(chan struct{})
+	got := make(chan streamMsgWithID, 8)
+
+	go func() {
+		defer close(got)
+		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if strings.HasPrefix(line, ":") {
+				continue
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			payload := strings.TrimPrefix(line, "data: ")
+			var evt streamEvent
+			if err := json.Unmarshal([]byte(payload), &evt); err != nil {
+				continue
+			}
+			if evt.Type == "session" {
+				select {
+				case <-ready:
+				default:
+					close(ready)
+				}
+				continue
+			}
+			if evt.Type != "msg" || strings.TrimSpace(evt.Data) == "" {
+				continue
+			}
+			var msg streamMsgWithID
+			if err := json.Unmarshal([]byte(evt.Data), &msg); err != nil {
+				continue
+			}
+			if msg.Op != "insert" {
+				continue
+			}
+			got <- msg
+		}
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for stream readiness")
+	}
+
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/secretary/inbox/messages", map[string]any{
+		"content": "帮我记住：等会儿跑测试",
+	}, nil)
+
+	var providerResp createProviderResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/providers", map[string]any{
+		"name":          "mock",
+		"provider_type": "openai",
+		"base_url":      mock.URL,
+		"api_key":       "sk-test",
+	}, &providerResp)
+
+	var modelResp createModelResp
+	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
+		"provider_id": providerResp.ID,
+		"name":        "mock-model",
+		"model":       "gpt-test",
+		"is_default":  true,
+	}, &modelResp)
+
+	deadline := time.Now().Add(4 * time.Second)
+	for {
+		select {
+		case msg, ok := <-got:
+			if !ok {
+				t.Fatalf("stream closed before retry summary arrived")
+			}
+			if msg.Role == "assistant" && msg.MsgType == "text" && strings.Contains(msg.Delta, "继续处理刚才那条待办") {
+				return
+			}
+		default:
+			if time.Now().After(deadline) {
+				t.Fatalf("timeout waiting for retried summary to be broadcast")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
 func TestServer_SecretarySessionStream_BroadcastsInboxMessages(t *testing.T) {
 	t.Setenv("ONEAGENT_SECRETARY_AUTOTRIAGE_DEBOUNCE_MS", "0")
 

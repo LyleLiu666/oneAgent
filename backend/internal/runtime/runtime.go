@@ -51,6 +51,9 @@ type Runtime struct {
 	bgWG     sync.WaitGroup
 	bgMu     sync.Mutex
 	bgOnce   map[string]*sync.Once
+
+	secretaryRetryMu sync.RWMutex
+	secretaryRetryFn func(context.Context, string)
 }
 
 func Init(cfg *config.Config) (*Runtime, error) {
@@ -245,6 +248,28 @@ func (r *Runtime) Close() error {
 		}
 	}
 	return firstErr
+}
+
+func (r *Runtime) SetSecretaryAutoTriageRetry(fn func(context.Context, string)) {
+	if r == nil {
+		return
+	}
+	r.secretaryRetryMu.Lock()
+	r.secretaryRetryFn = fn
+	r.secretaryRetryMu.Unlock()
+}
+
+func (r *Runtime) RetryPendingSecretaryAutoTriage(ctx context.Context, userID string) {
+	if r == nil {
+		return
+	}
+	r.secretaryRetryMu.RLock()
+	fn := r.secretaryRetryFn
+	r.secretaryRetryMu.RUnlock()
+	if fn == nil {
+		return
+	}
+	fn(ctx, userID)
 }
 
 type HealthStatus struct {

@@ -26,6 +26,8 @@ import {
   resetSecretarySession,
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
+import ErrorBanner from '@/components/ErrorBanner.vue'
+import { parseApiError, type ParsedApiError } from '@/lib/apiError'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -69,6 +71,7 @@ const sessionsLoading = ref(false)
 const loadingHistory = ref(false)
 const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
+const modelsError = ref<ParsedApiError | null>(null)
 const toolsLoading = ref(false)
 const tools = ref<ToolOption[]>([])
 const lastWorkspace = ref(localStorage.getItem('oneagent-workspace') || '')
@@ -461,6 +464,21 @@ const toolSummary = computed(() => {
   return `工具 (${selected}/${total})`
 })
 
+const secretaryModelSetupError = computed<ParsedApiError | null>(() => {
+  if (!isSecretaryMode.value) return null
+  if (modelsLoading.value) return null
+  if (modelsError.value) return modelsError.value
+  if (models.value.length > 0) return null
+  return {
+    message: '秘书模式当前不可用：还没有配置可用的大模型。',
+    hint: '请前往设置添加 Provider，并至少设置一个默认 Model。',
+  }
+})
+
+const secretaryModelSetupTitle = computed(() => {
+  return modelsError.value ? '加载模型失败' : '秘书模式暂不可用'
+})
+
 const toggleChatUIMode = () => {
   if (uiStore.mode === 'secretary') {
     uiStore.setMode('full')
@@ -566,6 +584,7 @@ const loadSessions = async () => {
 
 const loadModels = async () => {
   modelsLoading.value = true
+  modelsError.value = null
   try {
     const raw = await getModels()
     const mapped = (Array.isArray(raw) ? raw : []).map((m: any) => ({
@@ -600,6 +619,7 @@ const loadModels = async () => {
   } catch (error) {
     console.error('Failed to load models:', error)
     models.value = []
+    modelsError.value = parseApiError(error, '加载模型失败')
   } finally {
     modelsLoading.value = false
   }
@@ -2523,6 +2543,22 @@ onUnmounted(() => {
       <!-- Input area -->
       <div class="p-4 shrink-0">
         <div class="max-w-4xl mx-auto">
+          <div
+            v-if="secretaryModelSetupError"
+            data-testid="secretary-model-setup-banner"
+            class="mb-3"
+          >
+            <ErrorBanner :error="secretaryModelSetupError" :title="secretaryModelSetupTitle" />
+            <div class="mt-3 flex justify-center">
+              <a
+                data-testid="secretary-open-settings"
+                href="/settings"
+                class="inline-flex items-center rounded-xl border border-primary-400/30 bg-primary-500/10 px-3 py-2 text-sm text-primary-200 hover:bg-primary-500/15"
+              >
+                前往设置
+              </a>
+            </div>
+          </div>
           <div class="relative flex items-end gap-3">
             <div class="flex-1 relative">
               <textarea

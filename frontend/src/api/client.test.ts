@@ -57,3 +57,42 @@ it('decodes UTF-8 correctly when a multibyte rune is split across chunks', async
     expect(events[0].data).toBe('个')
     expect(events[0].data).not.toContain('\uFFFD')
 })
+
+it('passes structured API error details to stream onError when setup fails', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+        error: '还没有配置可用的大模型',
+        hint: '请前往“设置”添加 Provider，并至少设置一个默认 Model',
+        code: 'llm_model_missing',
+    }), {
+        status: 400,
+        headers: {
+            'Content-Type': 'application/json',
+        },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    let captured: any
+    await streamChat(
+        'hi',
+        '',
+        '',
+        [],
+        'json',
+        '',
+        () => {
+            throw new Error('unexpected event')
+        },
+        (err) => {
+            captured = err
+        }
+    )
+
+    expect(captured).toBeTruthy()
+    expect(captured.message).toBe('还没有配置可用的大模型')
+    expect(captured.data).toEqual({
+        error: '还没有配置可用的大模型',
+        hint: '请前往“设置”添加 Provider，并至少设置一个默认 Model',
+        code: 'llm_model_missing',
+    })
+    expect(captured.response?.status).toBe(400)
+})

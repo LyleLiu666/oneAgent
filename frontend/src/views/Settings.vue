@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useAuth } from '@/composables/useAuth'
 import {
   Settings as SettingsIcon,
   Server,
@@ -31,6 +32,8 @@ import {
   type Suggestion,
   type SuggestionStatus,
 } from '@/api/client'
+
+const { authMode } = useAuth()
 
 interface LLMModel {
   id: string
@@ -1035,8 +1038,14 @@ onMounted(async () => {
       </div>
 
       <!-- Footer note -->
-      <p class="mt-8 text-center text-sm text-surface-500">
+      <p v-if="authMode === 'none'" class="mt-8 text-center text-sm text-surface-500">
+        当前实例未启用认证（AUTH_MODE=none）。仅建议在可信环境中使用。
+      </p>
+      <p v-else-if="authMode === 'token'" class="mt-8 text-center text-sm text-surface-500">
         当前实例使用本地访问令牌保护（AUTH_MODE=token）。请妥善保管。
+      </p>
+      <p v-else class="mt-8 text-center text-sm text-surface-500">
+        当前实例的认证方式正在检测中。
       </p>
     </div>
   </div>

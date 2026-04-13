@@ -74,6 +74,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		api.POST("/sessions/:id/truncate", chatHandler.TruncateSession)
 
 		secretaryHandler := handler.NewSecretaryHandler(rt)
+		rt.SetSecretaryAutoTriageRetry(secretaryHandler.RetryPendingAutoTriage)
 		api.POST("/secretary/inbox/messages", secretaryHandler.AppendInboxMessage)
 		api.POST("/secretary/handoff", secretaryHandler.HandoffTask)
 		api.POST("/secretary/triage", secretaryHandler.Triage)

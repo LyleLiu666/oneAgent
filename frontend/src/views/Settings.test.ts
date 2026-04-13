@@ -4,6 +4,13 @@ import { expect, it, vi } from 'vitest'
 import { shallowMount } from '@vue/test-utils'
 
 import * as apiClient from '@/api/client'
+import { ref } from 'vue'
+
+const mockAuthMode = ref<'token' | 'none' | 'unknown'>('token')
+
+vi.mock('@/composables/useAuth', () => ({
+  useAuth: () => ({ authMode: mockAuthMode }),
+}))
 
 vi.mock('@/api/client', () => ({
   getProviders: vi.fn(async () => []),
@@ -31,6 +38,7 @@ vi.mock('@/api/client', () => ({
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 it('loads command approval settings on mount', async () => {
+  mockAuthMode.value = 'token'
   const { default: Settings } = await import('@/views/Settings.vue')
 
   ;(apiClient.getCommandApprovalSettings as any).mockResolvedValueOnce({ command_approval_mode: 'auto' })
@@ -44,6 +52,7 @@ it('loads command approval settings on mount', async () => {
 })
 
 it('updates command approval mode when toggled', async () => {
+  mockAuthMode.value = 'token'
   const { default: Settings } = await import('@/views/Settings.vue')
 
   ;(apiClient.getCommandApprovalSettings as any).mockResolvedValueOnce({ command_approval_mode: 'auto' })
@@ -63,3 +72,14 @@ it('updates command approval mode when toggled', async () => {
   wrapper.unmount()
 })
 
+it('shows AUTH_MODE=none guidance when authentication is disabled', async () => {
+  mockAuthMode.value = 'none'
+  const { default: Settings } = await import('@/views/Settings.vue')
+  const wrapper = shallowMount(Settings)
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('当前实例未启用认证（AUTH_MODE=none）')
+  expect(wrapper.text()).not.toContain('当前实例使用本地访问令牌保护（AUTH_MODE=token）')
+
+  wrapper.unmount()
+})

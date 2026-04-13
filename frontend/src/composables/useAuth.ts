@@ -5,6 +5,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 const isInitialized = ref(false)
 const authMode = ref<'token' | 'none' | 'unknown'>('unknown')
+let authModeLoadPromise: Promise<void> | null = null
 
 async function fetchHealth(): Promise<void> {
     try {
@@ -17,6 +18,23 @@ async function fetchHealth(): Promise<void> {
     } catch {
         // ignore
     }
+}
+
+export async function ensureAuthModeLoaded(force: boolean = false): Promise<void> {
+    if (!force && authMode.value !== 'unknown') {
+        return
+    }
+    if (authModeLoadPromise) {
+        return authModeLoadPromise
+    }
+
+    authModeLoadPromise = (async () => {
+        await fetchHealth()
+    })().finally(() => {
+        authModeLoadPromise = null
+    })
+
+    return authModeLoadPromise
 }
 
 async function fetchMe(token?: string): Promise<{ user_id: string; username: string } | null> {
@@ -37,7 +55,7 @@ export async function initAuth(): Promise<boolean> {
         return useAuthStore().isAuthenticated
     }
 
-    await fetchHealth()
+    await ensureAuthModeLoaded()
 
     const authStore = useAuthStore()
 
@@ -84,6 +102,7 @@ export async function loginWithToken(token: string): Promise<boolean> {
     const trimmed = token.trim()
     if (!trimmed) return false
 
+    await ensureAuthModeLoaded()
     authStore.setToken(trimmed)
     const me = await fetchMe(trimmed)
     if (!me) {
@@ -128,4 +147,3 @@ export function useAuth() {
 }
 
 export default useAuth
-

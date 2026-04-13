@@ -603,10 +603,79 @@ func (h *SecretaryHandler) runAutoTriage(userID, sessionID string) {
 
 	res, err := h.orch.Triage(ctx, userID, sessionID, nil)
 	if err != nil {
+		h.appendAutoTriageFailureMessage(ctx, userID, sessionID, err)
 		return
 	}
 	if res.SummaryMessageID == 0 || strings.TrimSpace(res.SummaryMessage) == "" {
 		return
 	}
 	h.broadcastTextInsert(sessionID, res.SummaryMessageID, "assistant", res.SummaryMessage)
+}
+
+func (h *SecretaryHandler) RetryPendingAutoTriage(ctx context.Context, userID string) {
+	if h == nil || h.rt == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		userID = "local"
+	}
+	sessionID, err := h.rt.ResolveSecretarySessionID(ctx, userID)
+	if err != nil || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	h.runAutoTriage(userID, sessionID)
+}
+
+func (h *SecretaryHandler) appendAutoTriageFailureMessage(ctx context.Context, userID, sessionID string, err error) {
+	if h == nil || h.rt == nil || h.rt.Sessions == nil {
+		return
+	}
+
+	content := formatAutoTriageFailureMessage(err)
+	if content == "" {
+		return
+	}
+
+	_, msgs, loadErr := h.rt.Sessions.GetSessionWithMessages(sessionID, userID)
+	if loadErr == nil {
+		for i := len(msgs) - 1; i >= 0; i-- {
+			msg := msgs[i]
+			if strings.TrimSpace(msg.Content) == "" {
+				continue
+			}
+			if msg.Role == model.MessageRoleAssistant &&
+				msg.Type == model.MessageTypeText &&
+				strings.TrimSpace(msg.Content) == content {
+				return
+			}
+			break
+		}
+	}
+
+	msg, appendErr := h.rt.Sessions.AppendMessage(sessionID, model.ChatMessage{
+		Role:    model.MessageRoleAssistant,
+		Type:    model.MessageTypeText,
+		Content: content,
+	})
+	if appendErr != nil || msg.ID == 0 {
+		return
+	}
+
+	h.broadcastTextInsert(sessionID, msg.ID, "assistant", content)
+}
+
+func formatAutoTriageFailureMessage(err error) string {
+	raw := strings.ToLower(strings.TrimSpace(fmt.Sprint(err)))
+
+	switch {
+	case strings.Contains(raw, "no llm model configured"), strings.Contains(raw, "model not found"):
+		return "我已经记下这条消息，但现在还不能继续处理，因为还没有配置可用的大模型。请先[打开设置](/settings)添加 Provider，并至少设置一个默认 Model。"
+	case strings.Contains(raw, "provider base_url or api_key is missing"):
+		return "我已经记下这条消息，但现在还不能继续处理，因为当前供应商配置不完整。请先[打开设置](/settings)补全 Base URL 和 API Key。"
+	case strings.Contains(raw, "provider not found"):
+		return "我已经记下这条消息，但现在还不能继续处理，因为当前模型关联的供应商不存在。请先[打开设置](/settings)重新配置 Provider 和 Model。"
+	}
+
+	return ""
 }

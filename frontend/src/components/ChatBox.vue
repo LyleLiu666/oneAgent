@@ -24,6 +24,8 @@ import {
   getSecretarySession,
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
+import ErrorBanner from '@/components/ErrorBanner.vue'
+import { parseApiError, type ParsedApiError } from '@/lib/apiError'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -67,6 +69,7 @@ const sessionsLoading = ref(false)
 const loadingHistory = ref(false)
 const modelsLoading = ref(false)
 const models = ref<ModelOption[]>([])
+const modelsError = ref<ParsedApiError | null>(null)
 const toolsLoading = ref(false)
 const tools = ref<ToolOption[]>([])
 const lastWorkspace = ref(localStorage.getItem('oneagent-workspace') || '')
@@ -186,6 +189,28 @@ const normalizeTrace = (raw: any): string | undefined => {
     return undefined
   }
   return String(raw)
+}
+
+const buildAssistantErrorContent = (parsed: ParsedApiError | null | undefined, fallback: string) => {
+  const message = String(parsed?.message || fallback).trim() || fallback
+  const hint = String(parsed?.hint || '').trim()
+  return hint ? `${message}\n\n${hint}` : message
+}
+
+const buildInlineStreamErrorSuffix = (parsed: ParsedApiError | null | undefined, fallback: string) => {
+  return `\n\n[Error] ${buildAssistantErrorContent(parsed, fallback)}`
+}
+
+const appendAssistantErrorMessage = (parsed: ParsedApiError | null | undefined, fallback: string) => {
+  chatStore.addMessage({
+    id: Date.now(),
+    role: 'assistant',
+    type: 'text',
+    content: buildAssistantErrorContent(parsed, fallback),
+    createdAt: new Date(),
+    isStreaming: false,
+  })
+  scrollToBottom(false)
 }
 
 const showSkillsHelpHint = computed(() => {
@@ -338,6 +363,21 @@ const toolSummary = computed(() => {
   return `工具 (${selected}/${total})`
 })
 
+const chatModelSetupError = computed<ParsedApiError | null>(() => {
+  if (isSecretaryMode.value) return null
+  if (modelsLoading.value) return null
+  if (modelsError.value) return modelsError.value
+  if (models.value.length > 0) return null
+  return {
+    message: '完整模式当前不可用：还没有配置可用的大模型。',
+    hint: '请前往设置添加 Provider，并至少设置一个默认 Model。',
+  }
+})
+
+const chatModelSetupTitle = computed(() => {
+  return modelsError.value ? '加载模型失败' : '完整模式暂不可用'
+})
+
 const toggleChatUIMode = () => {
   if (uiStore.mode === 'secretary') {
     uiStore.setMode('full')
@@ -422,6 +462,7 @@ const loadSessions = async () => {
 
 const loadModels = async () => {
   modelsLoading.value = true
+  modelsError.value = null
   try {
     const raw = await getModels()
     const mapped = (Array.isArray(raw) ? raw : []).map((m: any) => ({
@@ -456,6 +497,7 @@ const loadModels = async () => {
   } catch (error) {
     console.error('Failed to load models:', error)
     models.value = []
+    modelsError.value = parseApiError(error, '加载模型失败')
   } finally {
     modelsLoading.value = false
   }
@@ -1057,6 +1099,7 @@ const attachIfNeeded = async (sessionIdRaw: string) => {
       },
       (error) => {
         console.error('Stream error:', error)
+        const parsed = parseApiError(error, '恢复会话流失败')
         const idx = (() => {
           for (let i = chatStore.messages.length - 1; i >= 0; i--) {
             if (chatStore.messages[i]?.isStreaming) return i
@@ -1065,8 +1108,10 @@ const attachIfNeeded = async (sessionIdRaw: string) => {
         })()
         if (idx >= 0) {
           const msg = chatStore.messages[idx]
-          msg.content = (msg.content || '') + '\n\n[Error] Stream failed.'
+          msg.content = (msg.content || '') + buildInlineStreamErrorSuffix(parsed, '恢复会话流失败')
           msg.isStreaming = false
+        } else if (!sawMsgEvents) {
+          appendAssistantErrorMessage(parsed, '恢复会话流失败')
         }
       },
       abort.signal
@@ -1342,25 +1387,21 @@ const sendChat = async (rawMessage: string) => {
       },
       (error) => {
         console.error('Stream error:', error)
+        const parsed = parseApiError(error, '发送失败')
         const idx = findStreamingIndex()
         if (idx >= 0) {
           const msg = chatStore.messages[idx]
-          msg.content = (msg.content || '') + '\n\n[Error] Stream failed.'
+          msg.content = (msg.content || '') + buildInlineStreamErrorSuffix(parsed, '发送失败')
           msg.isStreaming = false
+        } else if (!sawMsgEvents) {
+          appendAssistantErrorMessage(parsed, '发送失败')
         }
       },
       abort.signal
     )
   } catch (error) {
     console.error('Chat error:', error)
-    chatStore.addMessage({
-      id: Date.now(),
-      role: 'assistant',
-      type: 'text',
-      content: '抱歉，发送失败，请稍后再试。',
-      createdAt: new Date(),
-      isStreaming: false,
-    })
+    appendAssistantErrorMessage(parseApiError(error, '抱歉，发送失败，请稍后再试。'), '抱歉，发送失败，请稍后再试。')
   } finally {
     if (activeStreamAbort.value === abort) {
       activeStreamAbort.value = null
@@ -2337,6 +2378,22 @@ onUnmounted(() => {
       <!-- Input area -->
       <div class="p-4 shrink-0">
         <div class="max-w-4xl mx-auto">
+          <div
+            v-if="chatModelSetupError"
+            data-testid="chat-model-setup-banner"
+            class="mb-3"
+          >
+            <ErrorBanner :error="chatModelSetupError" :title="chatModelSetupTitle" />
+            <div class="mt-3 flex justify-center">
+              <a
+                data-testid="chat-open-settings"
+                href="/settings"
+                class="inline-flex items-center rounded-xl border border-primary-400/30 bg-primary-500/10 px-3 py-2 text-sm text-primary-200 hover:bg-primary-500/15"
+              >
+                前往设置
+              </a>
+            </div>
+          </div>
           <div class="relative flex items-end gap-3">
             <div class="flex-1 relative">
               <textarea

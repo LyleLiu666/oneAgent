@@ -215,6 +215,99 @@ it('renders streaming token count while waiting for content', async () => {
     expect(wrapper.text()).toContain('7 tokens')
 })
 
+it('shows setup guidance when no model is configured in full mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="chat-model-setup-banner"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="chat-open-settings"]').attributes('href')).toBe('/settings')
+})
+
+it('shows actionable assistant feedback when full-mode send fails before any stream message arrives', async () => {
+    const store = new Map<string, string>()
+    store.set('oneagent-workspace', '/tmp/workspace')
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.streamChat as any).mockImplementation(
+        async (
+            _message: string,
+            _sessionId: string,
+            _modelId: string,
+            _toolIds: string[],
+            _toolProtocol: string,
+            _workspace: string,
+            _onEvent: unknown,
+            onError: (error: Error) => void
+        ) => {
+            onError({
+                message: '还没有配置可用的大模型',
+                data: {
+                    error: '还没有配置可用的大模型',
+                    hint: '请前往“设置”添加 Provider，并至少设置一个默认 Model',
+                },
+                response: {
+                    status: 400,
+                    headers: { get: vi.fn() },
+                },
+            } as any)
+        }
+    )
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chat = useChatStore()
+    chat.setMessages([])
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('你好')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const assistantMessage = chat.messages.find((m: any) => m.role === 'assistant')
+    expect(assistantMessage).toBeTruthy()
+    expect(String(assistantMessage?.content || '')).toContain('还没有配置可用的大模型')
+    expect(String(assistantMessage?.content || '')).toContain('请前往“设置”添加 Provider')
+})
+
 it('does not write recovery prompts into chat message list (secretary mode)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {

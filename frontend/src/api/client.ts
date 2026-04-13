@@ -36,6 +36,11 @@ export interface StreamEvent {
   data: string;
 }
 
+type StreamHTTPError = Error & {
+  data?: unknown;
+  response?: Response;
+};
+
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   if (a.length === 0) return b;
   if (b.length === 0) return a;
@@ -172,6 +177,39 @@ async function consumeSSE(
   }
 }
 
+async function buildStreamHTTPError(
+  response: Response,
+  fallbackMessage: string,
+): Promise<StreamHTTPError> {
+  let data: unknown;
+
+  try {
+    const raw = await response.text();
+    const trimmed = raw.trim();
+    if (trimmed) {
+      try {
+        data = JSON.parse(trimmed);
+      } catch {
+        data = trimmed;
+      }
+    }
+  } catch {
+    // Ignore body parsing errors and fall back to the status-only message.
+  }
+
+  const payload =
+    data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+  const message =
+    (typeof payload?.error === "string" && payload.error.trim()) ||
+    (typeof data === "string" && data.trim()) ||
+    `${fallbackMessage}（HTTP ${response.status}）`;
+
+  const error = new Error(message) as StreamHTTPError;
+  error.data = data;
+  error.response = response;
+  return error;
+}
+
 export async function streamChat(
   message: string,
   sessionId: string = "",
@@ -205,7 +243,7 @@ export async function streamChat(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw await buildStreamHTTPError(response, "聊天请求失败");
     }
     await consumeSSE(response, onEvent);
   } catch (error) {
@@ -245,7 +283,7 @@ export async function attachChatStream(
     );
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw await buildStreamHTTPError(response, "恢复会话流失败");
     }
 
     await consumeSSE(response, onEvent);
@@ -277,7 +315,7 @@ export async function attachSecretarySessionStream(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw await buildStreamHTTPError(response, "连接秘书会话失败");
     }
 
     await consumeSSE(response, onEvent);

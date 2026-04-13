@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { initAuth } from "@/composables/useAuth";
+import { ensureAuthModeLoaded, initAuth } from "@/composables/useAuth";
 import { useUIStore } from "@/stores/ui";
 
 const routes = [
@@ -119,6 +119,8 @@ router.beforeEach(async (to) => {
   const authStore = useAuthStore();
   const uiStore = useUIStore();
 
+  await ensureAuthModeLoaded();
+
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     await initAuth();
   }
@@ -131,6 +133,10 @@ router.beforeEach(async (to) => {
   if (to.name === "Login" && authStore.isAuthenticated) {
     // Redirect to home if already authenticated
     return { name: "Home" };
+  }
+
+  if (to.meta.requiresFullMode && uiStore.mode !== "full") {
+    uiStore.setMode("full");
   }
 
   // Keep route <-> ui_mode consistent for chat surfaces.
