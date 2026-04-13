@@ -292,7 +292,7 @@ func runToolcallingRegressionTask(
 	client := &fakeToolCaller{results: results}
 	broadcaster := &StreamBroadcaster{clients: map[chan StreamEvent]bool{}}
 
-	_, _, err = runToolLoop(
+	_, _, _, err = runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "go"}},
@@ -352,12 +352,12 @@ func runToolcallingRegressionTask(
 	}
 
 	return toolcallingRegressionTask{
-		Name:          name,
-		ExpectedTools: expectedTools,
-		ObservedTools: observedTools,
-		Steps:         steps,
-		ToolCalls:     toolCalls,
-		ToolCallsOK:   toolCallsOK,
+		Name:            name,
+		ExpectedTools:   expectedTools,
+		ObservedTools:   observedTools,
+		Steps:           steps,
+		ToolCalls:       toolCalls,
+		ToolCallsOK:     toolCallsOK,
 		ToolCallsFailed: toolCallsFailed,
 		FailuresByClass: failuresBy,
 	}

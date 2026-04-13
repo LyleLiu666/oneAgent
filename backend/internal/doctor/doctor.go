@@ -25,26 +25,31 @@ type BinaryCheck struct {
 }
 
 type Report struct {
-	Status           string
-	Version          string
-	Commit           string
-	BuildDate        string
-	OS               string
-	Arch             string
-	Profile          string
-	Bind             string
-	Port             string
-	AuthMode         string
-	OneAgentHome     string
-	SettingsDBPath   string
-	AuthTokenPath    string
-	DataDir          string
-	LogsDir          string
-	LogRetentionDays int
-	BashSource       string
-	GitSource        string
-	Checks           []BinaryCheck
-	Notes            []string
+	Status                      string
+	Version                     string
+	Commit                      string
+	BuildDate                   string
+	OS                          string
+	Arch                        string
+	Profile                     string
+	Bind                        string
+	Port                        string
+	AuthMode                    string
+	OneAgentHome                string
+	SettingsDBPath              string
+	AuthTokenPath               string
+	DataDir                     string
+	LogsDir                     string
+	LogRetentionDays            int
+	FormalMemoryEnabled         bool
+	FormalMemoryConnected       bool
+	MemorySDKPreRecallPolicy    string
+	MemorySDKToolsEnabled       bool
+	MemorySDKTurnEndJobsEnabled bool
+	BashSource                  string
+	GitSource                   string
+	Checks                      []BinaryCheck
+	Notes                       []string
 }
 
 type LookPathFunc func(string) (string, error)
@@ -82,6 +87,17 @@ func Check(ctx context.Context, rt *runtime.Runtime, lookPath LookPathFunc) (Rep
 		report.Notes = append(report.Notes, "runtime health check failed: "+err.Error())
 	} else if health.Status != "" && health.Status != "healthy" {
 		report.Status = health.Status
+		report.FormalMemoryEnabled = health.FormalMemoryEnabled
+		report.FormalMemoryConnected = health.FormalMemoryConnected
+		report.MemorySDKPreRecallPolicy = health.MemorySDKPreRecallPolicy
+		report.MemorySDKToolsEnabled = health.MemorySDKToolsEnabled
+		report.MemorySDKTurnEndJobsEnabled = health.MemorySDKTurnEndJobsEnabled
+	} else {
+		report.FormalMemoryEnabled = health.FormalMemoryEnabled
+		report.FormalMemoryConnected = health.FormalMemoryConnected
+		report.MemorySDKPreRecallPolicy = health.MemorySDKPreRecallPolicy
+		report.MemorySDKToolsEnabled = health.MemorySDKToolsEnabled
+		report.MemorySDKTurnEndJobsEnabled = health.MemorySDKTurnEndJobsEnabled
 	}
 	if !netutil.IsLoopbackBind(rt.Config.Bind) {
 		report.Notes = append(report.Notes, fmt.Sprintf("WARNING: bind=%s is non-loopback and may expose your local agent to the network (prefer bind=127.0.0.1).", rt.Config.Bind))
@@ -214,6 +230,9 @@ func Format(report Report) string {
 	fmt.Fprintf(&b, "auth_token_file=%s\n", report.AuthTokenPath)
 	fmt.Fprintf(&b, "data_dir=%s\n", report.DataDir)
 	fmt.Fprintf(&b, "logs_dir=%s (retention_days=%d)\n", report.LogsDir, report.LogRetentionDays)
+	fmt.Fprintf(&b, "formalmemory_enabled=%t connected=%t prerecall_policy=%s\n", report.FormalMemoryEnabled, report.FormalMemoryConnected, strings.TrimSpace(report.MemorySDKPreRecallPolicy))
+	fmt.Fprintf(&b, "formalmemory_tools_enabled=%t\n", report.MemorySDKToolsEnabled)
+	fmt.Fprintf(&b, "formalmemory_turn_end_jobs_enabled=%t\n", report.MemorySDKTurnEndJobsEnabled)
 	fmt.Fprintf(&b, "status=%s\n", report.Status)
 	fmt.Fprintf(&b, "bash_source=%s\n", formatBinarySource(report.BashSource))
 	fmt.Fprintf(&b, "git_source=%s\n", formatBinarySource(report.GitSource))

@@ -1,8 +1,9 @@
 package llm
 
 import (
-	"sort"
 	"strings"
+
+	agentsdkprovider "codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git/provider"
 )
 
 type CacheControl struct {
@@ -64,7 +65,7 @@ func cacheCapabilitiesForProvider(providerType string) providerCacheCapabilities
 		ProviderTypeAntigravity,
 		ProviderTypeCodex:
 		return providerCacheCapabilities{
-			SupportsPromptCacheKey: true,
+			SupportsPromptCacheKey: agentsdkprovider.SupportsPromptCacheKey(pt),
 			CacheStyle:             cacheControlStyleNone,
 			UsesAnthropicCaching:   false,
 		}
@@ -79,7 +80,7 @@ func cacheCapabilitiesForProvider(providerType string) providerCacheCapabilities
 
 // SupportsPromptCacheKey reports whether a provider accepts prompt_cache_key.
 func SupportsPromptCacheKey(providerType string) bool {
-	return cacheCapabilitiesForProvider(providerType).SupportsPromptCacheKey
+	return agentsdkprovider.SupportsPromptCacheKey(strings.ToLower(strings.TrimSpace(providerType)))
 }
 
 func maybeDowngradePromptCaching(opts *ChatCompletionOptions, status int, respBody []byte) bool {
@@ -153,22 +154,16 @@ func applyMessageCacheControl(messages []ChatMessage, style cacheControlStyle) [
 // CacheableMessageIndexes returns the cacheable message indexes selected by the
 // current default cache selector. The indexes are returned in ascending order.
 func CacheableMessageIndexes(messages []ChatMessage) []int {
-	indexes := cacheMessageIndexes(messages)
-	if len(indexes) == 0 {
-		return nil
-	}
-
-	out := make([]int, 0, len(indexes))
-	for idx := range indexes {
-		out = append(out, idx)
-	}
-	sort.Ints(out)
-	return out
+	return agentsdkprovider.CacheableMessageIndexes(toSDKCacheMessages(messages))
 }
 
 func cacheMessageIndexes(messages []ChatMessage) map[int]bool {
-	selector := defaultCacheSelector()
-	return selector.indexes(messages)
+	indexes := CacheableMessageIndexes(messages)
+	out := make(map[int]bool, len(indexes))
+	for _, idx := range indexes {
+		out[idx] = true
+	}
+	return out
 }
 
 func (s cacheSelector) indexes(messages []ChatMessage) map[int]bool {
@@ -205,4 +200,27 @@ func (s cacheSelector) indexes(messages []ChatMessage) map[int]bool {
 	}
 
 	return indexes
+}
+
+func toSDKCacheMessages(messages []ChatMessage) []agentsdkprovider.ChatMessage {
+	out := make([]agentsdkprovider.ChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, agentsdkprovider.ChatMessage{
+			Role:                msg.Role,
+			Content:             msg.Content,
+			PromptCacheBehavior: toSDKPromptCacheBehavior(msg),
+		})
+	}
+	return out
+}
+
+func toSDKPromptCacheBehavior(msg ChatMessage) agentsdkprovider.PromptCacheBehavior {
+	switch {
+	case msg.Volatile:
+		return agentsdkprovider.PromptCacheBehaviorVolatile
+	case msg.ForceCacheable:
+		return agentsdkprovider.PromptCacheBehaviorForceCacheable
+	default:
+		return agentsdkprovider.PromptCacheBehaviorDefault
+	}
 }

@@ -85,3 +85,47 @@ func TestDoctor_ReportIncludesNetworkExposureWarning(t *testing.T) {
 		t.Fatalf("expected network warning, got:\n%s", formatted)
 	}
 }
+
+func TestDoctor_ReportIncludesFormalMemoryStateWithoutLeakingDSN(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:                    "local",
+		Bind:                       "127.0.0.1",
+		Port:                       "0",
+		Home:                       home,
+		AuthMode:                   "token",
+		LogRetentionDays:           1,
+		MemorySDKEnableTools:       true,
+		MemorySDKEnableTurnEndJobs: true,
+		MemorySDKPreRecallPolicy:   "auto",
+	}
+
+	rt, err := runtime.Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	rt.Config.MemorySDKPostgresDSN = "postgres://memory_user:super-secret@memory.example.local/memory"
+
+	report, err := Check(context.Background(), rt, func(name string) (string, error) {
+		return "/usr/bin/" + name, nil
+	})
+	if err != nil {
+		t.Fatalf("doctor check: %v", err)
+	}
+
+	formatted := Format(report)
+	if !strings.Contains(formatted, "formalmemory_enabled=true") {
+		t.Fatalf("expected formal memory enabled state, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "formalmemory_tools_enabled=true") {
+		t.Fatalf("expected formal memory tools state, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "formalmemory_turn_end_jobs_enabled=true") {
+		t.Fatalf("expected formal memory turn-end jobs state, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "postgres://memory_user:super-secret@memory.example.local/memory") {
+		t.Fatalf("doctor output leaked raw memory DSN")
+	}
+}

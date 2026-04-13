@@ -25,7 +25,10 @@ services:
     container_name: oneagent-backend
     environment:
       PORT: "8080"
-      DATABASE_URL: postgres://postgres:postgres123@postgres:5432/oneagent?sslmode=disable
+      MEMORYSDK_POSTGRES_DSN: postgres://postgres:postgres123@postgres:5432/oneagent?sslmode=disable
+      MEMORYSDK_PRE_RECALL_POLICY: auto
+      MEMORYSDK_ENABLE_TOOLS: ${MEMORYSDK_ENABLE_TOOLS:-1}
+      MEMORYSDK_ENABLE_TURN_END_JOBS: ${MEMORYSDK_ENABLE_TURN_END_JOBS:-0}
       BASH_ROOT_DIR: /data/bash-root
 
       KEYCLOAK_URL: ${KEYCLOAK_URL:-https://keycloak.i.strategylab.xyz:10003}

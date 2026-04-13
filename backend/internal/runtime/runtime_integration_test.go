@@ -38,6 +38,12 @@ func TestRuntime_Init_Health_AndStorageRoundTrip(t *testing.T) {
 	if !health.SettingsDBOK || !health.MemoryDBOK || !health.DataDirOK || !health.LogsDirOK {
 		t.Fatalf("expected healthy storage, got %+v", health)
 	}
+	if health.FormalMemoryEnabled {
+		t.Fatalf("expected formal memory disabled by default, got %+v", health)
+	}
+	if health.MemorySDKToolsEnabled || health.MemorySDKTurnEndJobsEnabled {
+		t.Fatalf("expected formal memory feature flags disabled by default, got %+v", health)
+	}
 
 	// Canonical secretary session id is stable.
 	sec1, err := rt.ResolveSecretarySessionID(ctx, "local")
@@ -115,5 +121,48 @@ func TestRuntime_Init_Health_AndStorageRoundTrip(t *testing.T) {
 	}
 	if sec3 != sec1 {
 		t.Fatalf("expected same secretary session id after restart, got %q want %q", sec3, sec1)
+	}
+}
+
+func TestRuntime_HealthReportsFormalMemoryFeatureFlags(t *testing.T) {
+	home := t.TempDir()
+	cfg := &config.Config{
+		Profile:                    "local",
+		Bind:                       "127.0.0.1",
+		Port:                       "0",
+		Home:                       home,
+		AuthMode:                   "none",
+		LogRetentionDays:           1,
+		MemorySDKEnableTools:       true,
+		MemorySDKEnableTurnEndJobs: true,
+		MemorySDKPreRecallPolicy:   "session_only",
+	}
+
+	rt, err := Init(cfg)
+	if err != nil {
+		t.Fatalf("init runtime: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Close() })
+
+	rt.Config.MemorySDKPostgresDSN = "postgres://memory.example.local/memory"
+
+	health, err := rt.Health(context.Background())
+	if err != nil {
+		t.Fatalf("health: %v", err)
+	}
+	if !health.FormalMemoryEnabled {
+		t.Fatalf("expected formal memory enabled in health, got %+v", health)
+	}
+	if health.FormalMemoryConnected {
+		t.Fatalf("expected formal memory disconnected without service, got %+v", health)
+	}
+	if !health.MemorySDKToolsEnabled || !health.MemorySDKTurnEndJobsEnabled {
+		t.Fatalf("expected feature flags in health, got %+v", health)
+	}
+	if health.MemorySDKPreRecallPolicy != "session_only" {
+		t.Fatalf("expected prerecall policy in health, got %+v", health)
+	}
+	if health.Status != "degraded" {
+		t.Fatalf("expected degraded health when config says formal memory enabled but service is absent, got %+v", health)
 	}
 }

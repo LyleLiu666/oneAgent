@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,7 +69,7 @@ func TestRunToolLoop_SelfHeal_UnknownTool(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	combined, _, err := runToolLoop(
+	combined, _, _, err := runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
@@ -196,7 +197,7 @@ func TestRunToolLoop_StopsAfterMaxStepsEnvOverride(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	_, _, err = runToolLoop(
+	_, _, _, err = runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
@@ -277,7 +278,7 @@ func TestRunToolLoop_MapsInvalidArgumentsErrorToStructuredPayload(t *testing.T) 
 		t.Fatalf("create session: %v", err)
 	}
 
-	_, _, err = runToolLoop(
+	_, _, _, err = runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
@@ -364,7 +365,7 @@ func TestRunToolLoop_RetriesOnInvalidFunctionArgumentsAPIError(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	combined, _, err := runToolLoop(
+	combined, _, _, err := runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
@@ -393,4 +394,189 @@ func TestRunToolLoop_RetriesOnInvalidFunctionArgumentsAPIError(t *testing.T) {
 	if got := client.callMessages[1]; len(got) < 2 || got[len(got)-1].Role != model.MessageRoleUser {
 		t.Fatalf("expected retry call to append a user repair message, got %+v", got)
 	}
+}
+
+func TestRunToolLoop_InjectsInvocationMetaIntoHandlerContext(t *testing.T) {
+	var seen tool.InvocationMeta
+	defs := []tool.Definition{
+		{
+			ID: "dummy",
+			Spec: llm.Tool{
+				Type: "function",
+				Function: llm.ToolFunction{
+					Name:        "dummy",
+					Description: "dummy tool",
+					Parameters: map[string]any{
+						"type":                 "object",
+						"properties":           map[string]any{},
+						"required":             []string{},
+						"additionalProperties": false,
+					},
+				},
+			},
+			Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+				_ = raw
+				meta, ok := tool.InvocationMetaFromContext(ctx)
+				if !ok {
+					t.Fatalf("expected invocation meta in context")
+				}
+				seen = meta
+				return map[string]any{"ok": true}, nil
+			},
+		},
+	}
+
+	client := &scriptedToolClient{
+		results: []llm.ChatCompletionResult{
+			{
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_0",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "dummy",
+						Arguments: `{}`,
+					},
+				}},
+			},
+			{Content: "done"},
+		},
+	}
+
+	sm := NewStreamManager()
+	broadcaster := sm.GetOrCreate("session-1")
+	store, err := sessionstore.New(filepath.Join(t.TempDir(), "sessions"))
+	if err != nil {
+		t.Fatalf("new session store: %v", err)
+	}
+	if _, err := store.GetOrCreateSession("session-1", "user-1", ChatModule, "title"); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	ctx := tool.ContextWithInvocationMeta(context.Background(), tool.InvocationMeta{
+		RunID:  "chat:session-1",
+		TurnID: "turn-1",
+	})
+
+	_, _, _, err = runToolLoop(
+		ctx,
+		client,
+		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
+		nil,
+		defs,
+		broadcaster,
+		"session-1",
+		"user-1",
+		nil,
+		"model-1",
+		false,
+		store,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if seen.RunID != "chat:session-1" || seen.TurnID != "turn-1" {
+		t.Fatalf("expected run/turn ids in handler context, got %+v", seen)
+	}
+	if seen.ToolCallID != "call_0" || seen.ToolName != "dummy" || seen.Protocol != "json" {
+		t.Fatalf("expected per-call invocation metadata, got %+v", seen)
+	}
+}
+
+func TestRunToolLoop_DurablePersistedFalseWhenFinalAssistantWriteFails(t *testing.T) {
+	defs := []tool.Definition{
+		{
+			ID: "dummy",
+			Spec: llm.Tool{
+				Type: "function",
+				Function: llm.ToolFunction{
+					Name:        "dummy",
+					Description: "dummy tool",
+					Parameters: map[string]any{
+						"type":                 "object",
+						"properties":           map[string]any{},
+						"required":             []string{},
+						"additionalProperties": false,
+					},
+				},
+			},
+			Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+				_ = ctx
+				_ = raw
+				return map[string]any{"ok": true}, nil
+			},
+		},
+	}
+
+	client := &scriptedToolClient{
+		results: []llm.ChatCompletionResult{
+			{
+				Content: "",
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_0",
+					Type: "function",
+					Function: llm.ToolCallFunction{
+						Name:      "dummy",
+						Arguments: `{}`,
+					},
+				}},
+			},
+			{
+				Content: "done",
+			},
+		},
+	}
+
+	store := &failingToolLoopSessionStore{failAppendAt: 3}
+	broadcaster := &StreamBroadcaster{clients: map[chan StreamEvent]bool{}}
+	combined, persisted, durable, err := runToolLoop(
+		context.Background(),
+		client,
+		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
+		nil,
+		defs,
+		broadcaster,
+		"session-1",
+		"user-1",
+		nil,
+		"model-1",
+		false,
+		store,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if strings.TrimSpace(combined) != "done" {
+		t.Fatalf("expected combined %q, got %q", "done", combined)
+	}
+	if !persisted {
+		t.Fatalf("expected persisted=true because earlier tool messages were written")
+	}
+	if durable {
+		t.Fatalf("expected durable=false when final assistant persistence fails")
+	}
+	if store.appendCalls != 3 {
+		t.Fatalf("expected 3 append attempts, got %d", store.appendCalls)
+	}
+}
+
+type failingToolLoopSessionStore struct {
+	appendCalls  int
+	failAppendAt int
+}
+
+func (f *failingToolLoopSessionStore) AppendMessage(sessionID string, msg model.ChatMessage) (model.ChatMessage, error) {
+	_ = sessionID
+	f.appendCalls++
+	if f.failAppendAt > 0 && f.appendCalls == f.failAppendAt {
+		return model.ChatMessage{}, errors.New("append failed")
+	}
+	msg.ID = uint(f.appendCalls)
+	return msg, nil
+}
+
+func (f *failingToolLoopSessionStore) UpdateMessageTrace(sessionID string, messageID uint, trace model.TraceDataJSON) error {
+	_ = sessionID
+	_ = messageID
+	_ = trace
+	return nil
 }

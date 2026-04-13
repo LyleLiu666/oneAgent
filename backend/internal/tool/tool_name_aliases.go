@@ -16,6 +16,11 @@ var legacyToolNameAliases = map[string]string{
 	"write":          "write_file",
 	"write_to_file":  "write_file",
 
+	// Formal memory tools.
+	"memory.recall":   "memory_recall",
+	"memory.remember": "memory_remember",
+	"memory.forget":   "memory_forget",
+
 	// Code intelligence (LSP).
 	"lsp.definition":     "lsp_definition",
 	"lsp.references":     "lsp_references",

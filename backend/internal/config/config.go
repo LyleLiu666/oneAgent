@@ -60,6 +60,19 @@ type Config struct {
 	// When <=0, defaults to 30.
 	WorkflowArtifactsRetentionDays int
 
+	// MemorySDKPostgresDSN enables the optional external memorySdk formal-memory store.
+	MemorySDKPostgresDSN string
+
+	// MemorySDKPreRecallPolicy controls how memorySdk pre-recall chooses scopes.
+	// Supported values: none | session_only | auto.
+	MemorySDKPreRecallPolicy string
+
+	// MemorySDKEnableTools enables chat-local formal memory tools.
+	MemorySDKEnableTools bool
+
+	// MemorySDKEnableTurnEndJobs enables formal memory turn-end jobs.
+	MemorySDKEnableTurnEndJobs bool
+
 	// Deprecated / unsupported (kept only to provide a clear error message if set).
 	DatabaseURL string
 }
@@ -81,6 +94,11 @@ type LoadOptions struct {
 
 	WorkflowArtifactsRoot          string
 	WorkflowArtifactsRetentionDays int
+
+	MemorySDKPostgresDSN       string
+	MemorySDKPreRecallPolicy   string
+	MemorySDKEnableTools       *bool
+	MemorySDKEnableTurnEndJobs *bool
 }
 
 var AppConfig *Config
@@ -145,6 +163,10 @@ func defaultConfig() *Config {
 		LogRetentionDays:               30,
 		WorkflowArtifactsRoot:          "",
 		WorkflowArtifactsRetentionDays: 30,
+		MemorySDKPostgresDSN:           "",
+		MemorySDKPreRecallPolicy:       "",
+		MemorySDKEnableTools:           false,
+		MemorySDKEnableTurnEndJobs:     false,
 	}
 }
 
@@ -169,6 +191,11 @@ type configFile struct {
 
 	WorkflowArtifactsRoot          *string `yaml:"workflow_artifacts_root"`
 	WorkflowArtifactsRetentionDays *int    `yaml:"workflow_artifacts_retention_days"`
+
+	MemorySDKPostgresDSN       *string `yaml:"memorysdk_postgres_dsn"`
+	MemorySDKPreRecallPolicy   *string `yaml:"memorysdk_prerecall_policy"`
+	MemorySDKEnableTools       *bool   `yaml:"memorysdk_enable_tools"`
+	MemorySDKEnableTurnEndJobs *bool   `yaml:"memorysdk_enable_turn_end_jobs"`
 }
 
 func loadConfigFile(cfg *Config) error {
@@ -228,6 +255,18 @@ func loadConfigFile(cfg *Config) error {
 	if parsed.WorkflowArtifactsRetentionDays != nil {
 		cfg.WorkflowArtifactsRetentionDays = *parsed.WorkflowArtifactsRetentionDays
 	}
+	if parsed.MemorySDKPostgresDSN != nil {
+		cfg.MemorySDKPostgresDSN = *parsed.MemorySDKPostgresDSN
+	}
+	if parsed.MemorySDKPreRecallPolicy != nil {
+		cfg.MemorySDKPreRecallPolicy = *parsed.MemorySDKPreRecallPolicy
+	}
+	if parsed.MemorySDKEnableTools != nil {
+		cfg.MemorySDKEnableTools = *parsed.MemorySDKEnableTools
+	}
+	if parsed.MemorySDKEnableTurnEndJobs != nil {
+		cfg.MemorySDKEnableTurnEndJobs = *parsed.MemorySDKEnableTurnEndJobs
+	}
 
 	return nil
 }
@@ -277,6 +316,18 @@ func applyEnv(cfg *Config) {
 			cfg.WorkflowArtifactsRetentionDays = n
 		}
 	}
+	if v := strings.TrimSpace(os.Getenv("MEMORYSDK_POSTGRES_DSN")); v != "" {
+		cfg.MemorySDKPostgresDSN = v
+	}
+	if v := strings.TrimSpace(os.Getenv("MEMORYSDK_PRE_RECALL_POLICY")); v != "" {
+		cfg.MemorySDKPreRecallPolicy = v
+	}
+	if v := strings.TrimSpace(os.Getenv("MEMORYSDK_ENABLE_TOOLS")); v != "" {
+		cfg.MemorySDKEnableTools = parseBool(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("MEMORYSDK_ENABLE_TURN_END_JOBS")); v != "" {
+		cfg.MemorySDKEnableTurnEndJobs = parseBool(v)
+	}
 
 	// Unsupported.
 	cfg.DatabaseURL = strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -314,6 +365,18 @@ func applyOptions(cfg *Config, opts LoadOptions) {
 	if opts.WorkflowArtifactsRetentionDays != 0 {
 		cfg.WorkflowArtifactsRetentionDays = opts.WorkflowArtifactsRetentionDays
 	}
+	if v := strings.TrimSpace(opts.MemorySDKPostgresDSN); v != "" {
+		cfg.MemorySDKPostgresDSN = v
+	}
+	if v := strings.TrimSpace(opts.MemorySDKPreRecallPolicy); v != "" {
+		cfg.MemorySDKPreRecallPolicy = v
+	}
+	if opts.MemorySDKEnableTools != nil {
+		cfg.MemorySDKEnableTools = *opts.MemorySDKEnableTools
+	}
+	if opts.MemorySDKEnableTurnEndJobs != nil {
+		cfg.MemorySDKEnableTurnEndJobs = *opts.MemorySDKEnableTurnEndJobs
+	}
 }
 
 func normalize(cfg *Config) {
@@ -324,6 +387,8 @@ func normalize(cfg *Config) {
 	cfg.BashRootDir = strings.TrimSpace(cfg.BashRootDir)
 	cfg.DefaultWorkspace = strings.TrimSpace(cfg.DefaultWorkspace)
 	cfg.WorkflowArtifactsRoot = strings.TrimSpace(cfg.WorkflowArtifactsRoot)
+	cfg.MemorySDKPostgresDSN = strings.TrimSpace(cfg.MemorySDKPostgresDSN)
+	cfg.MemorySDKPreRecallPolicy = strings.ToLower(strings.TrimSpace(cfg.MemorySDKPreRecallPolicy))
 
 	if cfg.AuthMode == "password" {
 		cfg.AuthMode = "token"
@@ -379,6 +444,13 @@ func normalize(cfg *Config) {
 func validate(cfg *Config) error {
 	if cfg.DatabaseURL != "" {
 		return fmt.Errorf("Postgres/DATABASE_URL is not supported in local tool mode")
+	}
+	if cfg.MemorySDKPreRecallPolicy != "" {
+		switch cfg.MemorySDKPreRecallPolicy {
+		case "none", "session_only", "auto":
+		default:
+			return fmt.Errorf("invalid MEMORYSDK_PRE_RECALL_POLICY: %q (expected none|session_only|auto)", cfg.MemorySDKPreRecallPolicy)
+		}
 	}
 	if cfg.Home == "" {
 		return errors.New("ONEAGENT_HOME is required")

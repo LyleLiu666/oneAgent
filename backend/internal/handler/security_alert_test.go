@@ -66,7 +66,7 @@ func TestRunToolLoop_SecurityAlert_RecordedInTrace(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	_, _, err = runToolLoop(
+	_, _, _, err = runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
@@ -105,4 +105,3 @@ func TestRunToolLoop_SecurityAlert_RecordedInTrace(t *testing.T) {
 		t.Fatalf("expected SecurityAlert trace entry")
 	}
 }
-

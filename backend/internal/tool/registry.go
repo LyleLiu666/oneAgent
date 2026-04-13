@@ -13,20 +13,23 @@ import (
 )
 
 const (
-	ToolIDBash       = "bash"
-	ToolIDEdit       = "edit"
-	ToolIDGlob       = "glob"
-	ToolIDLs         = "ls"
-	ToolIDMultiEdit  = "multiedit"
-	ToolIDPlan       = "plan"
-	ToolIDRg         = "rg"
-	ToolIDSearch     = "search"
-	ToolIDRunCommand = "run_command"
-	ToolIDSkillRead  = "skill_read"
-	ToolIDSubagent   = "subagent"
-	ToolIDWriteFile  = "write_file"
-	ToolIDReadFile   = "read_file"
-	ToolIDTrashFile  = "trash_file"
+	ToolIDBash           = "bash"
+	ToolIDEdit           = "edit"
+	ToolIDGlob           = "glob"
+	ToolIDLs             = "ls"
+	ToolIDMultiEdit      = "multiedit"
+	ToolIDPlan           = "plan"
+	ToolIDRg             = "rg"
+	ToolIDSearch         = "search"
+	ToolIDRunCommand     = "run_command"
+	ToolIDSkillRead      = "skill_read"
+	ToolIDSubagent       = "subagent"
+	ToolIDWriteFile      = "write_file"
+	ToolIDReadFile       = "read_file"
+	ToolIDTrashFile      = "trash_file"
+	ToolIDMemoryRecall   = "memory_recall"
+	ToolIDMemoryRemember = "memory_remember"
+	ToolIDMemoryForget   = "memory_forget"
 )
 
 // Context keys for passing user information to tool handlers

@@ -45,7 +45,6 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/prompt"
 	oneruntime "github.com/liu_y/oneAgent/backend/internal/runtime"
 	"github.com/liu_y/oneAgent/backend/internal/scope"
-	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
 	"github.com/liu_y/oneAgent/backend/internal/settingsdb"
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 	"github.com/liu_y/oneAgent/backend/internal/toolcalling"
@@ -290,15 +289,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 		return
 	}
 	selectedToolIDs := toolIDsFromDefinitions(mountedToolDefs)
-
-	toolProtocol, toolProtocolFellBack := selectToolProtocol(requestedToolProtocol, mountedToolDefs, resolvedModel.Client)
-
-	toolDefs := mountedToolDefs
-	if toolProtocol == "xml" && len(toolDefs) > 0 {
-		toolDefs, _ = toolxml.FilterSupportedDefinitions(toolDefs)
+	formalMemoryRunID := "chat:" + strings.TrimSpace(sessionID)
+	formalMemoryTurnID := uuid.NewString()
+	memoryToolDefs := []tool.Definition(nil)
+	if h.rt.Config.MemorySDKEnableTools && h.rt.FormalMemory != nil {
+		memoryToolDefs = buildChatLocalMemoryToolDefinitions(h.rt.FormalMemory)
 	}
 
-	effectiveToolIDs := toolIDsFromDefinitions(toolDefs)
+	toolProtocol, toolProtocolFellBack := selectToolProtocol(requestedToolProtocol, append(append([]tool.Definition(nil), mountedToolDefs...), memoryToolDefs...), resolvedModel.Client)
+	toolSet := resolveChatToolSet(mountedToolDefs, memoryToolDefs, toolProtocol)
+	toolDefs := toolSet.RuntimeDefs
+	effectiveToolIDs := toolSet.RuntimeToolIDs
+	inheritableToolIDs := toolSet.InheritableToolIDs
 
 	if len(toolDefs) > 0 && strings.TrimSpace(workspaceRoot) == "" && toolSetRequiresWorkspace(toolDefs) {
 		RespondError(c, http.StatusBadRequest, &PublicError{
@@ -333,20 +335,18 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 
 	// TurnContext (volatile): dynamic per-turn context MUST NOT be injected into the stable prefix.
 	// This is intentionally appended after persisted history and excluded from cache selection.
-	turnContext := ""
-	caps := skillTurnContextCaps{}
-	for _, def := range toolDefs {
-		switch def.ID {
-		case tool.ToolIDSkillRead:
-			caps.HasSkillRead = true
-		case tool.ToolIDSubagent:
-			caps.HasSubagent = true
-		}
-	}
-	if caps.HasSkillRead || caps.HasSubagent {
-		turnContext = strings.TrimSpace(buildSkillSuggestionTurnContext(c.Request.Context(), h.rt.Skills, workspaceRoot, req.Message, caps))
-	}
-	if msg, ok := llm.BuildTurnContextMessage(turnContext); ok {
+	turnContextResult := buildChatTurnContext(c.Request.Context(), chatTurnContextInput{
+		Skills:        h.rt.Skills,
+		FormalMemory:  h.rt.FormalMemory,
+		WorkspaceRoot: workspaceRoot,
+		UserMessage:   req.Message,
+		UserID:        userID,
+		SessionID:     sessionID,
+		TurnID:        formalMemoryTurnID,
+		AgentID:       chatFormalMemoryAgentID,
+		ToolDefs:      toolDefs,
+	})
+	if msg, ok := llm.BuildTurnContextMessage(turnContextResult.Content); ok {
 		messages = append(messages, msg)
 	}
 
@@ -633,17 +633,33 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					Type: "trace",
 					Data: "Preparing conversation context...",
 				})
+				for _, traceMsg := range turnContextResult.TraceMessages {
+					if strings.TrimSpace(traceMsg) == "" {
+						continue
+					}
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: strings.TrimSpace(traceMsg),
+					})
+				}
+				if len(memoryToolDefs) > 0 && !toolSet.MemoryToolsActive {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: "Formal memory tools disabled for this turn: current protocol does not support them.",
+					})
+				}
 				time.Sleep(50 * time.Millisecond)
 			}
 
 			// Call LLM with streaming
 			var fullContent string
+			var turnDurablyPersisted bool
 			ctx, cancel := context.WithCancel(context.Background()) // Use background context so generation survives request cancellation
 			broadcaster.SetGenerationCancel(cancel)
 			ctx = tool.ContextWithSessionID(ctx, sessionID)
 			ctx = tool.ContextWithUserID(ctx, userID)
 			ctx = tool.ContextWithPromptBaseOverride(ctx, baseOverride)
-			ctx = tool.ContextWithMountedToolIDs(ctx, effectiveToolIDs)
+			ctx = tool.ContextWithMountedToolIDs(ctx, inheritableToolIDs)
 			ctx = tool.ContextWithPolicySnapshot(ctx, policySnap)
 			ctx = tool.ContextWithSettingsDB(ctx, h.rt.Settings)
 			ctx = tool.ContextWithSkillManager(ctx, h.rt.Skills)
@@ -662,6 +678,10 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				})
 			}
 			ctx = tool.ContextWithOCC(ctx, strings.TrimSpace(os.Getenv("ONEAGENT_DISABLE_OCC")) != "1")
+			ctx = tool.ContextWithInvocationMeta(ctx, tool.InvocationMeta{
+				RunID:  formalMemoryRunID,
+				TurnID: formalMemoryTurnID,
+			})
 
 			opts := &llm.ChatCompletionOptions{
 				Trace: traceCallback,
@@ -976,7 +996,9 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 					})
 					err = fmt.Errorf("tool calling not supported for this provider")
 				} else {
-					fullContent, toolLoopPersisted, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel, resolvedModel.ModelName, h.rt.Config.EnableTrace, h.rt.Sessions)
+					var toolLoopDurablyPersisted bool
+					fullContent, toolLoopPersisted, toolLoopDurablyPersisted, err = runToolLoop(ctx, toolClient, messages, opts, toolDefs, broadcaster, sessionID, userID, resolvedModel, resolvedModel.ModelName, h.rt.Config.EnableTrace, h.rt.Sessions)
+					turnDurablyPersisted = toolLoopDurablyPersisted
 				}
 			} else {
 				assistantStreamID := uuid.NewString()
@@ -1116,6 +1138,39 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 				if _, persistErr := h.rt.Sessions.AppendMessage(sessionID, assistantMsg); persistErr != nil {
 					log.Printf("Failed to persist assistant message: %v", persistErr)
+					turnDurablyPersisted = false
+				} else {
+					turnDurablyPersisted = true
+				}
+			}
+
+			if h.rt.Config.MemorySDKEnableTurnEndJobs && h.rt.FormalMemory != nil && turnDurablyPersisted && !broadcaster.WasCanceled() && !errors.Is(err, context.Canceled) {
+				enqueueCtx, enqueueCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				enqueueErr := enqueueChatTurnEndFormalMemory(enqueueCtx, chatTurnEndInput{
+					FormalMemory:  h.rt.FormalMemory,
+					RunID:         formalMemoryRunID,
+					TurnID:        formalMemoryTurnID,
+					UserID:        userID,
+					SessionID:     sessionID,
+					WorkspaceRoot: workspaceRoot,
+					AgentID:       chatFormalMemoryAgentID,
+					ToolProtocol:  toolProtocol,
+					TurnErr:       err,
+				})
+				enqueueCancel()
+				if enqueueErr != nil {
+					log.Printf("formalmemory turn-end enqueue degraded: %v", enqueueErr)
+					if h.rt.Config.EnableTrace {
+						broadcaster.Broadcast(StreamEvent{
+							Type: "trace",
+							Data: fmt.Sprintf("Formal memory turn-end enqueue degraded: %v", enqueueErr),
+						})
+					}
+				} else if h.rt.Config.EnableTrace {
+					broadcaster.Broadcast(StreamEvent{
+						Type: "trace",
+						Data: "Formal memory turn-end job queued.",
+					})
 				}
 			}
 		}()
@@ -1520,6 +1575,11 @@ type toolStreamingCaller interface {
 	ChatCompletionStreamWithTools(context.Context, []llm.ChatMessage, *llm.ChatCompletionOptions, llm.StreamCallback) (llm.ChatCompletionResult, error)
 }
 
+type toolLoopSessionStore interface {
+	AppendMessage(sessionID string, msg model.ChatMessage) (model.ChatMessage, error)
+	UpdateMessageTrace(sessionID string, messageID uint, trace model.TraceDataJSON) error
+}
+
 func runToolLoop(
 	ctx context.Context,
 	client toolCaller,
@@ -1532,14 +1592,14 @@ func runToolLoop(
 	resolved *resolvedModel,
 	modelName string,
 	enableTrace bool,
-	sessions *sessionstore.Store,
-) (string, bool, error) {
+	sessions toolLoopSessionStore,
+) (string, bool, bool, error) {
 	if len(defs) == 0 {
-		return "", false, fmt.Errorf("no tools configured")
+		return "", false, false, fmt.Errorf("no tools configured")
 	}
 
 	if sessions == nil {
-		return "", false, fmt.Errorf("session store not configured")
+		return "", false, false, fmt.Errorf("session store not configured")
 	}
 	defsByName := make(map[string]tool.Definition, len(defs))
 	for _, def := range defs {
@@ -1548,6 +1608,12 @@ func runToolLoop(
 			continue
 		}
 		defsByName[name] = def
+		if canonical := tool.CanonicalToolName(name); canonical != "" {
+			defsByName[canonical] = def
+		}
+		if trimmedID := strings.TrimSpace(def.ID); trimmedID != "" {
+			defsByName[trimmedID] = def
+		}
 	}
 
 	// Inject userID into context for tool handlers to access user-specific settings
@@ -1557,11 +1623,16 @@ func runToolLoop(
 
 	var combined strings.Builder
 	var persisted bool
+	var persistFailed bool
+
+	markPersistFailure := func() {
+		persistFailed = true
+	}
 
 	maxSteps := toolcalling.ChatToolMaxSteps()
 	for step := 0; step < maxSteps; step++ {
 		if (broadcaster != nil && broadcaster.WasCanceled()) || errors.Is(ctx.Err(), context.Canceled) {
-			return combined.String(), persisted, context.Canceled
+			return combined.String(), persisted, false, context.Canceled
 		}
 
 		stepStreamID := uuid.NewString()
@@ -1653,7 +1724,7 @@ func runToolLoop(
 					Role:    model.MessageRoleAssistant,
 					MsgType: model.MessageTypeText,
 				})
-				return combined.String(), persisted, context.Canceled
+				return combined.String(), persisted, false, context.Canceled
 			}
 
 			broadcastMsg(broadcaster, streamMsg{
@@ -1681,8 +1752,10 @@ func runToolLoop(
 			}
 			if _, persistErr := sessions.AppendMessage(sessionID, msg); persistErr == nil {
 				persisted = true
+			} else {
+				markPersistFailure()
 			}
-			return combined.String(), persisted, err
+			return combined.String(), persisted, persisted && !persistFailed, err
 		}
 
 		if len(result.ToolCalls) == 0 {
@@ -1693,7 +1766,7 @@ func runToolLoop(
 					Role:    model.MessageRoleAssistant,
 					MsgType: model.MessageTypeText,
 				})
-				return combined.String(), persisted, context.Canceled
+				return combined.String(), persisted, false, context.Canceled
 			}
 
 			broadcastMsg(broadcaster, streamMsg{
@@ -1709,10 +1782,12 @@ func runToolLoop(
 			}
 			if _, persistErr := sessions.AppendMessage(sessionID, assistantMsg); persistErr == nil {
 				persisted = true
+			} else {
+				markPersistFailure()
 			}
 
 			// Return the content already streamed/broadcast across all steps so llm_calls response matches realtime output.
-			return combined.String(), persisted, nil
+			return combined.String(), persisted, persisted && !persistFailed, nil
 		}
 
 		var toolCallMsgID uint
@@ -1729,6 +1804,8 @@ func runToolLoop(
 		if persistedCall, err := sessions.AppendMessage(sessionID, callMsg); err == nil {
 			toolCallMsgID = persistedCall.ID
 			persisted = true
+		} else {
+			markPersistFailure()
 		}
 		broadcastMsg(broadcaster, streamMsg{
 			Op:      "final",
@@ -1799,7 +1876,21 @@ func runToolLoop(
 						Data: fmt.Sprintf("Running tool: %s", call.Function.Name),
 					})
 
-					payload, toolErr = handler(ctx, json.RawMessage(call.Function.Arguments))
+					callCtx := ctx
+					if meta, ok := tool.InvocationMetaFromContext(ctx); ok {
+						meta.ToolCallID = strings.TrimSpace(call.ID)
+						meta.ToolName = strings.TrimSpace(call.Function.Name)
+						meta.Protocol = "json"
+						callCtx = tool.ContextWithInvocationMeta(callCtx, meta)
+					} else {
+						callCtx = tool.ContextWithInvocationMeta(callCtx, tool.InvocationMeta{
+							ToolCallID: strings.TrimSpace(call.ID),
+							ToolName:   strings.TrimSpace(call.Function.Name),
+							Protocol:   "json",
+						})
+					}
+
+					payload, toolErr = handler(callCtx, json.RawMessage(call.Function.Arguments))
 					if toolErr != nil {
 						var approvalRequired *tool.ApprovalRequiredError
 						var approvalDenied *tool.ApprovalDeniedError
@@ -1904,6 +1995,8 @@ func runToolLoop(
 			}
 			if _, persistErr := sessions.AppendMessage(sessionID, resultMsg); persistErr == nil {
 				persisted = true
+			} else {
+				markPersistFailure()
 			}
 			broadcastMsg(broadcaster, streamMsg{
 				Op:      "insert",
@@ -2028,8 +2121,10 @@ func runToolLoop(
 	}
 	if _, persistErr := sessions.AppendMessage(sessionID, msg); persistErr == nil {
 		persisted = true
+	} else {
+		markPersistFailure()
 	}
-	return combined.String(), persisted, err
+	return combined.String(), persisted, persisted && !persistFailed, err
 }
 
 func shouldRetryToolProtocolError(err error) bool {
@@ -2263,7 +2358,7 @@ func toolSetRequiresWorkspace(defs []tool.Definition) bool {
 	for _, def := range defs {
 		switch def.ID {
 		// Some tools can operate without a workspace (e.g., global skills).
-		case tool.ToolIDSkillRead:
+		case tool.ToolIDSkillRead, tool.ToolIDMemoryRecall, tool.ToolIDMemoryRemember, tool.ToolIDMemoryForget:
 			continue
 		default:
 			return true

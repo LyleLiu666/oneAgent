@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/liu_y/oneAgent/backend/internal/config"
+	"github.com/liu_y/oneAgent/backend/internal/formalmemory"
 	"github.com/liu_y/oneAgent/backend/internal/llmlog"
 	"github.com/liu_y/oneAgent/backend/internal/memorydb"
 	"github.com/liu_y/oneAgent/backend/internal/sessionstore"
@@ -32,11 +33,12 @@ type Runtime struct {
 
 	Pairing *PairingService
 
-	Settings *settingsdb.DB
-	Memory   *memorydb.DB
-	Sessions *sessionstore.Store
-	LLMLog   *llmlog.Writer
-	Skills   *skill.Manager
+	Settings     *settingsdb.DB
+	Memory       *memorydb.DB
+	Sessions     *sessionstore.Store
+	LLMLog       *llmlog.Writer
+	Skills       *skill.Manager
+	FormalMemory *formalmemory.Service
 
 	Tasks      *taskqueue.Store
 	TaskRunner *taskqueue.TaskRunner
@@ -108,10 +110,21 @@ func Init(cfg *config.Config) (*Runtime, error) {
 		return nil, err
 	}
 
+	formalMemory, err := formalmemory.Open(context.Background(), formalmemory.Config{
+		PostgresDSN:     cfg.MemorySDKPostgresDSN,
+		PreRecallPolicy: cfg.MemorySDKPreRecallPolicy,
+	})
+	if err != nil {
+		_ = settings.Close()
+		_ = memory.Close()
+		return nil, err
+	}
+
 	tasks, err := taskqueue.NewStore(layout.TasksDir)
 	if err != nil {
 		_ = settings.Close()
 		_ = memory.Close()
+		_ = formalMemory.Close()
 		return nil, err
 	}
 
@@ -119,6 +132,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 	if err != nil {
 		_ = settings.Close()
 		_ = memory.Close()
+		_ = formalMemory.Close()
 		return nil, err
 	}
 
@@ -126,6 +140,7 @@ func Init(cfg *config.Config) (*Runtime, error) {
 	if err != nil {
 		_ = settings.Close()
 		_ = memory.Close()
+		_ = formalMemory.Close()
 		return nil, err
 	}
 
@@ -140,18 +155,19 @@ func Init(cfg *config.Config) (*Runtime, error) {
 	}
 
 	rt := &Runtime{
-		Config:     cfg,
-		Layout:     layout,
-		AuthToken:  token,
-		Pairing:    NewPairingService(),
-		Settings:   settings,
-		Memory:     memory,
-		Sessions:   sessions,
-		LLMLog:     llmLogger,
-		Skills:     skill.NewManager(30 * time.Second),
-		Tasks:      tasks,
-		WorkLedger: ledger,
-		Workflows:  workflows,
+		Config:       cfg,
+		Layout:       layout,
+		AuthToken:    token,
+		Pairing:      NewPairingService(),
+		Settings:     settings,
+		Memory:       memory,
+		Sessions:     sessions,
+		LLMLog:       llmLogger,
+		Skills:       skill.NewManager(30 * time.Second),
+		FormalMemory: formalMemory,
+		Tasks:        tasks,
+		WorkLedger:   ledger,
+		Workflows:    workflows,
 	}
 	rt.bgCtx, rt.bgCancel = context.WithCancel(context.Background())
 
@@ -223,19 +239,29 @@ func (r *Runtime) Close() error {
 			firstErr = err
 		}
 	}
+	if r.FormalMemory != nil {
+		if err := r.FormalMemory.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	return firstErr
 }
 
 type HealthStatus struct {
-	Status       string `json:"status"`
-	SettingsDBOK bool   `json:"settings_db"`
-	MemoryDBOK   bool   `json:"memory_db"`
-	DataDirOK    bool   `json:"data_dir"`
-	LogsDirOK    bool   `json:"logs_dir"`
-	AuthMode     string `json:"auth_mode"`
-	OneAgentHome string `json:"oneagent_home"`
-	SettingsDB   string `json:"settings_db_path"`
-	MemoryDB     string `json:"memory_db_path"`
+	Status                      string `json:"status"`
+	SettingsDBOK                bool   `json:"settings_db"`
+	MemoryDBOK                  bool   `json:"memory_db"`
+	DataDirOK                   bool   `json:"data_dir"`
+	LogsDirOK                   bool   `json:"logs_dir"`
+	AuthMode                    string `json:"auth_mode"`
+	OneAgentHome                string `json:"oneagent_home"`
+	SettingsDB                  string `json:"settings_db_path"`
+	MemoryDB                    string `json:"memory_db_path"`
+	FormalMemoryEnabled         bool   `json:"formal_memory_enabled"`
+	FormalMemoryConnected       bool   `json:"formal_memory_connected"`
+	MemorySDKPreRecallPolicy    string `json:"memorysdk_prerecall_policy"`
+	MemorySDKToolsEnabled       bool   `json:"memorysdk_enable_tools"`
+	MemorySDKTurnEndJobsEnabled bool   `json:"memorysdk_enable_turn_end_jobs"`
 }
 
 func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
@@ -243,11 +269,16 @@ func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
 		return HealthStatus{}, errors.New("runtime is nil")
 	}
 	status := HealthStatus{
-		Status:       "healthy",
-		AuthMode:     r.Config.AuthMode,
-		OneAgentHome: r.Layout.Home,
-		SettingsDB:   r.Layout.SettingsDBPath,
-		MemoryDB:     r.Layout.MemoryDBPath,
+		Status:                      "healthy",
+		AuthMode:                    r.Config.AuthMode,
+		OneAgentHome:                r.Layout.Home,
+		SettingsDB:                  r.Layout.SettingsDBPath,
+		MemoryDB:                    r.Layout.MemoryDBPath,
+		FormalMemoryEnabled:         strings.TrimSpace(r.Config.MemorySDKPostgresDSN) != "",
+		FormalMemoryConnected:       r.FormalMemory != nil,
+		MemorySDKPreRecallPolicy:    effectiveMemorySDKPreRecallPolicy(r.Config),
+		MemorySDKToolsEnabled:       r.Config.MemorySDKEnableTools,
+		MemorySDKTurnEndJobsEnabled: r.Config.MemorySDKEnableTurnEndJobs,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -271,6 +302,9 @@ func (r *Runtime) Health(ctx context.Context) (HealthStatus, error) {
 	status.DataDirOK = canWriteDir(r.Layout.DataDir)
 	status.LogsDirOK = canWriteDir(r.Layout.LogsDir)
 	if !status.DataDirOK || !status.LogsDirOK {
+		status.Status = "degraded"
+	}
+	if status.FormalMemoryEnabled && !status.FormalMemoryConnected {
 		status.Status = "degraded"
 	}
 
@@ -315,4 +349,15 @@ func canWriteDir(dir string) bool {
 	}
 	_ = os.Remove(path)
 	return true
+}
+
+func effectiveMemorySDKPreRecallPolicy(cfg *config.Config) string {
+	if cfg == nil {
+		return "auto"
+	}
+	policy := strings.ToLower(strings.TrimSpace(cfg.MemorySDKPreRecallPolicy))
+	if policy == "" {
+		return "auto"
+	}
+	return policy
 }

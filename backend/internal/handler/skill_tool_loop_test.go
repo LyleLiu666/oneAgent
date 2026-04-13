@@ -65,7 +65,7 @@ func TestRunToolLoop_SkillRead_ByName(t *testing.T) {
 	ctx := context.Background()
 	ctx = tool.ContextWithSkillManager(ctx, skill.NewManager(0))
 
-	combined, _, err := runToolLoop(
+	combined, _, _, err := runToolLoop(
 		ctx,
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},
@@ -163,7 +163,7 @@ func TestRunToolLoop_SkillRead_ByName_CanonicalName(t *testing.T) {
 	ctx := context.Background()
 	ctx = tool.ContextWithSkillManager(ctx, skill.NewManager(0))
 
-	combined, _, err := runToolLoop(
+	combined, _, _, err := runToolLoop(
 		ctx,
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "hi"}},

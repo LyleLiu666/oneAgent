@@ -13,9 +13,9 @@ import (
 
 func TestOpenAIClient_DowngradesPromptCacheKeyWhenUnsupported(t *testing.T) {
 	var (
-		mu        sync.Mutex
-		requests  []map[string]any
-		attempts  int
+		mu       sync.Mutex
+		requests []map[string]any
+		attempts int
 	)
 
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,5 +90,47 @@ func TestOpenAIClient_DowngradesPromptCacheKeyWhenUnsupported(t *testing.T) {
 	}
 	if _, ok := requests[1]["prompt_cache_key"]; ok {
 		t.Fatalf("expected second request to omit prompt_cache_key")
+	}
+}
+
+func TestOpenAIClient_DoesNotRetryNonCache4xx(t *testing.T) {
+	var attempts int
+
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+
+		attempts++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"temperature invalid"}}`))
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	opts := &ChatCompletionOptions{
+		EnablePromptCache: true,
+		PromptCacheKey:    "v1:session:0:hash",
+	}
+
+	err := client.ChatCompletionStream(context.Background(), []ChatMessage{
+		BuildSystemMessage("sys"),
+		BuildUserMessage("hi"),
+	}, opts, nil)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 request, got %d", attempts)
+	}
+	if opts.PromptCacheDowngraded {
+		t.Fatalf("expected no prompt cache downgrade for non-cache 4xx")
 	}
 }

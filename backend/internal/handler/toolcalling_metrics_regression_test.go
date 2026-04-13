@@ -88,7 +88,7 @@ func TestToolcallingMetrics_JSONToolResultIncludesStructuredResults(t *testing.T
 	}
 
 	broadcaster := &StreamBroadcaster{clients: map[chan StreamEvent]bool{}}
-	out, persisted, err := runToolLoop(
+	out, persisted, _, err := runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "go"}},
@@ -207,7 +207,7 @@ func TestToolcallingMetrics_JSONToolArgsRequiredValidationRejectsBeforeHandler(t
 	}
 
 	broadcaster := &StreamBroadcaster{clients: map[chan StreamEvent]bool{}}
-	_, _, err = runToolLoop(
+	_, _, _, err = runToolLoop(
 		context.Background(),
 		client,
 		[]llm.ChatMessage{{Role: model.MessageRoleUser, Content: "go"}},
@@ -262,4 +262,3 @@ func TestToolcallingMetrics_JSONToolArgsRequiredValidationRejectsBeforeHandler(t
 		t.Fatalf("expected error to be populated, got %+v", got)
 	}
 }
-
