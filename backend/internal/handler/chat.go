@@ -537,8 +537,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			// Start trace collection
 			traceStart := time.Now()
 			var traceEntries []model.TraceEntry
-			var latestUsage *llm.UsageInfo
-
 			// Trace callback integration
 			traceCallback := &llm.TraceCallback{
 				OnStart: func(ctx context.Context, input []llm.ChatMessage) {
@@ -552,42 +550,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 						Type: "trace",
 						Data: "Generating response...",
 					})
-				},
-				OnUsage: func(ctx context.Context, usage llm.UsageInfo) {
-					usageCopy := usage
-					latestUsage = &usageCopy
-
-					payload := map[string]any{}
-					if usage.OutputTokens > 0 {
-						payload["response_tokens"] = usage.OutputTokens
-					}
-					if usage.InputTokens > 0 {
-						payload["input_tokens"] = usage.InputTokens
-					}
-					if usage.TotalTokens > 0 {
-						payload["total_tokens"] = usage.TotalTokens
-					}
-					if usage.CachedTokens > 0 {
-						payload["cached_tokens"] = usage.CachedTokens
-					}
-					if len(payload) > 0 {
-						if raw, err := json.Marshal(payload); err == nil {
-							broadcaster.Broadcast(StreamEvent{
-								Type: "usage",
-								Data: string(raw),
-							})
-						}
-					}
-					if usage.CachedTokens > 0 {
-						msg := fmt.Sprintf("KV cache hit: cached_tokens=%d", usage.CachedTokens)
-						if usage.InputTokens > 0 {
-							msg = fmt.Sprintf("KV cache hit: cached_tokens=%d/%d", usage.CachedTokens, usage.InputTokens)
-						}
-						broadcaster.Broadcast(StreamEvent{
-							Type: "trace",
-							Data: msg,
-						})
-					}
 				},
 				OnComplete: func(ctx context.Context, output string, err error) {
 					if broadcaster.WasCanceled() || errors.Is(err, context.Canceled) {
@@ -1114,10 +1076,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			callRecord.PromptCacheEnabled = opts.EnablePromptCache
 			callRecord.PromptCacheDowngraded = opts.PromptCacheDowngraded
 			callRecord.PromptCacheDowngradeReason = strings.TrimSpace(opts.PromptCacheDowngradeReason)
-			if latestUsage != nil {
-				usageCopy := *latestUsage
-				callRecord.Usage = &usageCopy
-			}
 			if err != nil {
 				callRecord.Error = err.Error()
 			}
@@ -1143,12 +1101,6 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 				if callRecord.PromptCacheKeyHash != "" {
 					traceEntries[0].Metadata["prompt_cache_key_hash"] = callRecord.PromptCacheKeyHash
-				}
-				if callRecord.Usage != nil {
-					traceEntries[0].Metadata["input_tokens"] = callRecord.Usage.InputTokens
-					traceEntries[0].Metadata["output_tokens"] = callRecord.Usage.OutputTokens
-					traceEntries[0].Metadata["total_tokens"] = callRecord.Usage.TotalTokens
-					traceEntries[0].Metadata["cached_tokens"] = callRecord.Usage.CachedTokens
 				}
 
 				traceEntries[0].Complete()
