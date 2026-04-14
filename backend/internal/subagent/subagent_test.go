@@ -219,6 +219,65 @@ func TestRun_TruncatesSummary(t *testing.T) {
 	}
 }
 
+func TestRun_DispatchesSanitizedToolCallNameToRawHandlerName(t *testing.T) {
+	logsBase := t.TempDir()
+	workspaceRoot := t.TempDir()
+	called := false
+
+	client := &scriptedToolClient{
+		results: []llm.ChatCompletionResult{
+			{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.ToolCallFunction{
+							Name:      "skill_read",
+							Arguments: `{"name":"demo"}`,
+						},
+					},
+				},
+			},
+			{
+				Content: `<subagent_handoff><summary>done</summary></subagent_handoff>`,
+			},
+		},
+	}
+
+	tools := []llm.Tool{
+		{Type: "function", Function: llm.ToolFunction{Name: "skill.read"}},
+	}
+	handlers := map[string]ToolHandler{
+		"skill.read": func(context.Context, json.RawMessage) (any, error) {
+			called = true
+			return map[string]any{"ok": true}, nil
+		},
+	}
+
+	got, err := Run(context.Background(), RunRequest{
+		ParentSessionID:   "sess-123",
+		UserID:            "u1",
+		SystemPrompt:      "sys",
+		Client:            client,
+		Tools:             tools,
+		Handlers:          handlers,
+		WorkspaceRoot:     workspaceRoot,
+		LogsBaseDir:       logsBase,
+		Task:              "step",
+		MaxSteps:          3,
+		MaxRuntimeSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !called {
+		t.Fatalf("expected sanitized tool call name to dispatch to handler")
+	}
+	if got.Summary != "done" {
+		t.Fatalf("expected summary done, got %q", got.Summary)
+	}
+}
+
 func TestParseHandoffXML_ToleratesRawTextAndMalformedXML(t *testing.T) {
 	t.Run("raw angle brackets and ampersands", func(t *testing.T) {
 		input := `<subagent_handoff>

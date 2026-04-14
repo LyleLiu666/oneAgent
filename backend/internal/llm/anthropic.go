@@ -344,7 +344,7 @@ func (c *AnthropicClient) ChatCompletionStreamWithTools(ctx context.Context, mes
 			reqBody.Tools = buildAnthropicTools(opts.Tools)
 		}
 		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
+			reqBody.ToolChoice = sanitizeProviderToolChoice(opts.ToolChoice)
 		}
 	}
 
@@ -638,12 +638,13 @@ func buildAnthropicPayload(messages []ChatMessage, enableCache bool) ([]anthropi
 }
 
 func buildAnthropicTools(tools []Tool) []anthropicTool {
-	if len(tools) == 0 {
+	ordered := normalizeTools(tools)
+	if len(ordered) == 0 {
 		return nil
 	}
 
-	out := make([]anthropicTool, 0, len(tools))
-	for _, tool := range tools {
+	out := make([]anthropicTool, 0, len(ordered))
+	for _, tool := range ordered {
 		out = append(out, anthropicTool{
 			Name:        tool.Function.Name,
 			Description: tool.Function.Description,

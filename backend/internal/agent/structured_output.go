@@ -18,10 +18,10 @@ const (
 )
 
 type StructuredOutputMeta struct {
-	Mode               StructuredOutputMode
+	Mode                 StructuredOutputMode
 	FellBackFromToolCall bool
-	ToolCallID         string
-	RawOutput          string
+	ToolCallID           string
+	RawOutput            string
 }
 
 type StructuredOutputSpec[T any] struct {
@@ -107,7 +107,7 @@ func RequestStructuredOutput[T any](
 				}
 
 				for _, call := range res.ToolCalls {
-					if strings.TrimSpace(call.Function.Name) != toolName {
+					if !llm.ToolNamesEquivalent(call.Function.Name, toolName) {
 						continue
 					}
 					raw := json.RawMessage(call.Function.Arguments)
@@ -224,4 +224,3 @@ func cloneChatCompletionOptions(in *llm.ChatCompletionOptions) *llm.ChatCompleti
 	}
 	return &out
 }
-

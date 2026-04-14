@@ -362,7 +362,7 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 				reqBody.Tools = normalizeTools(opts.Tools)
 			}
 			if opts.ToolChoice != nil {
-				reqBody.ToolChoice = opts.ToolChoice
+				reqBody.ToolChoice = sanitizeProviderToolChoice(opts.ToolChoice)
 			}
 		}
 
@@ -645,7 +645,7 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 				reqBody.Tools = normalizeTools(opts.Tools)
 			}
 			if opts.ToolChoice != nil {
-				reqBody.ToolChoice = opts.ToolChoice
+				reqBody.ToolChoice = sanitizeProviderToolChoice(opts.ToolChoice)
 			}
 		}
 

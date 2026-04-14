@@ -135,6 +135,54 @@ func TestRequestStructuredOutput_PrefersToolCall(t *testing.T) {
 	}
 }
 
+func TestRequestStructuredOutput_MatchesSanitizedToolCallName(t *testing.T) {
+	client := &structuredClient{
+		toolResults: []any{
+			llm.ChatCompletionResult{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.ToolCallFunction{
+							Name:      "emit_payload",
+							Arguments: `{"value":"ok"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tool := llm.Tool{
+		Type: "function",
+		Function: llm.ToolFunction{
+			Name: "emit.payload",
+		},
+	}
+
+	out, meta, err := RequestStructuredOutput[testPayload](context.Background(), client, nil, nil, StructuredOutputSpec[testPayload]{
+		Tool:     tool,
+		ToolName: "emit.payload",
+		ParseToolArgs: func(raw json.RawMessage) (testPayload, error) {
+			var p testPayload
+			return p, json.Unmarshal(raw, &p)
+		},
+		ParseTags: func(text string) (testPayload, bool) {
+			_ = text
+			return testPayload{}, false
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Value != "ok" {
+		t.Fatalf("expected value=ok, got %+v", out)
+	}
+	if meta.Mode != StructuredOutputModeToolCall {
+		t.Fatalf("expected mode=tool_call, got %+v", meta)
+	}
+}
+
 func TestRequestStructuredOutput_FallsBackToTagsWhenToolCallErrors(t *testing.T) {
 	client := &structuredClient{
 		toolResults: []any{

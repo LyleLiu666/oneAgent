@@ -161,7 +161,7 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 			reqBody.Tools = normalizeResponsesTools(opts.Tools)
 		}
 		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
+			reqBody.ToolChoice = sanitizeProviderToolChoice(opts.ToolChoice)
 		}
 	}
 
@@ -327,7 +327,7 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 			reqBody.Tools = normalizeResponsesTools(opts.Tools)
 		}
 		if opts.ToolChoice != nil {
-			reqBody.ToolChoice = opts.ToolChoice
+			reqBody.ToolChoice = sanitizeProviderToolChoice(opts.ToolChoice)
 		}
 	}
 

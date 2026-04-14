@@ -11,11 +11,19 @@ func toolByName(tools []Tool) map[string]Tool {
 	}
 	out := make(map[string]Tool, len(tools))
 	for _, t := range tools {
-		name := strings.TrimSpace(t.Function.Name)
-		if name == "" {
+		rawName := strings.TrimSpace(t.Function.Name)
+		if rawName == "" {
 			continue
 		}
-		out[name] = t
+		out[rawName] = t
+
+		sanitizedName := sanitizeProviderToolName(rawName)
+		if sanitizedName == "" || sanitizedName == rawName {
+			continue
+		}
+		cloned := t
+		cloned.Function.Name = sanitizedName
+		out[sanitizedName] = cloned
 	}
 	return out
 }
@@ -172,4 +180,3 @@ func extractJSONSchemaTypes(raw any) []string {
 		return nil
 	}
 }
-

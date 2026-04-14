@@ -217,8 +217,8 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 					Message:        fmt.Sprintf("budget exceeded: max_total_tokens=%d used_total_tokens=%d (resume with higher limits or split the task)", req.MaxTotalTokens, totals.TotalTokens),
 				}
 				logEvent(writer, limiter, true, map[string]any{
-					"type":            "budget_exceeded",
-					"step":            step,
+					"type":             "budget_exceeded",
+					"step":             step,
 					"max_total_tokens": req.MaxTotalTokens,
 					"max_cost_usd":     req.MaxCostUSD,
 					"totals":           totals,
@@ -234,8 +234,8 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 					Message:        fmt.Sprintf("budget exceeded: max_cost_usd=%.4f used_cost_usd=%.4f (resume with higher limits or split the task)", req.MaxCostUSD, totals.CostUSD),
 				}
 				logEvent(writer, limiter, true, map[string]any{
-					"type":            "budget_exceeded",
-					"step":            step,
+					"type":             "budget_exceeded",
+					"step":             step,
 					"max_total_tokens": req.MaxTotalTokens,
 					"max_cost_usd":     req.MaxCostUSD,
 					"totals":           totals,
@@ -303,14 +303,24 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			rawArgs := json.RawMessage(call.Function.Arguments)
 
 			logEvent(writer, limiter, false, map[string]any{
-				"type":        "tool_call",
-				"step":        step,
-				"tool_name":   toolName,
+				"type":         "tool_call",
+				"step":         step,
+				"tool_name":    toolName,
 				"tool_call_id": call.ID,
-				"arguments":   call.Function.Arguments,
+				"arguments":    call.Function.Arguments,
 			})
 
 			handler, ok := req.Handlers[toolName]
+			if !ok {
+				for registeredName, candidate := range req.Handlers {
+					if !llm.ToolNamesEquivalent(registeredName, toolName) {
+						continue
+					}
+					handler = candidate
+					ok = true
+					break
+				}
+			}
 			var payload any
 			var toolErr error
 			if !ok {
@@ -384,13 +394,13 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 			}
 
 			logEvent(writer, limiter, false, map[string]any{
-				"type":        "tool_result",
-				"step":        step,
-				"tool_name":   toolName,
+				"type":         "tool_result",
+				"step":         step,
+				"tool_name":    toolName,
 				"tool_call_id": call.ID,
-				"ok":          toolErr == nil,
-				"output":      string(response),
-				"error":       errorString(toolErr),
+				"ok":           toolErr == nil,
+				"output":       string(response),
+				"error":        errorString(toolErr),
 			})
 
 			messages = append(messages, llm.ChatMessage{
@@ -435,15 +445,15 @@ func Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	}
 
 	logEvent(writer, limiter, true, map[string]any{
-		"type":          "complete",
-		"run_id":        runID,
-		"summary":       summary,
-		"findings_path": findingsPath,
+		"type":           "complete",
+		"run_id":         runID,
+		"summary":        summary,
+		"findings_path":  findingsPath,
 		"trace_log_path": tracePath,
-		"duration_ms":   time.Since(started).Milliseconds(),
-		"error":         errorString(loopErr),
-		"log_truncated": limiter.Truncated,
-		"log_max_bytes": limiter.MaxBytes,
+		"duration_ms":    time.Since(started).Milliseconds(),
+		"error":          errorString(loopErr),
+		"log_truncated":  limiter.Truncated,
+		"log_max_bytes":  limiter.MaxBytes,
 	})
 
 	return RunResult{
