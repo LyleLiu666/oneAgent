@@ -1,95 +1,115 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { ChevronLeft, Folder, HardDrive, Loader2, RefreshCw, X } from 'lucide-vue-next'
+import { computed, ref, watch } from "vue";
+import {
+  ChevronLeft,
+  Folder,
+  HardDrive,
+  Loader2,
+  RefreshCw,
+  X,
+} from "lucide-vue-next";
 
-import { browseWorkspaceDir, type WorkspaceBrowseEntry } from '@/api/client'
-import ErrorBanner from '@/components/ErrorBanner.vue'
-import { parseApiError, type ParsedApiError } from '@/lib/apiError'
+import { browseWorkspaceDir, type WorkspaceBrowseEntry } from "@/api/client";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import { parseApiError, type ParsedApiError } from "@/lib/apiError";
 
-const props = withDefaults(defineProps<{
-  open: boolean
-  title?: string
-  initialPath?: string
-}>(), {
-  title: '选择工作区文件夹',
-  initialPath: '',
-})
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    title?: string;
+    initialPath?: string;
+  }>(),
+  {
+    title: "选择工作区文件夹",
+    initialPath: "",
+  },
+);
 
 const emit = defineEmits<{
-  (e: 'close'): void
-  (e: 'select', path: string): void
-}>()
+  (e: "close"): void;
+  (e: "select", path: string): void;
+}>();
 
-const loading = ref(false)
-const error = ref<ParsedApiError | null>(null)
-const currentPath = ref('')
-const rootPath = ref('')
-const parentPath = ref('')
-const entries = ref<WorkspaceBrowseEntry[]>([])
+const loading = ref(false);
+const error = ref<ParsedApiError | null>(null);
+const currentPath = ref("");
+const rootPath = ref("");
+const parentPath = ref("");
+const canSelectCurrent = ref(false);
+const entries = ref<WorkspaceBrowseEntry[]>([]);
 
-let loadSeq = 0
+let loadSeq = 0;
 
-const atRootList = computed(() => !String(currentPath.value || '').trim())
+const atRootList = computed(() => !String(currentPath.value || "").trim());
+const currentSelectable = computed(() => {
+  const path = String(currentPath.value || "").trim();
+  return Boolean(path) && canSelectCurrent.value;
+});
 
 const loadPath = async (path?: string) => {
-  const seq = ++loadSeq
-  loading.value = true
-  error.value = null
+  const seq = ++loadSeq;
+  loading.value = true;
+  error.value = null;
   try {
-    const res = await browseWorkspaceDir(path)
-    if (seq !== loadSeq) return
-    currentPath.value = String(res?.current_path || '').trim()
-    rootPath.value = String(res?.root_path || '').trim()
-    parentPath.value = String(res?.parent_path || '').trim()
-    entries.value = Array.isArray(res?.entries) ? res.entries : []
+    const res = await browseWorkspaceDir(path);
+    if (seq !== loadSeq) return;
+    currentPath.value = String(res?.current_path || "").trim();
+    rootPath.value = String(res?.root_path || "").trim();
+    parentPath.value = String(res?.parent_path || "").trim();
+    canSelectCurrent.value =
+      typeof res?.can_select_current === "boolean"
+        ? res.can_select_current
+        : Boolean(String(res?.current_path || "").trim());
+    entries.value = Array.isArray(res?.entries) ? res.entries : [];
   } catch (e: any) {
-    if (seq !== loadSeq) return
-    error.value = parseApiError(e, '加载目录失败')
+    if (seq !== loadSeq) return;
+    error.value = parseApiError(e, "加载目录失败");
     if (!path) {
-      currentPath.value = ''
-      rootPath.value = ''
-      parentPath.value = ''
-      entries.value = []
+      currentPath.value = "";
+      rootPath.value = "";
+      parentPath.value = "";
+      canSelectCurrent.value = false;
+      entries.value = [];
     }
   } finally {
-    if (seq === loadSeq) loading.value = false
+    if (seq === loadSeq) loading.value = false;
   }
-}
+};
 
 const close = () => {
-  emit('close')
-}
+  emit("close");
+};
 
 const openEntry = async (path: string) => {
-  const nextPath = String(path || '').trim()
-  if (!nextPath) return
-  await loadPath(nextPath)
-}
+  const nextPath = String(path || "").trim();
+  if (!nextPath) return;
+  await loadPath(nextPath);
+};
 
 const showRoots = async () => {
-  await loadPath()
-}
+  await loadPath();
+};
 
 const goUp = async () => {
-  const nextPath = String(parentPath.value || '').trim()
-  if (!nextPath) return
-  await loadPath(nextPath)
-}
+  const nextPath = String(parentPath.value || "").trim();
+  if (!nextPath) return;
+  await loadPath(nextPath);
+};
 
 const selectCurrent = () => {
-  const path = String(currentPath.value || '').trim()
-  if (!path) return
-  emit('select', path)
-}
+  const path = String(currentPath.value || "").trim();
+  if (!path) return;
+  emit("select", path);
+};
 
 watch(
   () => props.open,
   (open) => {
-    if (!open) return
-    void loadPath(String(props.initialPath || '').trim() || undefined)
+    if (!open) return;
+    void loadPath(String(props.initialPath || "").trim() || undefined);
   },
   { immediate: true },
-)
+);
 </script>
 
 <template>
@@ -99,8 +119,12 @@ watch(
     class="fixed inset-0 z-50 flex items-center justify-center p-4"
   >
     <div class="absolute inset-0 bg-black/70" @click="close"></div>
-    <div class="relative w-full max-w-3xl rounded-3xl bg-surface-900 shadow-2xl overflow-hidden">
-      <div class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-4">
+    <div
+      class="relative w-full max-w-3xl rounded-3xl bg-surface-900 shadow-2xl overflow-hidden"
+    >
+      <div
+        class="px-5 py-4 bg-surface-800/50 flex items-start justify-between gap-4"
+      >
         <div class="min-w-0">
           <div class="text-sm font-semibold text-surface-100">{{ title }}</div>
           <div class="mt-1 text-xs text-surface-400">
@@ -142,7 +166,7 @@ watch(
             type="button"
             data-testid="workspace-browser-select-current"
             class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
-            :disabled="!currentPath"
+            :disabled="!currentSelectable"
             @click="selectCurrent"
           >
             <Folder class="h-4 w-4" />
@@ -159,13 +183,24 @@ watch(
           </button>
         </div>
 
-        <div class="rounded-2xl border border-surface-800 bg-surface-950/40 px-4 py-3 text-xs text-surface-400">
+        <div
+          class="rounded-2xl border border-surface-800 bg-surface-950/40 px-4 py-3 text-xs text-surface-400"
+        >
           <div class="font-medium text-surface-300">当前位置</div>
-          <div data-testid="workspace-browser-current-path" class="mt-1 break-all font-mono">
-            {{ atRootList ? '允许浏览的根目录列表' : currentPath }}
+          <div
+            data-testid="workspace-browser-current-path"
+            class="mt-1 break-all font-mono"
+          >
+            {{ atRootList ? "允许浏览的根目录列表" : currentPath }}
           </div>
           <div v-if="rootPath" class="mt-2 text-surface-500">
             当前根目录：<span class="font-mono break-all">{{ rootPath }}</span>
+          </div>
+          <div
+            v-if="currentPath && !currentSelectable"
+            class="mt-2 text-amber-300"
+          >
+            当前目录只用于浏览，不能直接作为工作区。
           </div>
         </div>
 
@@ -174,7 +209,10 @@ watch(
           正在加载目录…
         </div>
         <ErrorBanner v-else-if="error" :error="error" title="加载失败" />
-        <div v-else class="rounded-2xl border border-surface-800 bg-surface-950/30 overflow-hidden">
+        <div
+          v-else
+          class="rounded-2xl border border-surface-800 bg-surface-950/30 overflow-hidden"
+        >
           <div
             v-if="entries.length === 0"
             class="px-4 py-10 text-center text-sm text-surface-500"
@@ -196,7 +234,7 @@ watch(
               </div>
             </div>
             <div class="shrink-0 text-xs text-surface-500">
-              {{ atRootList ? '进入根目录' : '进入' }}
+              {{ atRootList ? "进入根目录" : "进入" }}
             </div>
           </button>
         </div>

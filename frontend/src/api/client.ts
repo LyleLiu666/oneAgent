@@ -329,7 +329,9 @@ export async function attachSecretarySessionStream(
 export async function stopSessionStream(sessionId: string) {
   const id = String(sessionId || "").trim();
   if (!id) throw new Error("sessionId is required");
-  return api(`/api/sessions/${encodeURIComponent(id)}/stop`, { method: "POST" });
+  return api(`/api/sessions/${encodeURIComponent(id)}/stop`, {
+    method: "POST",
+  });
 }
 
 /**
@@ -389,7 +391,10 @@ export async function appendSecretaryInboxMessage(payload: {
   content: string;
   workspace?: string;
 }): Promise<SecretaryInboxAppendResponse> {
-  return api("/api/secretary/inbox/messages", { method: "POST", body: payload });
+  return api("/api/secretary/inbox/messages", {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export interface SecretaryHandoffResponse {
@@ -451,8 +456,14 @@ export async function getSecretaryState(): Promise<SecretaryStateResponse> {
 export async function setSecretaryRecoveryFocus(payload: {
   task_id?: string;
   attempt_id?: string;
-}): Promise<{ session_id: string; recovery_focus?: { task_id: string; attempt_id: string } }> {
-  return api("/api/secretary/recovery/focus", { method: "POST", body: payload });
+}): Promise<{
+  session_id: string;
+  recovery_focus?: { task_id: string; attempt_id: string };
+}> {
+  return api("/api/secretary/recovery/focus", {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export async function getSecretarySession() {
@@ -463,7 +474,10 @@ export async function resetSecretarySession(): Promise<{ session_id: string }> {
   return api("/api/secretary/session/reset", { method: "POST", body: {} });
 }
 
-export async function approveToolApproval(approvalId: string, reason: string = "") {
+export async function approveToolApproval(
+  approvalId: string,
+  reason: string = "",
+) {
   const id = String(approvalId || "").trim();
   if (!id) throw new Error("approvalId is required");
   const body = String(reason || "").trim() ? { reason } : undefined;
@@ -473,7 +487,10 @@ export async function approveToolApproval(approvalId: string, reason: string = "
   });
 }
 
-export async function denyToolApproval(approvalId: string, reason: string = "") {
+export async function denyToolApproval(
+  approvalId: string,
+  reason: string = "",
+) {
   const id = String(approvalId || "").trim();
   if (!id) throw new Error("approvalId is required");
   const body = String(reason || "").trim() ? { reason } : undefined;
@@ -500,7 +517,10 @@ export async function getCommandApprovalSettings(): Promise<CommandApprovalSetti
 export async function updateCommandApprovalSettings(
   payload: CommandApprovalSettings,
 ): Promise<CommandApprovalSettings> {
-  return api("/api/command_approvals/settings", { method: "PUT", body: payload });
+  return api("/api/command_approvals/settings", {
+    method: "PUT",
+    body: payload,
+  });
 }
 
 export async function getProviders() {
@@ -573,6 +593,7 @@ export interface WorkspaceBrowseResponse {
   current_path?: string;
   root_path?: string;
   parent_path?: string;
+  can_select_current?: boolean;
   entries?: WorkspaceBrowseEntry[];
 }
 
@@ -1005,9 +1026,12 @@ export async function deleteWorkflow(
   workspace: string,
 ): Promise<{ ok: boolean }> {
   const qs = new URLSearchParams({ workspace });
-  return api(`/api/workflows/${encodeURIComponent(workflowId)}?${qs.toString()}`, {
-    method: "DELETE",
-  });
+  return api(
+    `/api/workflows/${encodeURIComponent(workflowId)}?${qs.toString()}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function publishWorkflowVersion(
@@ -1022,7 +1046,11 @@ export async function publishWorkflowVersion(
 
 export async function createWorkflowRun(
   workflowId: string,
-  payload: { workspace_root: string; version_id: string; inputs?: Record<string, any> },
+  payload: {
+    workspace_root: string;
+    version_id: string;
+    inputs?: Record<string, any>;
+  },
 ): Promise<WorkflowRun> {
   return api(`/api/workflows/${encodeURIComponent(workflowId)}/runs`, {
     method: "POST",
@@ -1153,7 +1181,12 @@ export async function listSkillDuplicates(params?: {
 export async function archiveSkill(
   skillId: string,
   payload?: { reason?: string },
-): Promise<{ ok: boolean; skill_id: string; archived_path: string; reason?: string }> {
+): Promise<{
+  ok: boolean;
+  skill_id: string;
+  archived_path: string;
+  reason?: string;
+}> {
   return api(`/api/skills/${encodeURIComponent(skillId)}/archive`, {
     method: "POST",
     body: payload || {},
@@ -1427,7 +1460,10 @@ export async function createTaskQueueSchedule(payload: {
   enabled: boolean;
   limits?: Record<string, any>;
 }): Promise<TaskQueueGovernance> {
-  return api("/api/tasks/governance/schedules", { method: "POST", body: payload });
+  return api("/api/tasks/governance/schedules", {
+    method: "POST",
+    body: payload,
+  });
 }
 
 export type ReceiptKind = "subagent_run";

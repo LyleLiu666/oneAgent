@@ -22,16 +22,28 @@ type workspaceBrowserCapability struct {
 	Reason    string
 }
 
+type workspaceBrowseRoot struct {
+	Path           string
+	CanSelectExact bool
+}
+
+type workspaceBrowsePolicy struct {
+	Roots          []workspaceBrowseRoot
+	HiddenPaths    map[string]struct{}
+	ProtectedPaths map[string]struct{}
+}
+
 type workspaceBrowseEntry struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
 
 type workspaceBrowseResponse struct {
-	CurrentPath string                 `json:"current_path,omitempty"`
-	RootPath    string                 `json:"root_path,omitempty"`
-	ParentPath  string                 `json:"parent_path,omitempty"`
-	Entries     []workspaceBrowseEntry `json:"entries"`
+	CurrentPath      string                 `json:"current_path,omitempty"`
+	RootPath         string                 `json:"root_path,omitempty"`
+	ParentPath       string                 `json:"parent_path,omitempty"`
+	CanSelectCurrent bool                   `json:"can_select_current"`
+	Entries          []workspaceBrowseEntry `json:"entries"`
 }
 
 func BrowseWorkspace(c *gin.Context) {
@@ -41,8 +53,8 @@ func BrowseWorkspace(c *gin.Context) {
 		return
 	}
 
-	roots := workspaceBrowseRootsFromConfig(rt.Config)
-	if len(roots) == 0 {
+	policy := workspaceBrowsePolicyFromConfig(rt.Config)
+	if len(policy.Roots) == 0 {
 		RespondError(c, http.StatusNotImplemented, &PublicError{
 			Status: http.StatusNotImplemented,
 			Code:   "workspace_browser_unsupported",
@@ -56,12 +68,12 @@ func BrowseWorkspace(c *gin.Context) {
 	requestedPath := strings.TrimSpace(c.Query("path"))
 	if requestedPath == "" {
 		c.JSON(http.StatusOK, workspaceBrowseResponse{
-			Entries: browseRootEntries(roots),
+			Entries: browseRootEntries(policy.Roots),
 		})
 		return
 	}
 
-	currentPath, rootPath, err := resolveWorkspaceBrowsePath(requestedPath, roots)
+	currentPath, root, err := resolveWorkspaceBrowsePath(requestedPath, policy)
 	if err != nil {
 		var publicErr *PublicError
 		if errors.As(err, &publicErr) {
@@ -72,7 +84,7 @@ func BrowseWorkspace(c *gin.Context) {
 		return
 	}
 
-	entries, err := listWorkspaceBrowseEntries(currentPath, rootPath)
+	entries, err := listWorkspaceBrowseEntries(currentPath, root.Path, policy)
 	if err != nil {
 		RespondError(c, http.StatusBadRequest, &PublicError{
 			Status: http.StatusBadRequest,
@@ -85,17 +97,18 @@ func BrowseWorkspace(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, workspaceBrowseResponse{
-		CurrentPath: currentPath,
-		RootPath:    rootPath,
-		ParentPath:  workspaceBrowseParentPath(currentPath, rootPath),
-		Entries:     entries,
+		CurrentPath:      currentPath,
+		RootPath:         root.Path,
+		ParentPath:       workspaceBrowseParentPath(currentPath, root.Path),
+		CanSelectCurrent: workspaceBrowseCanSelectCurrent(policy, currentPath, root),
+		Entries:          entries,
 	})
 }
 
 const workspaceBrowserUnsupportedReason = "请手动填写服务端工作区路径，或为当前服务端配置一个可浏览的目录根"
 
 func defaultWorkspaceBrowserCapability(cfg *config.Config) workspaceBrowserCapability {
-	if len(workspaceBrowseRootsFromConfig(cfg)) == 0 {
+	if len(workspaceBrowsePolicyFromConfig(cfg).Roots) == 0 {
 		return workspaceBrowserCapability{
 			Supported: false,
 			Reason:    workspaceBrowserUnsupportedReason,
@@ -104,52 +117,89 @@ func defaultWorkspaceBrowserCapability(cfg *config.Config) workspaceBrowserCapab
 	return workspaceBrowserCapability{Supported: true}
 }
 
-func workspaceBrowseRootsFromConfig(cfg *config.Config) []string {
+func workspaceBrowsePolicyFromConfig(cfg *config.Config) workspaceBrowsePolicy {
+	policy := workspaceBrowsePolicy{
+		HiddenPaths:    map[string]struct{}{},
+		ProtectedPaths: map[string]struct{}{},
+	}
 	if cfg == nil {
-		return nil
+		return policy
 	}
 
-	candidates := make([]string, 0, 3)
-	candidates = append(candidates, strings.TrimSpace(cfg.Home))
-	candidates = append(candidates, strings.TrimSpace(cfg.DefaultWorkspace))
+	type candidate struct {
+		Path           string
+		CanSelectExact bool
+	}
+
+	candidates := make([]candidate, 0, 3)
+	candidates = append(candidates, candidate{
+		Path:           strings.TrimSpace(cfg.Home),
+		CanSelectExact: false,
+	})
+	candidates = append(candidates, candidate{
+		Path:           strings.TrimSpace(cfg.DefaultWorkspace),
+		CanSelectExact: true,
+	})
 	if cfg.BashRootDirExplicit {
-		candidates = append(candidates, strings.TrimSpace(cfg.BashRootDir))
+		candidates = append(candidates, candidate{
+			Path:           strings.TrimSpace(cfg.BashRootDir),
+			CanSelectExact: true,
+		})
 	}
 
-	roots := make([]string, 0, len(candidates))
-	seen := make(map[string]struct{}, len(candidates))
+	roots := make([]workspaceBrowseRoot, 0, len(candidates))
+	seen := make(map[string]int, len(candidates))
 	for _, candidate := range candidates {
-		if strings.TrimSpace(candidate) == "" {
+		if strings.TrimSpace(candidate.Path) == "" {
 			continue
 		}
-		normalized, err := scope.NormalizeWorkspaceRoot(candidate)
+		normalized, err := scope.NormalizeWorkspaceRoot(candidate.Path)
 		if err != nil || normalized == "" {
 			continue
 		}
-		if _, ok := seen[normalized]; ok {
+		if idx, ok := seen[normalized]; ok {
+			roots[idx].CanSelectExact = roots[idx].CanSelectExact || candidate.CanSelectExact
 			continue
 		}
-		seen[normalized] = struct{}{}
-		roots = append(roots, normalized)
+		seen[normalized] = len(roots)
+		roots = append(roots, workspaceBrowseRoot{
+			Path:           normalized,
+			CanSelectExact: candidate.CanSelectExact,
+		})
 	}
-	return roots
+	policy.Roots = roots
+
+	home, err := scope.NormalizeWorkspaceRoot(strings.TrimSpace(cfg.Home))
+	if err == nil && home != "" {
+		policy.ProtectedPaths[filepath.Join(home, ".oneagent")] = struct{}{}
+	}
+
+	if home != "" && cfg.BashRootDirExplicit {
+		if bashRoot, err := scope.NormalizeWorkspaceRoot(strings.TrimSpace(cfg.BashRootDir)); err == nil && bashRoot != "" && bashRoot != home && workspaceBrowsePathWithinRoot(home, bashRoot) {
+			// Nested infrastructure roots are still available from the root list,
+			// but we hide them from the parent listing to avoid duplicate/internal-looking entries.
+			policy.HiddenPaths[bashRoot] = struct{}{}
+		}
+	}
+
+	return policy
 }
 
-func browseRootEntries(roots []string) []workspaceBrowseEntry {
+func browseRootEntries(roots []workspaceBrowseRoot) []workspaceBrowseEntry {
 	entries := make([]workspaceBrowseEntry, 0, len(roots))
 	for _, root := range roots {
 		entries = append(entries, workspaceBrowseEntry{
-			Name: workspaceBrowseDisplayName(root),
-			Path: root,
+			Name: workspaceBrowseDisplayName(root.Path),
+			Path: root.Path,
 		})
 	}
 	return entries
 }
 
-func resolveWorkspaceBrowsePath(requested string, roots []string) (string, string, error) {
+func resolveWorkspaceBrowsePath(requested string, policy workspaceBrowsePolicy) (string, workspaceBrowseRoot, error) {
 	normalized, err := scope.NormalizeWorkspaceRoot(requested)
 	if err != nil {
-		return "", "", &PublicError{
+		return "", workspaceBrowseRoot{}, &PublicError{
 			Status: http.StatusBadRequest,
 			Code:   "workspace_browser_invalid_path",
 			Public: "所选目录不存在、不可访问，或不是目录",
@@ -158,9 +208,9 @@ func resolveWorkspaceBrowsePath(requested string, roots []string) (string, strin
 		}
 	}
 
-	root := findWorkspaceBrowseRoot(roots, normalized)
-	if root == "" {
-		return "", "", &PublicError{
+	root, ok := findWorkspaceBrowseRoot(policy.Roots, normalized)
+	if !ok {
+		return "", workspaceBrowseRoot{}, &PublicError{
 			Status: http.StatusForbidden,
 			Code:   "workspace_browser_path_denied",
 			Public: "所选目录不在当前服务端允许浏览的范围内",
@@ -169,16 +219,34 @@ func resolveWorkspaceBrowsePath(requested string, roots []string) (string, strin
 		}
 	}
 
+	if workspaceBrowsePathProtected(policy, normalized) {
+		return "", workspaceBrowseRoot{}, &PublicError{
+			Status: http.StatusForbidden,
+			Code:   "workspace_browser_path_denied",
+			Public: "所选目录不在当前服务端允许浏览的范围内",
+			Hint:   "请重新选择一个项目目录，不要使用 oneAgent 的内部状态目录",
+			Err:    scope.ErrPathOutsideWorkspace,
+		}
+	}
+
 	return normalized, root, nil
 }
 
-func findWorkspaceBrowseRoot(roots []string, target string) string {
+func findWorkspaceBrowseRoot(roots []workspaceBrowseRoot, target string) (workspaceBrowseRoot, bool) {
+	var (
+		best    workspaceBrowseRoot
+		bestLen = -1
+	)
 	for _, root := range roots {
-		if workspaceBrowsePathWithinRoot(root, target) {
-			return root
+		if !workspaceBrowsePathWithinRoot(root.Path, target) {
+			continue
+		}
+		if len(root.Path) > bestLen {
+			best = root
+			bestLen = len(root.Path)
 		}
 	}
-	return ""
+	return best, bestLen >= 0
 }
 
 func workspaceBrowsePathWithinRoot(root, target string) bool {
@@ -197,7 +265,7 @@ func workspaceBrowsePathWithinRoot(root, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func listWorkspaceBrowseEntries(currentPath, rootPath string) ([]workspaceBrowseEntry, error) {
+func listWorkspaceBrowseEntries(currentPath, rootPath string, policy workspaceBrowsePolicy) ([]workspaceBrowseEntry, error) {
 	dirEntries, err := os.ReadDir(currentPath)
 	if err != nil {
 		return nil, err
@@ -220,6 +288,10 @@ func listWorkspaceBrowseEntries(currentPath, rootPath string) ([]workspaceBrowse
 			continue
 		}
 
+		if workspaceBrowsePathProtected(policy, childPath) || workspaceBrowsePathHidden(policy, childPath) {
+			continue
+		}
+
 		entries = append(entries, workspaceBrowseEntry{
 			Name: entry.Name(),
 			Path: childPath,
@@ -230,6 +302,39 @@ func listWorkspaceBrowseEntries(currentPath, rootPath string) ([]workspaceBrowse
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 	return entries, nil
+}
+
+func workspaceBrowsePathHidden(policy workspaceBrowsePolicy, target string) bool {
+	target = filepath.Clean(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	_, ok := policy.HiddenPaths[target]
+	return ok
+}
+
+func workspaceBrowsePathProtected(policy workspaceBrowsePolicy, target string) bool {
+	target = filepath.Clean(strings.TrimSpace(target))
+	if target == "" {
+		return false
+	}
+	for protected := range policy.ProtectedPaths {
+		if workspaceBrowsePathWithinRoot(protected, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceBrowseCanSelectCurrent(policy workspaceBrowsePolicy, currentPath string, root workspaceBrowseRoot) bool {
+	currentPath = filepath.Clean(strings.TrimSpace(currentPath))
+	if currentPath == "" || workspaceBrowsePathProtected(policy, currentPath) {
+		return false
+	}
+	if currentPath == root.Path && !root.CanSelectExact {
+		return false
+	}
+	return true
 }
 
 func workspaceBrowseParentPath(currentPath, rootPath string) string {
