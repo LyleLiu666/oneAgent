@@ -7,6 +7,7 @@ import * as apiClient from "@/api/client";
 
 vi.mock("@/api/client", () => ({
   browseWorkspaceDir: vi.fn(),
+  createWorkspaceDir: vi.fn(),
 }));
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -75,4 +76,51 @@ it("disables selecting the current directory when the server marks it browse-onl
   );
   expect((selectButton.element as HTMLButtonElement).disabled).toBe(true);
   expect(wrapper.text()).toContain("当前目录只用于浏览，不能直接作为工作区。");
+});
+
+it("waits until selecting the current directory to create a new child folder", async () => {
+  (apiClient.browseWorkspaceDir as any).mockResolvedValueOnce({
+    current_path: "/home/user",
+    root_path: "/home/user",
+    parent_path: "",
+    can_select_current: false,
+    entries: [],
+  });
+  (apiClient.createWorkspaceDir as any).mockResolvedValueOnce({
+    path: "/home/user/project",
+  });
+
+  const { default: WorkspaceBrowserModal } =
+    await import("@/components/WorkspaceBrowserModal.vue");
+  const wrapper = mount(WorkspaceBrowserModal, {
+    props: {
+      open: true,
+    },
+  });
+
+  await flushPromises();
+
+  await wrapper
+    .get('[data-testid="workspace-browser-new-folder"]')
+    .trigger("click");
+  await wrapper
+    .get('[data-testid="workspace-browser-new-folder-input"]')
+    .setValue("project");
+
+  expect(apiClient.createWorkspaceDir).not.toHaveBeenCalled();
+
+  const selectButton = wrapper.get(
+    '[data-testid="workspace-browser-select-current"]',
+  );
+  expect((selectButton.element as HTMLButtonElement).disabled).toBe(false);
+  expect(selectButton.text()).toContain("创建并选择新目录");
+
+  await selectButton.trigger("click");
+  await flushPromises();
+
+  expect(apiClient.createWorkspaceDir).toHaveBeenCalledWith({
+    parent_path: "/home/user",
+    name: "project",
+  });
+  expect(wrapper.emitted("select")).toEqual([["/home/user/project"]]);
 });

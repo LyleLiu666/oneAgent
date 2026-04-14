@@ -5,11 +5,16 @@ import {
   Folder,
   HardDrive,
   Loader2,
+  Plus,
   RefreshCw,
   X,
 } from "lucide-vue-next";
 
-import { browseWorkspaceDir, type WorkspaceBrowseEntry } from "@/api/client";
+import {
+  browseWorkspaceDir,
+  createWorkspaceDir,
+  type WorkspaceBrowseEntry,
+} from "@/api/client";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
 
@@ -37,19 +42,33 @@ const rootPath = ref("");
 const parentPath = ref("");
 const canSelectCurrent = ref(false);
 const entries = ref<WorkspaceBrowseEntry[]>([]);
+const createPending = ref(false);
+const createName = ref("");
+const createError = ref<ParsedApiError | null>(null);
+const creating = ref(false);
 
 let loadSeq = 0;
 
 const atRootList = computed(() => !String(currentPath.value || "").trim());
+const pendingCreateName = computed(() => String(createName.value || "").trim());
 const currentSelectable = computed(() => {
   const path = String(currentPath.value || "").trim();
   return Boolean(path) && canSelectCurrent.value;
 });
+const canCreateHere = computed(() => Boolean(String(currentPath.value || "").trim()));
+const canSubmitCurrent = computed(() => {
+  if (pendingCreateName.value) return canCreateHere.value && !creating.value;
+  return currentSelectable.value && !creating.value;
+});
+const selectCurrentLabel = computed(() =>
+  pendingCreateName.value ? "创建并选择新目录" : "选择当前目录",
+);
 
 const loadPath = async (path?: string) => {
   const seq = ++loadSeq;
   loading.value = true;
   error.value = null;
+  createError.value = null;
   try {
     const res = await browseWorkspaceDir(path);
     if (seq !== loadSeq) return;
@@ -61,6 +80,8 @@ const loadPath = async (path?: string) => {
         ? res.can_select_current
         : Boolean(String(res?.current_path || "").trim());
     entries.value = Array.isArray(res?.entries) ? res.entries : [];
+    createPending.value = false;
+    createName.value = "";
   } catch (e: any) {
     if (seq !== loadSeq) return;
     error.value = parseApiError(e, "加载目录失败");
@@ -96,16 +117,55 @@ const goUp = async () => {
   await loadPath(nextPath);
 };
 
-const selectCurrent = () => {
+const toggleCreateFolder = () => {
+  if (!canCreateHere.value) return;
+  createError.value = null;
+  if (createPending.value) {
+    createPending.value = false;
+    createName.value = "";
+    return;
+  }
+  createPending.value = true;
+  createName.value = "";
+};
+
+const selectCurrent = async () => {
   const path = String(currentPath.value || "").trim();
   if (!path) return;
+  if (pendingCreateName.value) {
+    creating.value = true;
+    createError.value = null;
+    try {
+      const res = await createWorkspaceDir({
+        parent_path: path,
+        name: pendingCreateName.value,
+      });
+      const createdPath = String(res?.path || "").trim();
+      if (!createdPath) {
+        throw new Error("服务端没有返回新目录路径");
+      }
+      emit("select", createdPath);
+    } catch (e: any) {
+      createError.value = parseApiError(e, "创建目录失败");
+    } finally {
+      creating.value = false;
+    }
+    return;
+  }
+  if (!currentSelectable.value) return;
   emit("select", path);
 };
 
 watch(
   () => props.open,
   (open) => {
-    if (!open) return;
+    if (!open) {
+      createPending.value = false;
+      createName.value = "";
+      createError.value = null;
+      creating.value = false;
+      return;
+    }
     void loadPath(String(props.initialPath || "").trim() || undefined);
   },
   { immediate: true },
@@ -164,13 +224,24 @@ watch(
           </button>
           <button
             type="button"
+            data-testid="workspace-browser-new-folder"
+            class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium bg-surface-800/70 text-surface-200 hover:bg-surface-700/70 disabled:opacity-50"
+            :disabled="!canCreateHere || loading || creating"
+            @click="toggleCreateFolder"
+          >
+            <Plus class="h-4 w-4" />
+            {{ createPending ? "取消新建" : "新建文件夹" }}
+          </button>
+          <button
+            type="button"
             data-testid="workspace-browser-select-current"
             class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
-            :disabled="!currentSelectable"
+            :disabled="!canSubmitCurrent"
             @click="selectCurrent"
           >
-            <Folder class="h-4 w-4" />
-            选择当前目录
+            <Loader2 v-if="creating" class="h-4 w-4 animate-spin" />
+            <Folder v-else class="h-4 w-4" />
+            {{ selectCurrentLabel }}
           </button>
           <button
             type="button"
@@ -204,11 +275,40 @@ watch(
           </div>
         </div>
 
+        <div
+          v-if="createPending"
+          class="rounded-2xl border border-surface-800 bg-surface-950/40 px-4 py-3"
+        >
+          <label
+            for="workspace-browser-new-folder-input"
+            class="block text-xs font-medium text-surface-300"
+          >
+            新目录名称
+          </label>
+          <input
+            id="workspace-browser-new-folder-input"
+            v-model="createName"
+            data-testid="workspace-browser-new-folder-input"
+            type="text"
+            class="mt-2 w-full rounded-xl border border-surface-800 bg-surface-900 px-3 py-2 text-sm text-surface-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+            placeholder="例如：project"
+            :disabled="creating"
+          />
+          <p class="mt-2 text-xs text-surface-500">
+            不会立刻创建，只有点击“{{ selectCurrentLabel }}”时才会真正创建。
+          </p>
+        </div>
+
         <div v-if="loading" class="py-10 text-center text-sm text-surface-500">
           <Loader2 class="mx-auto mb-2 h-5 w-5 animate-spin" />
           正在加载目录…
         </div>
         <ErrorBanner v-else-if="error" :error="error" title="加载失败" />
+        <ErrorBanner
+          v-else-if="createError"
+          :error="createError"
+          title="创建失败"
+        />
         <div
           v-else
           class="rounded-2xl border border-surface-800 bg-surface-950/30 overflow-hidden"

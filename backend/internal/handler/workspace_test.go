@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -456,5 +457,85 @@ func TestBrowseWorkspace_NotSupported(t *testing.T) {
 	}
 	if payload.Hint == "" {
 		t.Fatalf("expected non-empty hint")
+	}
+}
+
+func TestCreateWorkspaceDir_CreatesAndReturnsPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	home := t.TempDir()
+	normalizedHome, err := scope.NormalizeWorkspaceRoot(home)
+	if err != nil {
+		t.Fatalf("normalize home: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(middleware.InjectRuntime(&rtpkg.Runtime{
+		Config: &config.Config{
+			Home: home,
+		},
+	}))
+	router.POST("/api/workspace/browse/create", CreateWorkspaceDir)
+
+	body := strings.NewReader(`{"parent_path":` + fmt.Sprintf("%q", home) + `,"name":"project"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspace/browse/create", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected %d, got %d (%s)", http.StatusOK, rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	expected := filepath.Join(normalizedHome, "project")
+	if payload.Path != expected {
+		t.Fatalf("expected path %q, got %q", expected, payload.Path)
+	}
+	info, err := os.Stat(expected)
+	if err != nil {
+		t.Fatalf("stat created directory: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected created path to be directory")
+	}
+}
+
+func TestCreateWorkspaceDir_RejectsInvalidName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	home := t.TempDir()
+
+	router := gin.New()
+	router.Use(middleware.InjectRuntime(&rtpkg.Runtime{
+		Config: &config.Config{
+			Home: home,
+		},
+	}))
+	router.POST("/api/workspace/browse/create", CreateWorkspaceDir)
+
+	body := strings.NewReader(`{"parent_path":` + fmt.Sprintf("%q", home) + `,"name":"../escape"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspace/browse/create", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected %d, got %d (%s)", http.StatusBadRequest, rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Code != "workspace_browser_invalid_name" {
+		t.Fatalf("expected workspace_browser_invalid_name, got %q", payload.Code)
 	}
 }

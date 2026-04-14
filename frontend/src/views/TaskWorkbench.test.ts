@@ -29,6 +29,7 @@ vi.mock("@/api/client", () => ({
   postTaskAttemptReviewComment: vi.fn(async () => ({})),
   chooseWorkspaceDir: vi.fn(async () => ({ path: "/tmp/ws" })),
   browseWorkspaceDir: vi.fn(),
+  createWorkspaceDir: vi.fn(),
 }));
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));

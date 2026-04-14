@@ -603,6 +603,16 @@ export async function browseWorkspaceDir(path?: string) {
   return api<WorkspaceBrowseResponse>(`/api/workspace/browse${suffix}`);
 }
 
+export async function createWorkspaceDir(payload: {
+  parent_path: string;
+  name: string;
+}) {
+  return api<{ path: string }>("/api/workspace/browse/create", {
+    method: "POST",
+    body: payload,
+  });
+}
+
 // ============================================================================
 // Document Export
 // ============================================================================

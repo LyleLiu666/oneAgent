@@ -9,6 +9,7 @@ vi.mock('@/api/client', () => ({
   exportDocument: vi.fn(async () => ({ ok: true, output_path: 'report.docx' })),
   chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/ws' })),
   browseWorkspaceDir: vi.fn(),
+  createWorkspaceDir: vi.fn(),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
 }))
 

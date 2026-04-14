@@ -30,6 +30,7 @@ vi.mock('@/api/client', () => ({
     getTools: vi.fn(async () => []),
     chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
     browseWorkspaceDir: vi.fn(),
+    createWorkspaceDir: vi.fn(),
     approveToolApproval: vi.fn(),
     denyToolApproval: vi.fn(),
     // Task queue (used by TaskQueuePanel).

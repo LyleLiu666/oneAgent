@@ -46,6 +46,15 @@ type workspaceBrowseResponse struct {
 	Entries          []workspaceBrowseEntry `json:"entries"`
 }
 
+type workspaceCreateRequest struct {
+	ParentPath string `json:"parent_path"`
+	Name       string `json:"name"`
+}
+
+type workspaceCreateResponse struct {
+	Path string `json:"path"`
+}
+
 func BrowseWorkspace(c *gin.Context) {
 	rt := middleware.GetRuntime(c)
 	if rt == nil || rt.Config == nil {
@@ -103,6 +112,112 @@ func BrowseWorkspace(c *gin.Context) {
 		CanSelectCurrent: workspaceBrowseCanSelectCurrent(policy, currentPath, root),
 		Entries:          entries,
 	})
+}
+
+func CreateWorkspaceDir(c *gin.Context) {
+	rt := middleware.GetRuntime(c)
+	if rt == nil || rt.Config == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "runtime not initialized"})
+		return
+	}
+
+	policy := workspaceBrowsePolicyFromConfig(rt.Config)
+	if len(policy.Roots) == 0 {
+		RespondError(c, http.StatusNotImplemented, &PublicError{
+			Status: http.StatusNotImplemented,
+			Code:   "workspace_browser_unsupported",
+			Public: "当前服务端环境没有可浏览的工作区根目录",
+			Hint:   workspaceBrowserUnsupportedReason,
+			Err:    ErrWorkspaceBrowserNotSupported,
+		})
+		return
+	}
+
+	var req workspaceCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "workspace_browser_invalid_request",
+			Public: "创建目录请求不完整",
+			Hint:   "请重新选择父目录，并填写一个新的目录名称",
+			Err:    err,
+		})
+		return
+	}
+
+	parentPath, root, err := resolveWorkspaceBrowsePath(req.ParentPath, policy)
+	if err != nil {
+		var publicErr *PublicError
+		if errors.As(err, &publicErr) {
+			RespondError(c, publicErr.Status, publicErr)
+			return
+		}
+		RespondError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	name, err := normalizeWorkspaceCreateName(req.Name)
+	if err != nil {
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "workspace_browser_invalid_name",
+			Public: "新目录名称不合法",
+			Hint:   "请使用不含斜杠的单层目录名，例如 project 或 work",
+			Err:    err,
+		})
+		return
+	}
+
+	targetPath := filepath.Clean(filepath.Join(parentPath, name))
+	if !workspaceBrowsePathWithinRoot(root.Path, targetPath) ||
+		workspaceBrowsePathProtected(policy, targetPath) ||
+		workspaceBrowsePathHidden(policy, targetPath) {
+		RespondError(c, http.StatusForbidden, &PublicError{
+			Status: http.StatusForbidden,
+			Code:   "workspace_browser_path_denied",
+			Public: "所选目录不在当前服务端允许浏览的范围内",
+			Hint:   "请在当前可浏览目录下创建新的项目目录",
+			Err:    scope.ErrPathOutsideWorkspace,
+		})
+		return
+	}
+
+	info, statErr := os.Stat(targetPath)
+	switch {
+	case statErr == nil:
+		if !info.IsDir() {
+			RespondError(c, http.StatusConflict, &PublicError{
+				Status: http.StatusConflict,
+				Code:   "workspace_browser_path_conflict",
+				Public: "同名文件已经存在，不能创建目录",
+				Hint:   "请换一个新的目录名称",
+				Err:    errors.New("path already exists as file"),
+			})
+			return
+		}
+	case os.IsNotExist(statErr):
+		if err := os.Mkdir(targetPath, 0o755); err != nil {
+			RespondError(c, http.StatusBadRequest, &PublicError{
+				Status: http.StatusBadRequest,
+				Code:   "workspace_browser_create_failed",
+				Public: "创建目录失败",
+				Hint:   "请确认当前目录可写，或换一个新的目录名称",
+				Err:    err,
+			})
+			return
+		}
+	default:
+		RespondError(c, http.StatusBadRequest, &PublicError{
+			Status: http.StatusBadRequest,
+			Code:   "workspace_browser_create_failed",
+			Public: "创建目录失败",
+			Hint:   "请确认当前目录可写，或重新选择父目录",
+			Err:    statErr,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, workspaceCreateResponse{Path: targetPath})
 }
 
 const workspaceBrowserUnsupportedReason = "请手动填写服务端工作区路径，或为当前服务端配置一个可浏览的目录根"
@@ -360,4 +475,18 @@ func workspaceBrowseDisplayName(path string) string {
 		return cleaned
 	}
 	return name
+}
+
+func normalizeWorkspaceCreateName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	switch {
+	case name == "":
+		return "", errors.New("empty directory name")
+	case name == "." || name == "..":
+		return "", errors.New("reserved directory name")
+	case strings.ContainsAny(name, `/\`):
+		return "", errors.New("directory name must be single-segment")
+	default:
+		return name, nil
+	}
 }

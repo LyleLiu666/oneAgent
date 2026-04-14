@@ -182,6 +182,7 @@ func NewRouter(rt *runtime.Runtime) (*gin.Engine, error) {
 		// Workspace helpers (local-tool mode).
 		api.POST("/workspace/choose", handler.ChooseWorkspace)
 		api.GET("/workspace/browse", handler.BrowseWorkspace)
+		api.POST("/workspace/browse/create", handler.CreateWorkspaceDir)
 
 		// Workflow orchestration (MVP, workspace-scoped).
 		api.GET("/workflows", handler.ListWorkflows)
