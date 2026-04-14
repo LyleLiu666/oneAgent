@@ -94,6 +94,7 @@ it('disables browse when the server environment does not support the native pick
         base_url: '',
         warnings: [],
         workspace_chooser_supported: false,
+        workspace_chooser_reason: '服务端不支持原生选择器，请手动填写路径。',
     })
 
     const pinia = createPinia()
@@ -113,7 +114,38 @@ it('disables browse when the server environment does not support the native pick
 
     const browseButton = wrapper.get('[data-testid="chat-workspace-choose"]')
     expect(browseButton.attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-testid="chat-workspace-chooser-hint"]').text()).toContain('手动填写服务端工作区路径')
+    expect(wrapper.get('[data-testid="chat-workspace-chooser-hint"]').text()).toContain('服务端不支持原生选择器')
+})
+
+it('keeps browse disabled when runtime config cannot be loaded', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.getConfig as any).mockRejectedValueOnce(new Error('boom'))
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const browseButton = wrapper.get('[data-testid="chat-workspace-choose"]')
+    expect(browseButton.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="chat-workspace-chooser-hint"]').text()).toContain('暂时无法确认服务端是否支持')
 })
 
 it('keeps session header above messages (for tool popover)', async () => {

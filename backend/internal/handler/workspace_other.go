@@ -16,6 +16,6 @@ func defaultChooseWorkspaceDir(ctx context.Context) (string, bool, error) {
 func defaultWorkspaceChooserCapability() workspaceChooserCapability {
 	return workspaceChooserCapability{
 		Supported: false,
-		Reason:    fmt.Sprintf("Native folder chooser is not supported on %s server environments.", runtime.GOOS),
+		Reason:    "当前服务端环境不支持原生文件夹选择，请手动填写服务端工作区路径。",
 	}
 }

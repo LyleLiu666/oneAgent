@@ -26,7 +26,7 @@ import {
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { parseApiError, type ParsedApiError } from '@/lib/apiError'
-import { resolveWorkspaceChooserSupport } from '@/lib/workspaceChooser'
+import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from '@/lib/workspaceChooser'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -578,8 +578,9 @@ const loadRuntimeConfig = async () => {
     const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to load runtime config.'
     runtimeConfigError.value = String(msg)
     runtimeWarnings.value = []
-    workspaceChooserSupported.value = true
-    workspaceChooserHint.value = ''
+    const chooser = unknownWorkspaceChooserSupport()
+    workspaceChooserSupported.value = chooser.supported
+    workspaceChooserHint.value = chooser.hint
     console.error('Failed to load runtime config:', error)
   } finally {
     runtimeConfigLoading.value = false

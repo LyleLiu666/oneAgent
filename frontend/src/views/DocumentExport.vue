@@ -5,7 +5,7 @@ import { Download, FolderOpen } from 'lucide-vue-next'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { chooseWorkspaceDir, exportDocument, getConfig, type DocumentExportFormat } from '@/api/client'
 import { parseApiError, type ParsedApiError } from '@/lib/apiError'
-import { resolveWorkspaceChooserSupport } from '@/lib/workspaceChooser'
+import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from '@/lib/workspaceChooser'
 
 const workspace = ref(String(globalThis?.localStorage?.getItem?.('oneagent-workspace') || '').trim())
 const inputPath = ref('report.md')
@@ -28,8 +28,9 @@ const loadWorkspaceChooserSupport = async () => {
     workspaceChooserSupported.value = chooser.supported
     workspaceChooserHint.value = chooser.hint
   } catch {
-    workspaceChooserSupported.value = true
-    workspaceChooserHint.value = ''
+    const chooser = unknownWorkspaceChooserSupport()
+    workspaceChooserSupported.value = chooser.supported
+    workspaceChooserHint.value = chooser.hint
   }
 }
 

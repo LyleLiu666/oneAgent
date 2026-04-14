@@ -47,7 +47,7 @@ import {
   type TaskUpdate,
 } from "@/lib/taskUpdates";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
-import { resolveWorkspaceChooserSupport } from "@/lib/workspaceChooser";
+import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from "@/lib/workspaceChooser";
 
 type WorkspaceSummary = {
   workspace: string;
@@ -713,8 +713,9 @@ const loadWorkspaceChooserSupport = async () => {
     workspaceChooserSupported.value = chooser.supported;
     workspaceChooserHint.value = chooser.hint;
   } catch {
-    workspaceChooserSupported.value = true;
-    workspaceChooserHint.value = "";
+    const chooser = unknownWorkspaceChooserSupport();
+    workspaceChooserSupported.value = chooser.supported;
+    workspaceChooserHint.value = chooser.hint;
   }
 };
 
