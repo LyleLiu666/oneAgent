@@ -2244,11 +2244,6 @@ watch(
   { immediate: true },
 );
 
-const handleWelcomeSelect = (prompt: string) => {
-  inputMessage.value = prompt;
-  sendMessage();
-};
-
 const handoffToTask = async () => {
   if (!canHandoffTask.value) return;
 
@@ -2657,7 +2652,6 @@ onUnmounted(() => {
           :workspace-chooser-strategy="workspaceChooserStrategy"
           @choose-workspace="chooseWorkspace"
           @skip-workspace="skipWorkspaceOnboarding"
-          @select="handleWelcomeSelect"
         />
 
         <!-- Messages -->
