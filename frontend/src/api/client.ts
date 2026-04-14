@@ -550,6 +550,8 @@ export interface RuntimeConfig {
   default_workspace?: string;
   base_url?: string;
   warnings?: string[];
+  workspace_chooser_supported?: boolean;
+  workspace_chooser_reason?: string;
 }
 
 export async function getConfig(): Promise<RuntimeConfig> {

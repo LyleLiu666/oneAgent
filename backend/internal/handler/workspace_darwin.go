@@ -13,6 +13,10 @@ func defaultChooseWorkspaceDir(ctx context.Context) (string, bool, error) {
 	return chooseWorkspaceDarwin(ctx)
 }
 
+func defaultWorkspaceChooserCapability() workspaceChooserCapability {
+	return workspaceChooserCapability{Supported: true}
+}
+
 func chooseWorkspaceDarwin(ctx context.Context) (string, bool, error) {
 	// AppleScript: show folder picker and return POSIX path.
 	const script = `POSIX path of (choose folder with prompt "Select workspace folder")`

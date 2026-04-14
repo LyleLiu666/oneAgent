@@ -21,6 +21,7 @@ import {
   createWorkflowRun,
   deleteWorkflow,
   executeWorkflowRun,
+  getConfig,
   listWorkflows,
   publishWorkflowVersion,
   renameWorkflow,
@@ -30,6 +31,7 @@ import {
   type WorkflowVersion,
 } from "@/api/client";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
+import { resolveWorkspaceChooserSupport } from "@/lib/workspaceChooser";
 
 const router = useRouter();
 
@@ -42,6 +44,8 @@ const workspaceNew = ref("");
 const workspaceSelected = ref("");
 const workspaceChoosing = ref(false);
 const workspaceChooseError = ref<ParsedApiError | null>(null);
+const workspaceChooserSupported = ref(true);
+const workspaceChooserHint = ref("");
 
 const workflowsLoading = ref(false);
 const workflowsError = ref<ParsedApiError | null>(null);
@@ -106,6 +110,7 @@ const addWorkspace = () => {
 };
 
 const chooseWorkspace = async () => {
+  if (!workspaceChooserSupported.value) return;
   workspaceChooseError.value = null;
   workspaceChoosing.value = true;
   try {
@@ -122,6 +127,17 @@ const chooseWorkspace = async () => {
     workspaceChooseError.value = parseApiError(e, "选择文件夹失败");
   } finally {
     workspaceChoosing.value = false;
+  }
+};
+
+const loadWorkspaceChooserSupport = async () => {
+  try {
+    const chooser = resolveWorkspaceChooserSupport(await getConfig());
+    workspaceChooserSupported.value = chooser.supported;
+    workspaceChooserHint.value = chooser.hint;
+  } catch {
+    workspaceChooserSupported.value = true;
+    workspaceChooserHint.value = "";
   }
 };
 
@@ -298,6 +314,7 @@ const openRun = async () => {
 };
 
 onMounted(() => {
+  void loadWorkspaceChooserSupport();
   loadManualWorkspaces();
   try {
     const last = normalizeWorkspace(localStorage.getItem("oneagent-workspace") || "");
@@ -341,7 +358,8 @@ onMounted(() => {
 
               <button
                 class="inline-flex items-center gap-2 rounded-lg bg-surface-800 px-3 py-2 text-sm font-medium text-surface-200 hover:bg-surface-700"
-                :disabled="workspaceChoosing"
+                :disabled="workspaceChoosing || !workspaceChooserSupported"
+                :title="workspaceChooserSupported ? '选择工作区文件夹' : workspaceChooserHint"
                 @click="chooseWorkspace"
               >
                 <Folder class="h-4 w-4" />
@@ -374,6 +392,9 @@ onMounted(() => {
           </div>
         </div>
 
+        <p v-if="!workspaceChooserSupported" class="mt-3 text-xs text-amber-400">
+          {{ workspaceChooserHint }}
+        </p>
         <ErrorBanner v-if="workspaceChooseError" class="mt-3" :error="workspaceChooseError" />
       </section>
 
@@ -523,4 +544,3 @@ onMounted(() => {
     </div>
   </div>
 </template>
-

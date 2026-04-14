@@ -93,4 +93,22 @@ func TestChooseWorkspace_NotSupported(t *testing.T) {
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("expected %d, got %d (%s)", http.StatusNotImplemented, rec.Code, rec.Body.String())
 	}
+
+	var payload struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+		Hint  string `json:"hint"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if payload.Code != "workspace_chooser_unsupported" {
+		t.Fatalf("expected code workspace_chooser_unsupported, got %q", payload.Code)
+	}
+	if payload.Error == "" || payload.Error == "服务器错误" {
+		t.Fatalf("expected actionable error message, got %q", payload.Error)
+	}
+	if payload.Hint == "" {
+		t.Fatalf("expected hint for manual workspace input")
+	}
 }

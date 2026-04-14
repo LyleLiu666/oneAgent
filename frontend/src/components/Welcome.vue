@@ -12,6 +12,8 @@ const props = defineProps<{
   workspaceChoosing?: boolean
   workspaceChooseError?: string
   runtimeWarnings?: string[]
+  workspaceChooserSupported?: boolean
+  workspaceChooserHint?: string
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +22,7 @@ const emit = defineEmits<{
 }>()
 
 const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()))
+const workspaceChooserUnavailable = computed(() => props.workspaceChooserSupported === false)
 </script>
 
 <template>
@@ -65,6 +68,13 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
               <p v-else class="mt-2 text-xs text-surface-400">
                 选择一个文件夹以启用文件/搜索/命令等工具；也可以跳过进入纯聊天模式。
               </p>
+              <p
+                v-if="workspaceChooserUnavailable && workspaceChooserHint"
+                data-testid="welcome-workspace-chooser-hint"
+                class="mt-2 text-xs text-amber-400"
+              >
+                {{ workspaceChooserHint }}
+              </p>
               <p v-if="workspaceChooseError" class="mt-2 text-xs text-red-400">
                 {{ workspaceChooseError }}
               </p>
@@ -77,10 +87,11 @@ const hasWorkspace = computed(() => Boolean(String(props.workspace || '').trim()
 
             <div class="flex items-center gap-2 shrink-0">
               <button
+                data-testid="welcome-workspace-choose"
                 type="button"
                 class="inline-flex items-center gap-2 rounded-lg bg-surface-900 text-surface-200 text-xs sm:text-sm px-3 py-2 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                :disabled="workspaceChoosing"
-                title="选择工作区文件夹"
+                :disabled="workspaceChoosing || workspaceChooserUnavailable"
+                :title="workspaceChooserUnavailable ? workspaceChooserHint || '当前环境不支持原生文件夹选择' : '选择工作区文件夹'"
                 @click="emit('choose-workspace')"
               >
                 <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />

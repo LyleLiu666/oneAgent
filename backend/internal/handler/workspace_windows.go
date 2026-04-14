@@ -42,6 +42,10 @@ func defaultChooseWorkspaceDir(ctx context.Context) (string, bool, error) {
 	return chooseWorkspaceWindows(ctx)
 }
 
+func defaultWorkspaceChooserCapability() workspaceChooserCapability {
+	return workspaceChooserCapability{Supported: true}
+}
+
 func chooseWorkspaceWindows(ctx context.Context) (string, bool, error) {
 	select {
 	case <-ctx.Done():

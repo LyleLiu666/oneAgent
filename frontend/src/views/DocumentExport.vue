@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Download, FolderOpen } from 'lucide-vue-next'
 
 import ErrorBanner from '@/components/ErrorBanner.vue'
-import { chooseWorkspaceDir, exportDocument, type DocumentExportFormat } from '@/api/client'
+import { chooseWorkspaceDir, exportDocument, getConfig, type DocumentExportFormat } from '@/api/client'
 import { parseApiError, type ParsedApiError } from '@/lib/apiError'
+import { resolveWorkspaceChooserSupport } from '@/lib/workspaceChooser'
 
 const workspace = ref(String(globalThis?.localStorage?.getItem?.('oneagent-workspace') || '').trim())
 const inputPath = ref('report.md')
@@ -16,10 +17,24 @@ const running = ref(false)
 const choosing = ref(false)
 const error = ref<ParsedApiError | null>(null)
 const result = ref<any>(null)
+const workspaceChooserSupported = ref(true)
+const workspaceChooserHint = ref('')
 
 const canRun = computed(() => workspace.value.trim() && inputPath.value.trim() && format.value)
 
+const loadWorkspaceChooserSupport = async () => {
+  try {
+    const chooser = resolveWorkspaceChooserSupport(await getConfig())
+    workspaceChooserSupported.value = chooser.supported
+    workspaceChooserHint.value = chooser.hint
+  } catch {
+    workspaceChooserSupported.value = true
+    workspaceChooserHint.value = ''
+  }
+}
+
 const chooseWorkspace = async () => {
+  if (!workspaceChooserSupported.value) return
   error.value = null
   choosing.value = true
   try {
@@ -60,6 +75,10 @@ const run = async () => {
     running.value = false
   }
 }
+
+onMounted(() => {
+  void loadWorkspaceChooserSupport()
+})
 </script>
 
 <template>
@@ -95,13 +114,17 @@ const run = async () => {
               />
               <button
                 class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
-                :disabled="choosing"
+                :disabled="choosing || !workspaceChooserSupported"
+                :title="workspaceChooserSupported ? '选择工作区文件夹' : workspaceChooserHint"
                 @click="chooseWorkspace"
               >
                 <FolderOpen class="w-4 h-4" />
                 选择文件夹
               </button>
             </div>
+            <p v-if="!workspaceChooserSupported" class="text-xs text-amber-400">
+              {{ workspaceChooserHint }}
+            </p>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

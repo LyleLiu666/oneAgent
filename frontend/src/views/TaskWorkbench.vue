@@ -19,6 +19,7 @@ import {
   cancelTask,
   chooseWorkspaceDir,
   createTask,
+  getConfig,
   getTask,
   getTaskAttemptArtifact,
   listTaskAttemptFiles,
@@ -46,6 +47,7 @@ import {
   type TaskUpdate,
 } from "@/lib/taskUpdates";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
+import { resolveWorkspaceChooserSupport } from "@/lib/workspaceChooser";
 
 type WorkspaceSummary = {
   workspace: string;
@@ -84,6 +86,8 @@ const workspaceNew = ref("");
 const workspaceSelected = ref("");
 const workspaceChoosing = ref(false);
 const workspaceChooseError = ref<ParsedApiError | null>(null);
+const workspaceChooserSupported = ref(true);
+const workspaceChooserHint = ref("");
 
 const selectedTaskId = ref("");
 const selectedTask = ref<Task | null>(null);
@@ -683,6 +687,7 @@ const addWorkspace = () => {
 };
 
 const chooseWorkspace = async () => {
+  if (!workspaceChooserSupported.value) return;
   workspaceChooseError.value = null;
   workspaceChoosing.value = true;
   try {
@@ -699,6 +704,17 @@ const chooseWorkspace = async () => {
     workspaceChooseError.value = parseApiError(e, "选择文件夹失败");
   } finally {
     workspaceChoosing.value = false;
+  }
+};
+
+const loadWorkspaceChooserSupport = async () => {
+  try {
+    const chooser = resolveWorkspaceChooserSupport(await getConfig());
+    workspaceChooserSupported.value = chooser.supported;
+    workspaceChooserHint.value = chooser.hint;
+  } catch {
+    workspaceChooserSupported.value = true;
+    workspaceChooserHint.value = "";
   }
 };
 
@@ -784,6 +800,7 @@ const doResume = async () => {
 };
 
 onMounted(async () => {
+  void loadWorkspaceChooserSupport();
   loadManualWorkspaces();
   const persisted = normalizeWorkspace(
     safeGetLocalStorageItem("oneagent-workspace"),
@@ -942,7 +959,8 @@ onUnmounted(() => {
                     data-testid="workspace-browse"
                     type="button"
                     class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-                    :disabled="workspaceChoosing"
+                    :disabled="workspaceChoosing || !workspaceChooserSupported"
+                    :title="workspaceChooserSupported ? '选择工作区文件夹' : workspaceChooserHint"
                     @click="chooseWorkspace"
                   >
                     <Folder class="w-4 h-4" />
@@ -966,6 +984,9 @@ onUnmounted(() => {
                   :error="workspaceChooseError"
                   title="选择失败"
                 />
+                <p v-if="!workspaceChooserSupported" class="mt-3 text-xs text-amber-400">
+                  {{ workspaceChooserHint }}
+                </p>
               </div>
 
               <div class="max-h-[30vh] overflow-y-auto -mx-1 px-1">

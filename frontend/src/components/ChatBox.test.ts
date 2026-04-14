@@ -80,6 +80,42 @@ it('sets workspace path after clicking Browse', async () => {
     expect((input.element as HTMLInputElement).value).toBe('/tmp/workspace')
 })
 
+it('disables browse when the server environment does not support the native picker', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.getConfig as any).mockResolvedValueOnce({
+        default_workspace: '',
+        base_url: '',
+        warnings: [],
+        workspace_chooser_supported: false,
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const browseButton = wrapper.get('[data-testid="chat-workspace-choose"]')
+    expect(browseButton.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="chat-workspace-chooser-hint"]').text()).toContain('手动填写服务端工作区路径')
+})
+
 it('keeps session header above messages (for tool popover)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {

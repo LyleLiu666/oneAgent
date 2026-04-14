@@ -98,6 +98,9 @@ func classifyAPIError(status int, err error) (code string, msg string, hint stri
 	if strings.Contains(lower, "provider base_url or api_key is missing") {
 		return "llm_provider_incomplete", "当前供应商配置不完整", "请前往“设置”补全 Base URL 和 API Key"
 	}
+	if errors.Is(err, ErrWorkspaceChooserNotSupported) {
+		return "workspace_chooser_unsupported", "当前服务端环境不支持原生文件夹选择", "请手动填写服务端工作区路径"
+	}
 
 	switch status {
 	case http.StatusBadRequest:

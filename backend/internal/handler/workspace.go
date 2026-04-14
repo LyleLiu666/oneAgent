@@ -12,8 +12,14 @@ import (
 
 var ErrWorkspaceChooserNotSupported = errors.New("workspace chooser not supported")
 
+type workspaceChooserCapability struct {
+	Supported bool
+	Reason    string
+}
+
 // chooseWorkspaceDir is overridden in tests.
 var chooseWorkspaceDir = defaultChooseWorkspaceDir
+var getWorkspaceChooserCapability = defaultWorkspaceChooserCapability
 
 // ChooseWorkspace opens a native folder picker on the server machine and returns the selected path.
 // This is primarily intended for local-tool mode where the server runs on the same machine as the UI.

@@ -28,6 +28,7 @@ import {
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { parseApiError, type ParsedApiError } from '@/lib/apiError'
+import { resolveWorkspaceChooserSupport } from '@/lib/workspaceChooser'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -89,6 +90,8 @@ const runtimeConfigError = ref('')
 const runtimeWarnings = ref<string[]>([])
 const serverDefaultWorkspace = ref('')
 const serverBaseURL = ref('')
+const workspaceChooserSupported = ref(true)
+const workspaceChooserHint = ref('')
 
 const toolPickerOpen = ref(false)
 const toolPickerEl = ref<HTMLElement | null>(null)
@@ -687,6 +690,9 @@ const loadRuntimeConfig = async () => {
     serverDefaultWorkspace.value =
       typeof raw?.default_workspace === 'string' ? String(raw.default_workspace) : ''
     serverBaseURL.value = typeof raw?.base_url === 'string' ? String(raw.base_url) : ''
+    const chooser = resolveWorkspaceChooserSupport(raw)
+    workspaceChooserSupported.value = chooser.supported
+    workspaceChooserHint.value = chooser.hint
     runtimeWarnings.value = Array.isArray(raw?.warnings)
       ? raw.warnings.map((w: any) => String(w)).filter((w: string) => Boolean(w.trim()))
       : []
@@ -694,6 +700,8 @@ const loadRuntimeConfig = async () => {
     const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to load runtime config.'
     runtimeConfigError.value = String(msg)
     runtimeWarnings.value = []
+    workspaceChooserSupported.value = true
+    workspaceChooserHint.value = ''
     console.error('Failed to load runtime config:', error)
   } finally {
     runtimeConfigLoading.value = false
@@ -904,6 +912,7 @@ const handleScroll = () => {
 
 const chooseWorkspace = async () => {
   if (workspaceChoosing.value) return
+  if (!workspaceChooserSupported.value) return
   workspaceChoosing.value = true
   workspaceChooseError.value = ''
   try {
@@ -2249,11 +2258,13 @@ onUnmounted(() => {
                     'bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-2 py-1.5 border hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-50 disabled:cursor-not-allowed',
                     workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
                   ]"
-                  :disabled="workspaceChoosing || Boolean(sessionWorkspace)"
+                  :disabled="workspaceChoosing || Boolean(sessionWorkspace) || !workspaceChooserSupported"
                   :title="
                     sessionWorkspace
                       ? '本会话的工作区已锁定；如需修改，请新建会话。'
-                      : workspaceChooseError || '选择工作区文件夹（服务端）'
+                      : !workspaceChooserSupported
+                        ? workspaceChooserHint || '当前环境不支持原生文件夹选择'
+                        : workspaceChooseError || '选择工作区文件夹（服务端）'
                   "
                   @click="chooseWorkspace"
                 >
@@ -2261,6 +2272,12 @@ onUnmounted(() => {
                   <span v-else>选择文件夹</span>
                 </button>
               </div>
+              <p
+                v-if="!workspaceChooserSupported && !sessionWorkspace"
+                class="text-xs text-amber-400"
+              >
+                {{ workspaceChooserHint }}
+              </p>
               <div v-if="tools.length > 0" ref="toolPickerEl" class="relative flex items-center gap-2">
                 <Sparkles class="w-4 h-4 text-surface-400" />
                 <button
@@ -2361,6 +2378,8 @@ onUnmounted(() => {
           :workspace-choosing="workspaceChoosing"
           :workspace-choose-error="workspacePromptError"
           :runtime-warnings="runtimeWarnings"
+          :workspace-chooser-supported="workspaceChooserSupported"
+          :workspace-chooser-hint="workspaceChooserHint"
           @choose-workspace="chooseWorkspace"
           @skip-workspace="skipWorkspaceOnboarding"
           @select="handleWelcomeSelect"
