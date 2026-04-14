@@ -112,6 +112,9 @@ const workspacePath = ref(lastWorkspace.value);
 const workspaceChoosing = ref(false);
 const workspaceChooseError = ref("");
 const workspaceOnboardingDismissed = ref(false);
+const workspaceBrowserSelectionMode = ref<"workspace" | "secretary-reply">(
+  "workspace",
+);
 const sessionWorkspace = ref("");
 const sessionPolicyID = ref("");
 const sessionPolicyHash = ref("");
@@ -455,6 +458,14 @@ const workspaceOnboardingBlocking = computed(() => {
     isEmptyState &&
     !String(workspacePath.value || "").trim() &&
     !workspaceOnboardingDismissed.value
+  );
+});
+
+const secretaryWorkspaceQuestionPending = computed(() => {
+  if (!isSecretaryMode.value) return false;
+  if (String(sessionWorkspace.value || "").trim()) return false;
+  return secretaryPendingQuestions.value.some((q) =>
+    isWorkspaceBindingQuestion(q),
   );
 });
 
@@ -1013,10 +1024,27 @@ const applyChosenWorkspace = async (path: string) => {
   inputEl.value?.focus();
 };
 
+const replyWithChosenWorkspace = async (path: string) => {
+  const trimmed = String(path || "").trim();
+  if (!trimmed) return;
+  workspaceBrowserOpen.value = false;
+  secretaryPendingQuestionsModalOpen.value = false;
+  await sendSecretaryMessage(trimmed);
+};
+
+const handleWorkspaceBrowserSelect = async (path: string) => {
+  if (workspaceBrowserSelectionMode.value === "secretary-reply") {
+    await replyWithChosenWorkspace(path);
+    return;
+  }
+  await applyChosenWorkspace(path);
+};
+
 const chooseWorkspace = async () => {
   if (workspaceChoosing.value) return;
   if (!workspaceChooserSupported.value) return;
   workspaceChooseError.value = "";
+  workspaceBrowserSelectionMode.value = "workspace";
   if (workspaceChooserStrategy.value === "browser") {
     workspaceBrowserOpen.value = true;
     return;
@@ -1035,6 +1063,36 @@ const chooseWorkspace = async () => {
       "Failed to choose workspace folder.";
     workspaceChooseError.value = String(msg);
     console.error("Failed to choose workspace:", error);
+  } finally {
+    workspaceChoosing.value = false;
+  }
+};
+
+const chooseWorkspaceForSecretaryReply = async () => {
+  if (workspaceChoosing.value) return;
+  if (!workspaceChooserSupported.value) return;
+  workspaceChooseError.value = "";
+  secretaryPendingQuestionsModalOpen.value = false;
+  workspaceBrowserSelectionMode.value = "secretary-reply";
+  if (workspaceChooserStrategy.value === "browser") {
+    workspaceBrowserOpen.value = true;
+    return;
+  }
+  workspaceChoosing.value = true;
+  try {
+    const res: any = await chooseWorkspaceDir();
+    if (res && typeof res === "object" && res.canceled) return;
+    const path = res?.path;
+    if (typeof path === "string" && path.trim()) {
+      await replyWithChosenWorkspace(path);
+    }
+  } catch (error) {
+    const msg =
+      (error as any)?.data?.error ||
+      (error as any)?.message ||
+      "Failed to choose workspace folder.";
+    workspaceChooseError.value = String(msg);
+    console.error("Failed to choose workspace for secretary reply:", error);
   } finally {
     workspaceChoosing.value = false;
   }
@@ -2421,6 +2479,25 @@ onUnmounted(() => {
               </span>
             </button>
             <button
+              v-if="
+                isSecretaryMode &&
+                secretaryWorkspaceQuestionPending &&
+                workspaceChooserSupported
+              "
+              type="button"
+              data-testid="secretary-browse-workspace-reply"
+              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="workspaceChoosing || secretaryInboxSubmitting"
+              title="秘书正在等待项目目录；选择后会作为你的回复发送"
+              @click="chooseWorkspaceForSecretaryReply"
+            >
+              <Loader2
+                v-if="workspaceChoosing"
+                class="w-4 h-4 animate-spin inline-block"
+              />
+              <span v-else>选择目录并回复</span>
+            </button>
+            <button
               v-if="isSecretaryMode"
               type="button"
               data-testid="secretary-toggle-task-panel"
@@ -2600,6 +2677,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </template>
+
           </div>
         </div>
       </div>
@@ -3017,6 +3095,34 @@ onUnmounted(() => {
             sessionWorkspace
           }}</span>
         </div>
+        <div
+          v-if="secretaryWorkspaceQuestionPending"
+          class="rounded-2xl border border-surface-800 bg-surface-950/40 px-4 py-3 space-y-3"
+        >
+          <div class="text-xs text-surface-300">
+            秘书正在等待你提供项目目录。你可以直接回复绝对路径，也可以用目录浏览器来选。
+          </div>
+          <button
+            v-if="workspaceChooserSupported"
+            type="button"
+            data-testid="secretary-pending-questions-browse-workspace"
+            class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium bg-surface-800/70 text-surface-200 hover:bg-surface-700/70 disabled:opacity-60 disabled:cursor-not-allowed"
+            :disabled="workspaceChoosing || secretaryInboxSubmitting"
+            @click="chooseWorkspaceForSecretaryReply"
+          >
+            <Loader2
+              v-if="workspaceChoosing"
+              class="h-4 w-4 animate-spin"
+            />
+            <span v-else>选择目录并回复</span>
+          </button>
+          <div v-else class="text-xs text-amber-300">
+            {{
+              workspaceChooserHint ||
+              "当前环境不支持目录选择，请直接回复绝对路径。"
+            }}
+          </div>
+        </div>
         <ol class="space-y-2 text-sm text-surface-100 list-decimal list-inside">
           <li
             v-for="q in secretaryPendingQuestions"
@@ -3107,9 +3213,14 @@ onUnmounted(() => {
 
   <WorkspaceBrowserModal
     :open="workspaceBrowserOpen"
+    :title="
+      workspaceBrowserSelectionMode === 'secretary-reply'
+        ? '选择项目目录并回复给秘书'
+        : '选择工作区文件夹'
+    "
     :initial-path="workspacePath"
     @close="workspaceBrowserOpen = false"
-    @select="applyChosenWorkspace"
+    @select="handleWorkspaceBrowserSelect"
   />
 
   <div

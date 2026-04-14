@@ -40,9 +40,9 @@ RUN go mod edit -replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.
 # Copy backend source
 COPY backend/ ./
 
-# Create static directory and copy frontend build
-RUN mkdir -p cmd/server/static
-COPY --from=frontend-builder /app/frontend/dist/ ./cmd/server/static/
+# Refresh the embedded frontend assets consumed by backend/internal/web/assets.go.
+RUN rm -rf internal/web/static && mkdir -p internal/web/static
+COPY --from=frontend-builder /app/frontend/dist/ ./internal/web/static/
 
 # Build the application
 RUN go mod edit -replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git=/ext/agentsdk \

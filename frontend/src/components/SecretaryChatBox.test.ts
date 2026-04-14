@@ -153,7 +153,7 @@ it('closes reset modal after confirming reset', async () => {
 it('binds workspace when user replies with an absolute path for a pending workspace question', async () => {
   vi.stubGlobal('localStorage', makeLocalStorage())
 
-  ;(apiClient.getSecretaryState as any).mockResolvedValue({
+  ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
     session_id: 's1',
     cursor_message_id: 0,
     triage_runs: [
@@ -220,6 +220,74 @@ it('shows setup guidance when no model is configured in secretary mode', async (
 
   expect(wrapper.find('[data-testid="secretary-model-setup-banner"]').exists()).toBe(true)
   expect(wrapper.get('[data-testid="secretary-open-settings"]').attributes('href')).toBe('/settings')
+
+  wrapper.unmount()
+})
+
+it('lets the user browse a directory only when secretary asks for a workspace', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  ;(apiClient.getConfig as any).mockResolvedValueOnce({
+    default_workspace: '',
+    base_url: '',
+    warnings: [],
+    workspace_chooser_supported: false,
+    workspace_browser_supported: true,
+  })
+  ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
+    session_id: 's1',
+    cursor_message_id: 0,
+    triage_runs: [
+      {
+        from_cursor: 0,
+        to_message_id: 1,
+        questions: ['要继续推进，我需要你发我项目目录（仓库根目录）的路径。'],
+      },
+    ],
+  })
+  ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+    session_id: 's1',
+    message_id: 1,
+    ack_message_id: 0,
+    ack_text: '',
+  })
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: { initialMode: 'secretary' },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  expect(wrapper.find('[data-testid="chat-workspace-choose"]').exists()).toBe(false)
+
+  const browseButton = wrapper.get('[data-testid="secretary-browse-workspace-reply"]')
+  expect(browseButton.attributes('disabled')).toBeUndefined()
+  await browseButton.trigger('click')
+  await flushPromises()
+
+  const modal = wrapper.find('workspace-browser-modal-stub')
+  expect(modal.exists()).toBe(true)
+  expect(modal.attributes('open')).toBe('true')
+
+  const modalVm = wrapper.getComponent({ name: 'WorkspaceBrowserModal' }) as any
+  modalVm.vm.$emit('select', '/tmp/workspace')
+  await flushPromises()
+
+  expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledWith({
+    content: '/tmp/workspace',
+    workspace: '/tmp/workspace',
+  })
 
   wrapper.unmount()
 })
