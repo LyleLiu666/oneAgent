@@ -552,6 +552,8 @@ export interface RuntimeConfig {
   warnings?: string[];
   workspace_chooser_supported?: boolean;
   workspace_chooser_reason?: string;
+  workspace_browser_supported?: boolean;
+  workspace_browser_reason?: string;
 }
 
 export async function getConfig(): Promise<RuntimeConfig> {
@@ -560,6 +562,24 @@ export async function getConfig(): Promise<RuntimeConfig> {
 
 export async function chooseWorkspaceDir() {
   return api("/api/workspace/choose", { method: "POST" });
+}
+
+export interface WorkspaceBrowseEntry {
+  name: string;
+  path: string;
+}
+
+export interface WorkspaceBrowseResponse {
+  current_path?: string;
+  root_path?: string;
+  parent_path?: string;
+  entries?: WorkspaceBrowseEntry[];
+}
+
+export async function browseWorkspaceDir(path?: string) {
+  const query = String(path || "").trim();
+  const suffix = query ? `?path=${encodeURIComponent(query)}` : "";
+  return api<WorkspaceBrowseResponse>(`/api/workspace/browse${suffix}`);
 }
 
 // ============================================================================

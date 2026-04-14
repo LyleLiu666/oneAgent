@@ -27,8 +27,13 @@ import {
 } from '@/api/client'
 import { resolveWorkspaceChoice } from '@/lib/workspaceOnboarding'
 import ErrorBanner from '@/components/ErrorBanner.vue'
+import WorkspaceBrowserModal from '@/components/WorkspaceBrowserModal.vue'
 import { parseApiError, type ParsedApiError } from '@/lib/apiError'
-import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from '@/lib/workspaceChooser'
+import {
+  resolveWorkspaceChooserSupport,
+  unknownWorkspaceChooserSupport,
+  type WorkspaceChooserStrategy,
+} from '@/lib/workspaceChooser'
 import Welcome from './Welcome.vue'
 import ChatHistoryList from './ChatHistoryList.vue'
 import TraceLog from './TraceLog.vue'
@@ -61,6 +66,18 @@ const normalizeChatUIMode = (raw: any): ChatUIMode | undefined => {
 
 const isSecretaryMode = computed(() => uiStore.mode === 'secretary')
 const showHistory = computed(() => !isSecretaryMode.value)
+const workspaceChooserTitle = computed(() => {
+  if (sessionWorkspace.value) {
+    return '本会话的工作区已锁定；如需修改，请新建会话。'
+  }
+  if (!workspaceChooserSupported.value) {
+    return workspaceChooserHint.value || '当前环境不支持选择文件夹'
+  }
+  return workspaceChooseError.value
+    || (workspaceChooserStrategy.value === 'browser'
+      ? '浏览服务端目录（服务端）'
+      : '选择工作区文件夹（服务端）')
+})
 
 // Local state
 const inputMessage = ref('')
@@ -92,6 +109,8 @@ const serverDefaultWorkspace = ref('')
 const serverBaseURL = ref('')
 const workspaceChooserSupported = ref(true)
 const workspaceChooserHint = ref('')
+const workspaceChooserStrategy = ref<WorkspaceChooserStrategy>('native')
+const workspaceBrowserOpen = ref(false)
 
 const toolPickerOpen = ref(false)
 const toolPickerEl = ref<HTMLElement | null>(null)
@@ -693,6 +712,7 @@ const loadRuntimeConfig = async () => {
     const chooser = resolveWorkspaceChooserSupport(raw)
     workspaceChooserSupported.value = chooser.supported
     workspaceChooserHint.value = chooser.hint
+    workspaceChooserStrategy.value = chooser.strategy
     runtimeWarnings.value = Array.isArray(raw?.warnings)
       ? raw.warnings.map((w: any) => String(w)).filter((w: string) => Boolean(w.trim()))
       : []
@@ -703,6 +723,7 @@ const loadRuntimeConfig = async () => {
     const chooser = unknownWorkspaceChooserSupport()
     workspaceChooserSupported.value = chooser.supported
     workspaceChooserHint.value = chooser.hint
+    workspaceChooserStrategy.value = chooser.strategy
     console.error('Failed to load runtime config:', error)
   } finally {
     runtimeConfigLoading.value = false
@@ -911,21 +932,30 @@ const handleScroll = () => {
   }
 }
 
+const applyChosenWorkspace = async (path: string) => {
+  const trimmed = String(path || '').trim()
+  if (!trimmed) return
+  workspaceBrowserOpen.value = false
+  workspacePath.value = trimmed
+  workspaceOnboardingDismissed.value = true
+  await nextTick()
+  inputEl.value?.focus()
+}
+
 const chooseWorkspace = async () => {
   if (workspaceChoosing.value) return
   if (!workspaceChooserSupported.value) return
-  workspaceChoosing.value = true
   workspaceChooseError.value = ''
+  if (workspaceChooserStrategy.value === 'browser') {
+    workspaceBrowserOpen.value = true
+    return
+  }
+  workspaceChoosing.value = true
   try {
     const res: any = await chooseWorkspaceDir()
     if (res && typeof res === 'object' && res.canceled) return
     const path = res?.path
-    if (typeof path === 'string' && path.trim()) {
-      workspacePath.value = path
-      workspaceOnboardingDismissed.value = true
-      await nextTick()
-      inputEl.value?.focus()
-    }
+    if (typeof path === 'string' && path.trim()) await applyChosenWorkspace(path)
   } catch (error) {
     const msg = (error as any)?.data?.error || (error as any)?.message || 'Failed to choose workspace folder.'
     workspaceChooseError.value = String(msg)
@@ -2260,13 +2290,7 @@ onUnmounted(() => {
                     workspaceChooseError ? 'border-red-500/60' : 'border-surface-800',
                   ]"
                   :disabled="workspaceChoosing || Boolean(sessionWorkspace) || !workspaceChooserSupported"
-                  :title="
-                    sessionWorkspace
-                      ? '本会话的工作区已锁定；如需修改，请新建会话。'
-                      : !workspaceChooserSupported
-                        ? workspaceChooserHint || '当前环境不支持原生文件夹选择'
-                        : workspaceChooseError || '选择工作区文件夹（服务端）'
-                  "
+                  :title="workspaceChooserTitle"
                   @click="chooseWorkspace"
                 >
                   <Loader2 v-if="workspaceChoosing" class="w-4 h-4 animate-spin" />
@@ -2757,6 +2781,13 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+	  <WorkspaceBrowserModal
+	    :open="workspaceBrowserOpen"
+	    :initial-path="workspacePath"
+	    @close="workspaceBrowserOpen = false"
+	    @select="applyChosenWorkspace"
+	  />
 
 	  <div
 	    v-if="taskHandoffSuggestOpen"

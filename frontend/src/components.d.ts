@@ -24,5 +24,6 @@ declare module 'vue' {
     Welcome: typeof import('./components/Welcome.vue')['default']
     WorkflowGraphEditor: typeof import('./components/WorkflowGraphEditor.vue')['default']
     WorkflowRunNodes: typeof import('./components/WorkflowRunNodes.vue')['default']
+    WorkspaceBrowserModal: typeof import('./components/WorkspaceBrowserModal.vue')['default']
   }
 }

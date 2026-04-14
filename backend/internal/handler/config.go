@@ -29,11 +29,14 @@ func GetRuntimeConfig(c *gin.Context) {
 		warnings = append(warnings, fmt.Sprintf("Server is listening on a non-loopback interface (bind=%s). This may expose your local agent to the network; prefer bind=127.0.0.1.", rt.Config.Bind))
 	}
 	chooser := getWorkspaceChooserCapability()
+	browser := defaultWorkspaceBrowserCapability(rt.Config)
 	c.JSON(http.StatusOK, gin.H{
 		"default_workspace":           rt.Config.DefaultWorkspace,
 		"base_url":                    fmt.Sprintf("http://localhost:%s", rt.Config.Port),
 		"warnings":                    warnings,
 		"workspace_chooser_supported": chooser.Supported,
 		"workspace_chooser_reason":    chooser.Reason,
+		"workspace_browser_supported": browser.Supported,
+		"workspace_browser_reason":    browser.Reason,
 	})
 }

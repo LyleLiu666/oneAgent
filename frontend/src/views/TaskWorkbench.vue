@@ -14,6 +14,7 @@ import {
 
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import EventLogViewer from "@/components/EventLogViewer.vue";
+import WorkspaceBrowserModal from "@/components/WorkspaceBrowserModal.vue";
 
 import {
   cancelTask,
@@ -47,7 +48,11 @@ import {
   type TaskUpdate,
 } from "@/lib/taskUpdates";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
-import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from "@/lib/workspaceChooser";
+import {
+  resolveWorkspaceChooserSupport,
+  unknownWorkspaceChooserSupport,
+  type WorkspaceChooserStrategy,
+} from "@/lib/workspaceChooser";
 
 type WorkspaceSummary = {
   workspace: string;
@@ -88,6 +93,8 @@ const workspaceChoosing = ref(false);
 const workspaceChooseError = ref<ParsedApiError | null>(null);
 const workspaceChooserSupported = ref(true);
 const workspaceChooserHint = ref("");
+const workspaceChooserStrategy = ref<WorkspaceChooserStrategy>("native");
+const workspaceBrowserOpen = ref(false);
 
 const selectedTaskId = ref("");
 const selectedTask = ref<Task | null>(null);
@@ -207,6 +214,13 @@ const governanceSummaryText = computed(() => {
   const slots = max > 0 ? `${running}/${max}` : `${running}/不限`;
   return `运行槽 ${slots} · 延迟 ${deferred} · 暂停 ${paused}`;
 });
+const workspaceChooserTitle = computed(() =>
+  workspaceChooserSupported.value
+    ? workspaceChooserStrategy.value === "browser"
+      ? "浏览服务端目录"
+      : "选择工作区文件夹"
+    : workspaceChooserHint.value,
+);
 
 const refreshGovernanceSnapshot = async () => {
   governanceSnapshotError.value = null;
@@ -686,20 +700,29 @@ const addWorkspace = () => {
   }
 };
 
+const applyChosenWorkspace = (wsRaw: string) => {
+  const ws = normalizeWorkspace(wsRaw);
+  if (!ws) return;
+  if (!workspacesManual.value.includes(ws)) {
+    workspacesManual.value = [...workspacesManual.value, ws];
+    saveManualWorkspaces();
+  }
+  workspaceSelected.value = ws;
+  workspaceBrowserOpen.value = false;
+  persistDefaultWorkspace(ws);
+};
+
 const chooseWorkspace = async () => {
   if (!workspaceChooserSupported.value) return;
   workspaceChooseError.value = null;
+  if (workspaceChooserStrategy.value === "browser") {
+    workspaceBrowserOpen.value = true;
+    return;
+  }
   workspaceChoosing.value = true;
   try {
     const res: any = await chooseWorkspaceDir();
-    const ws = normalizeWorkspace(res?.path);
-    if (!ws) return;
-    if (!workspacesManual.value.includes(ws)) {
-      workspacesManual.value = [...workspacesManual.value, ws];
-      saveManualWorkspaces();
-    }
-    workspaceSelected.value = ws;
-    persistDefaultWorkspace(ws);
+    applyChosenWorkspace(String(res?.path || ""));
   } catch (e: any) {
     workspaceChooseError.value = parseApiError(e, "选择文件夹失败");
   } finally {
@@ -712,10 +735,12 @@ const loadWorkspaceChooserSupport = async () => {
     const chooser = resolveWorkspaceChooserSupport(await getConfig());
     workspaceChooserSupported.value = chooser.supported;
     workspaceChooserHint.value = chooser.hint;
+    workspaceChooserStrategy.value = chooser.strategy;
   } catch {
     const chooser = unknownWorkspaceChooserSupport();
     workspaceChooserSupported.value = chooser.supported;
     workspaceChooserHint.value = chooser.hint;
+    workspaceChooserStrategy.value = chooser.strategy;
   }
 };
 
@@ -961,7 +986,7 @@ onUnmounted(() => {
                     type="button"
                     class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2 disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
                     :disabled="workspaceChoosing || !workspaceChooserSupported"
-                    :title="workspaceChooserSupported ? '选择工作区文件夹' : workspaceChooserHint"
+                    :title="workspaceChooserTitle"
                     @click="chooseWorkspace"
                   >
                     <Folder class="w-4 h-4" />
@@ -2008,4 +2033,10 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  <WorkspaceBrowserModal
+    :open="workspaceBrowserOpen"
+    :initial-path="workspaceSelected"
+    @close="workspaceBrowserOpen = false"
+    @select="applyChosenWorkspace"
+  />
 </template>

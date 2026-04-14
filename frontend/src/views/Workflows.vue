@@ -14,6 +14,7 @@ import { useRouter } from "vue-router";
 
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import WorkflowGraphEditor from "@/components/WorkflowGraphEditor.vue";
+import WorkspaceBrowserModal from "@/components/WorkspaceBrowserModal.vue";
 
 import {
   chooseWorkspaceDir,
@@ -31,7 +32,11 @@ import {
   type WorkflowVersion,
 } from "@/api/client";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
-import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from "@/lib/workspaceChooser";
+import {
+  resolveWorkspaceChooserSupport,
+  unknownWorkspaceChooserSupport,
+  type WorkspaceChooserStrategy,
+} from "@/lib/workspaceChooser";
 
 const router = useRouter();
 
@@ -46,6 +51,8 @@ const workspaceChoosing = ref(false);
 const workspaceChooseError = ref<ParsedApiError | null>(null);
 const workspaceChooserSupported = ref(true);
 const workspaceChooserHint = ref("");
+const workspaceChooserStrategy = ref<WorkspaceChooserStrategy>("native");
+const workspaceBrowserOpen = ref(false);
 
 const workflowsLoading = ref(false);
 const workflowsError = ref<ParsedApiError | null>(null);
@@ -60,6 +67,13 @@ const selectedWorkflow = computed<Workflow | null>(() => {
   const id = String(selectedWorkflowId.value || "");
   return workflows.value.find((w) => w.workflow_id === id) || null;
 });
+const workspaceChooserTitle = computed(() =>
+  workspaceChooserSupported.value
+    ? workspaceChooserStrategy.value === "browser"
+      ? "浏览服务端目录"
+      : "选择工作区文件夹"
+    : workspaceChooserHint.value,
+);
 
 const graphDraft = ref<WorkflowGraph>({ nodes: [], edges: [] });
 const latestVersion = ref<WorkflowVersion | null>(null);
@@ -109,20 +123,29 @@ const addWorkspace = () => {
   }
 };
 
+const applyChosenWorkspace = (wsRaw: string) => {
+  const ws = normalizeWorkspace(wsRaw);
+  if (!ws) return;
+  if (!workspacesManual.value.includes(ws)) {
+    workspacesManual.value = [...workspacesManual.value, ws];
+    saveManualWorkspaces();
+  }
+  workspaceSelected.value = ws;
+  workspaceBrowserOpen.value = false;
+  persistDefaultWorkspace(ws);
+};
+
 const chooseWorkspace = async () => {
   if (!workspaceChooserSupported.value) return;
   workspaceChooseError.value = null;
+  if (workspaceChooserStrategy.value === "browser") {
+    workspaceBrowserOpen.value = true;
+    return;
+  }
   workspaceChoosing.value = true;
   try {
     const res: any = await chooseWorkspaceDir();
-    const ws = normalizeWorkspace(res?.path);
-    if (!ws) return;
-    if (!workspacesManual.value.includes(ws)) {
-      workspacesManual.value = [...workspacesManual.value, ws];
-      saveManualWorkspaces();
-    }
-    workspaceSelected.value = ws;
-    persistDefaultWorkspace(ws);
+    applyChosenWorkspace(String(res?.path || ""));
   } catch (e: any) {
     workspaceChooseError.value = parseApiError(e, "选择文件夹失败");
   } finally {
@@ -135,10 +158,12 @@ const loadWorkspaceChooserSupport = async () => {
     const chooser = resolveWorkspaceChooserSupport(await getConfig());
     workspaceChooserSupported.value = chooser.supported;
     workspaceChooserHint.value = chooser.hint;
+    workspaceChooserStrategy.value = chooser.strategy;
   } catch {
     const chooser = unknownWorkspaceChooserSupport();
     workspaceChooserSupported.value = chooser.supported;
     workspaceChooserHint.value = chooser.hint;
+    workspaceChooserStrategy.value = chooser.strategy;
   }
 };
 
@@ -360,7 +385,7 @@ onMounted(() => {
               <button
                 class="inline-flex items-center gap-2 rounded-lg bg-surface-800 px-3 py-2 text-sm font-medium text-surface-200 hover:bg-surface-700"
                 :disabled="workspaceChoosing || !workspaceChooserSupported"
-                :title="workspaceChooserSupported ? '选择工作区文件夹' : workspaceChooserHint"
+                :title="workspaceChooserTitle"
                 @click="chooseWorkspace"
               >
                 <Folder class="h-4 w-4" />
@@ -544,4 +569,10 @@ onMounted(() => {
       </div>
     </div>
   </div>
+  <WorkspaceBrowserModal
+    :open="workspaceBrowserOpen"
+    :initial-path="workspaceSelected"
+    @close="workspaceBrowserOpen = false"
+    @select="applyChosenWorkspace"
+  />
 </template>

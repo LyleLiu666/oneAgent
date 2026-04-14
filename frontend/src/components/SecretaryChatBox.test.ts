@@ -32,6 +32,7 @@ vi.mock('@/api/client', () => ({
   getModels: vi.fn(async () => []),
   getTools: vi.fn(async () => []),
   chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
+  browseWorkspaceDir: vi.fn(),
   getConfig: vi.fn(async () => ({ default_workspace: '', base_url: '', warnings: [] })),
   createTask: vi.fn(),
   secretaryHandoff: vi.fn(),

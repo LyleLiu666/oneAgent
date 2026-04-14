@@ -2,10 +2,15 @@
 import { computed, onMounted, ref } from 'vue'
 import { Download, FolderOpen } from 'lucide-vue-next'
 
+import WorkspaceBrowserModal from '@/components/WorkspaceBrowserModal.vue'
 import ErrorBanner from '@/components/ErrorBanner.vue'
 import { chooseWorkspaceDir, exportDocument, getConfig, type DocumentExportFormat } from '@/api/client'
 import { parseApiError, type ParsedApiError } from '@/lib/apiError'
-import { resolveWorkspaceChooserSupport, unknownWorkspaceChooserSupport } from '@/lib/workspaceChooser'
+import {
+  resolveWorkspaceChooserSupport,
+  unknownWorkspaceChooserSupport,
+  type WorkspaceChooserStrategy,
+} from '@/lib/workspaceChooser'
 
 const workspace = ref(String(globalThis?.localStorage?.getItem?.('oneagent-workspace') || '').trim())
 const inputPath = ref('report.md')
@@ -19,32 +24,51 @@ const error = ref<ParsedApiError | null>(null)
 const result = ref<any>(null)
 const workspaceChooserSupported = ref(true)
 const workspaceChooserHint = ref('')
+const workspaceChooserStrategy = ref<WorkspaceChooserStrategy>('native')
+const workspaceBrowserOpen = ref(false)
 
 const canRun = computed(() => workspace.value.trim() && inputPath.value.trim() && format.value)
+const workspaceChooserTitle = computed(() =>
+  workspaceChooserSupported.value
+    ? workspaceChooserStrategy.value === 'browser'
+      ? '浏览服务端目录'
+      : '选择工作区文件夹'
+    : workspaceChooserHint.value,
+)
 
 const loadWorkspaceChooserSupport = async () => {
   try {
     const chooser = resolveWorkspaceChooserSupport(await getConfig())
     workspaceChooserSupported.value = chooser.supported
     workspaceChooserHint.value = chooser.hint
+    workspaceChooserStrategy.value = chooser.strategy
   } catch {
     const chooser = unknownWorkspaceChooserSupport()
     workspaceChooserSupported.value = chooser.supported
     workspaceChooserHint.value = chooser.hint
+    workspaceChooserStrategy.value = chooser.strategy
   }
+}
+
+const applyWorkspace = (path: string) => {
+  const p = String(path || '').trim()
+  if (!p) return
+  workspace.value = p
+  workspaceBrowserOpen.value = false
+  localStorage.setItem('oneagent-workspace', p)
 }
 
 const chooseWorkspace = async () => {
   if (!workspaceChooserSupported.value) return
   error.value = null
+  if (workspaceChooserStrategy.value === 'browser') {
+    workspaceBrowserOpen.value = true
+    return
+  }
   choosing.value = true
   try {
     const res: any = await chooseWorkspaceDir()
-    const p = String(res?.path || '').trim()
-    if (p) {
-      workspace.value = p
-      localStorage.setItem('oneagent-workspace', p)
-    }
+    applyWorkspace(String(res?.path || ''))
   } catch (e: any) {
     error.value = parseApiError(e, '选择工作区失败')
   } finally {
@@ -116,7 +140,7 @@ onMounted(() => {
               <button
                 class="px-3 py-2 rounded-xl text-sm font-medium bg-surface-900/60 text-surface-300 hover:bg-surface-800/60 inline-flex items-center gap-2"
                 :disabled="choosing || !workspaceChooserSupported"
-                :title="workspaceChooserSupported ? '选择工作区文件夹' : workspaceChooserHint"
+                :title="workspaceChooserTitle"
                 @click="chooseWorkspace"
               >
                 <FolderOpen class="w-4 h-4" />
@@ -193,4 +217,10 @@ onMounted(() => {
       </div>
     </div>
   </div>
+  <WorkspaceBrowserModal
+    :open="workspaceBrowserOpen"
+    :initial-path="workspace"
+    @close="workspaceBrowserOpen = false"
+    @select="applyWorkspace"
+  />
 </template>

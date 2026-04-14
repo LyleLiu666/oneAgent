@@ -16,6 +16,7 @@ describe('workspace chooser support', () => {
 
     expect(resolved).toEqual({
       supported: false,
+      strategy: 'unsupported',
       hint: '服务端不支持原生选择器，请手动填写路径。',
     })
   })
@@ -27,6 +28,7 @@ describe('workspace chooser support', () => {
 
     expect(resolved).toEqual({
       supported: false,
+      strategy: 'unsupported',
       hint: WORKSPACE_CHOOSER_UNSUPPORTED_HINT,
     })
   })
@@ -34,7 +36,21 @@ describe('workspace chooser support', () => {
   it('returns a conservative unknown-state hint when config loading fails', () => {
     expect(unknownWorkspaceChooserSupport()).toEqual({
       supported: false,
+      strategy: 'unsupported',
       hint: WORKSPACE_CHOOSER_UNKNOWN_HINT,
+    })
+  })
+
+  it('prefers the web browser strategy when native chooser is unavailable but web browse is supported', () => {
+    const resolved = resolveWorkspaceChooserSupport({
+      workspace_chooser_supported: false,
+      workspace_browser_supported: true,
+    })
+
+    expect(resolved).toEqual({
+      supported: true,
+      strategy: 'browser',
+      hint: '',
     })
   })
 })

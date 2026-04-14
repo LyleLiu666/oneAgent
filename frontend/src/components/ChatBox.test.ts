@@ -29,6 +29,7 @@ vi.mock('@/api/client', () => ({
     getModels: vi.fn(async () => []),
     getTools: vi.fn(async () => []),
     chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
+    browseWorkspaceDir: vi.fn(),
     approveToolApproval: vi.fn(),
     denyToolApproval: vi.fn(),
     // Task queue (used by TaskQueuePanel).
@@ -145,7 +146,56 @@ it('keeps browse disabled when runtime config cannot be loaded', async () => {
 
     const browseButton = wrapper.get('[data-testid="chat-workspace-choose"]')
     expect(browseButton.attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-testid="chat-workspace-chooser-hint"]').text()).toContain('暂时无法确认服务端是否支持')
+  expect(wrapper.get('[data-testid="chat-workspace-chooser-hint"]').text()).toContain('暂时无法确认服务端是否支持')
+})
+
+it('opens the web workspace browser when native chooser is unavailable but browser mode is supported', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.getConfig as any).mockResolvedValueOnce({
+        default_workspace: '',
+        base_url: '',
+        warnings: [],
+        workspace_chooser_supported: false,
+        workspace_browser_supported: true,
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    const browseButton = wrapper.get('[data-testid="chat-workspace-choose"]')
+    expect(browseButton.attributes('disabled')).toBeUndefined()
+
+    await browseButton.trigger('click')
+    await flushPromises()
+
+    expect(apiClient.chooseWorkspaceDir).not.toHaveBeenCalled()
+    expect(wrapper.find('workspace-browser-modal-stub').exists()).toBe(true)
+
+    const modal = wrapper.getComponent({ name: 'WorkspaceBrowserModal' }) as any
+    modal.vm.$emit('select', '/data/project')
+    await flushPromises()
+
+    const input = wrapper.get('[data-testid="chat-workspace-path"]')
+    expect((input.element as HTMLInputElement).value).toBe('/data/project')
 })
 
 it('keeps session header above messages (for tool popover)', async () => {

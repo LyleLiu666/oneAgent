@@ -49,6 +49,8 @@ func TestGetRuntimeConfig_IncludesWorkspaceChooserCapability(t *testing.T) {
 		Warnings                  []string `json:"warnings"`
 		WorkspaceChooserSupported bool     `json:"workspace_chooser_supported"`
 		WorkspaceChooserReason    string   `json:"workspace_chooser_reason"`
+		WorkspaceBrowserSupported bool     `json:"workspace_browser_supported"`
+		WorkspaceBrowserReason    string   `json:"workspace_browser_reason"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
@@ -64,6 +66,12 @@ func TestGetRuntimeConfig_IncludesWorkspaceChooserCapability(t *testing.T) {
 	}
 	if payload.WorkspaceChooserReason == "" {
 		t.Fatalf("expected workspace chooser reason")
+	}
+	if payload.WorkspaceBrowserSupported {
+		t.Fatalf("expected workspace browser to be marked unsupported when no browse roots are configured")
+	}
+	if payload.WorkspaceBrowserReason == "" {
+		t.Fatalf("expected workspace browser reason")
 	}
 	if len(payload.Warnings) == 0 {
 		t.Fatalf("expected non-loopback bind warning")

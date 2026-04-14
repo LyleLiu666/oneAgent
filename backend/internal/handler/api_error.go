@@ -101,6 +101,9 @@ func classifyAPIError(status int, err error) (code string, msg string, hint stri
 	if errors.Is(err, ErrWorkspaceChooserNotSupported) {
 		return "workspace_chooser_unsupported", "当前服务端环境不支持原生文件夹选择", "请手动填写服务端工作区路径"
 	}
+	if errors.Is(err, ErrWorkspaceBrowserNotSupported) {
+		return "workspace_browser_unsupported", "当前服务端环境没有可浏览的工作区根目录", workspaceBrowserUnsupportedReason
+	}
 
 	switch status {
 	case http.StatusBadRequest:
