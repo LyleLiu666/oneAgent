@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -88,10 +86,8 @@ func defaultCommandProfileForCommandTools() string {
 	// Prefer a more capable profile on macOS when a hard boundary is available out-of-the-box.
 	//
 	// On other OSes, native sandboxing may not be implemented yet; keep a conservative default.
-	if runtime.GOOS == "darwin" {
-		if _, err := exec.LookPath("sandbox-exec"); err == nil {
-			return "coding"
-		}
+	if DefaultCommandToolSandboxMode() == "native" {
+		return "coding"
 	}
 	return "dev"
 }

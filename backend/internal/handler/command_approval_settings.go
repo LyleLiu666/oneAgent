@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -33,18 +34,10 @@ func GetCommandApprovalSettings(c *gin.Context) {
 		return
 	}
 
-	mode := "auto"
-	val, err := rt.Settings.GetUserSetting(c.Request.Context(), userID, settingsdb.SettingKeyCommandApprovalMode)
+	mode, err := resolveCommandApprovalMode(c.Request.Context(), rt.Settings, userID)
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			RespondError(c, http.StatusInternalServerError, err)
-			return
-		}
-	} else {
-		v := strings.ToLower(strings.TrimSpace(val))
-		if v == "manual" {
-			mode = "manual"
-		}
+		RespondError(c, http.StatusInternalServerError, err)
+		return
 	}
 
 	c.JSON(http.StatusOK, commandApprovalSettingsResponse{CommandApprovalMode: mode})
@@ -69,8 +62,8 @@ func UpdateCommandApprovalSettings(c *gin.Context) {
 		return
 	}
 
-	mode := strings.ToLower(strings.TrimSpace(req.CommandApprovalMode))
-	if mode != "auto" && mode != "manual" {
+	mode, ok := parseCommandApprovalMode(req.CommandApprovalMode)
+	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "command_approval_mode must be auto|manual"})
 		return
 	}
@@ -83,3 +76,41 @@ func UpdateCommandApprovalSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, commandApprovalSettingsResponse{CommandApprovalMode: mode})
 }
 
+func resolveCommandApprovalMode(ctx context.Context, db *settingsdb.DB, userID string) (string, error) {
+	if db == nil {
+		return "", errors.New("settings db is not initialized")
+	}
+
+	mode := "auto"
+	val, err := db.GetUserSetting(ctx, userID, settingsdb.SettingKeyCommandApprovalMode)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return mode, nil
+		}
+		return "", err
+	}
+
+	mode = normalizeCommandApprovalMode(val)
+	if mode == "manual" {
+		return mode, nil
+	}
+	return "auto", nil
+}
+
+func normalizeCommandApprovalMode(raw string) string {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "manual" {
+		return "manual"
+	}
+	return "auto"
+}
+
+func parseCommandApprovalMode(raw string) (string, bool) {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	switch mode {
+	case "auto", "manual":
+		return mode, true
+	default:
+		return "", false
+	}
+}

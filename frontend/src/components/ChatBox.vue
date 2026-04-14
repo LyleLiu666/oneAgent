@@ -34,10 +34,16 @@ import {
   setSecretaryRecoveryFocus,
   getSecretarySession,
 } from "@/api/client";
+import { useSimpleToolPermissions } from "@/composables/useSimpleToolPermissions";
 import { resolveWorkspaceChoice } from "@/lib/workspaceOnboarding";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import WorkspaceBrowserModal from "@/components/WorkspaceBrowserModal.vue";
 import { parseApiError, type ParsedApiError } from "@/lib/apiError";
+import {
+  isToolPermissionDeniedLike,
+  messageLikelyNeedsElevatedPermissions,
+  simpleToolPermissionLabel,
+} from "@/lib/toolPermissions";
 import {
   resolveWorkspaceChooserSupport,
   unknownWorkspaceChooserSupport,
@@ -130,6 +136,10 @@ const workspaceBrowserOpen = ref(false);
 
 const toolPickerOpen = ref(false);
 const toolPickerEl = ref<HTMLElement | null>(null);
+const permissionPickerOpen = ref(false);
+const permissionPickerEl = ref<HTMLElement | null>(null);
+const permissionSuggestionDismissed = ref(false);
+const permissionSuggestionReason = ref<"" | "permission_denied">("");
 
 const activeStreamAbort = ref<AbortController | null>(null);
 
@@ -146,6 +156,18 @@ let secretaryRecoveryFocusPersistTimer:
   | ReturnType<typeof setTimeout>
   | undefined;
 let secretaryRecoveryFocusLastPersistedKey = "";
+
+const {
+  state: simplePermissionState,
+  loading: simplePermissionLoading,
+  saving: simplePermissionSaving,
+  error: simplePermissionError,
+  successMessage: simplePermissionSuccessMessage,
+  clearSuccessMessage: clearSimplePermissionSuccessMessage,
+  refresh: refreshSimplePermissions,
+  applyMode: applySimplePermissionMode,
+  updateApprovalMode: updateSimplePermissionApprovalMode,
+} = useSimpleToolPermissions();
 
 const normalizeSecretaryQuestions = (raw: any): string[] => {
   const list = Array.isArray(raw) ? raw : [];
@@ -540,6 +562,44 @@ const chatModelSetupTitle = computed(() => {
   return modelsError.value ? "加载模型失败" : "完整模式暂不可用";
 });
 
+const currentPermissionMode = computed(
+  () => simplePermissionState.value?.current_mode || "custom",
+);
+const currentPermissionLabel = computed(() =>
+  simpleToolPermissionLabel(currentPermissionMode.value),
+);
+const currentPermissionApprovalLabel = computed(() =>
+  simplePermissionState.value?.command_approval_mode === "manual"
+    ? "手动审批"
+    : "自动审批",
+);
+const canOpenAdvancedPermissions = computed(
+  () => simplePermissionState.value?.advanced_settings_available === true,
+);
+const secretaryNeedsPermissionSuggestion = computed(() => {
+  if (!isSecretaryMode.value) return false;
+  if (
+    currentPermissionMode.value !== "readonly" &&
+    currentPermissionMode.value !== "custom"
+  ) {
+    return false;
+  }
+  return messageLikelyNeedsElevatedPermissions(inputMessage.value);
+});
+const showPermissionSuggestion = computed(() => {
+  if (!isSecretaryMode.value) return false;
+  if (simplePermissionLoading.value) return false;
+  if (permissionSuggestionReason.value === "permission_denied") return true;
+  if (permissionSuggestionDismissed.value) return false;
+  return secretaryNeedsPermissionSuggestion.value;
+});
+const permissionSuggestionText = computed(() => {
+  if (permissionSuggestionReason.value === "permission_denied") {
+    return "刚才的操作被执行权限拦住了。我建议先切到“沙箱开发”，这样更稳，也不会让秘书自己直接获得写权限。";
+  }
+  return "这件事看起来需要写文件、改代码或跑测试。我建议先切到“沙箱开发”，这样更稳，也更符合默认的安全边界。";
+});
+
 const toggleChatUIMode = () => {
   if (uiStore.mode === "secretary") {
     uiStore.setMode("full");
@@ -575,16 +635,75 @@ const sendChatFromSuggest = async () => {
   await sendChat(message);
 };
 
+const togglePermissionPicker = async () => {
+  permissionPickerOpen.value = !permissionPickerOpen.value;
+  clearSimplePermissionSuccessMessage();
+  if (permissionPickerOpen.value && !simplePermissionState.value) {
+    await refreshSimplePermissions();
+  }
+};
+
+const markPermissionDenied = async () => {
+  permissionSuggestionReason.value = "permission_denied";
+  permissionSuggestionDismissed.value = false;
+  await refreshSimplePermissions();
+};
+
+const dismissPermissionSuggestion = () => {
+  permissionSuggestionDismissed.value = true;
+  if (permissionSuggestionReason.value !== "permission_denied") {
+    permissionSuggestionReason.value = "";
+  }
+};
+
+const applyPermissionModeFromUI = async (
+  mode: "readonly" | "sandbox_coding" | "host_full",
+  source: "chat_header" | "secretary_prompt",
+) => {
+  if (mode === "host_full") {
+    const ok = window.confirm(
+      "“本机执行”会直接在当前机器上运行命令，风险最高。要继续吗？",
+    );
+    if (!ok) return;
+  }
+  try {
+    await applySimplePermissionMode(mode, source);
+    permissionSuggestionReason.value = "";
+    permissionSuggestionDismissed.value = false;
+    if (source !== "secretary_prompt") {
+      permissionPickerOpen.value = false;
+    }
+  } catch {
+    // Error state is already stored in simplePermissionError.
+  }
+};
+
+const updatePermissionApprovalModeFromUI = async (
+  mode: "auto" | "manual",
+  source: "chat_header" | "secretary_prompt",
+) => {
+  try {
+    await updateSimplePermissionApprovalMode(mode, source);
+  } catch {
+    // Error state is already stored in simplePermissionError.
+  }
+};
+
 // Methods
 const handleDocumentClick = (event: MouseEvent) => {
-  if (!toolPickerOpen.value) return;
-  const el = toolPickerEl.value;
-  if (!el) {
+  const toolPicker = toolPickerEl.value;
+  if (toolPickerOpen.value && (!toolPicker || !(event.target instanceof Node && toolPicker.contains(event.target)))) {
     toolPickerOpen.value = false;
-    return;
   }
-  if (event.target instanceof Node && el.contains(event.target)) return;
-  toolPickerOpen.value = false;
+
+  const permissionPicker = permissionPickerEl.value;
+  if (
+    permissionPickerOpen.value &&
+    (!permissionPicker ||
+      !(event.target instanceof Node && permissionPicker.contains(event.target)))
+  ) {
+    permissionPickerOpen.value = false;
+  }
 };
 
 const scrollToBottom = (smooth = true) => {
@@ -915,6 +1034,14 @@ const loadSessionMessages = async (
       }
     }
     chatStore.setMessages(withPlaceholders);
+    if (
+      withPlaceholders.some((m) =>
+        isToolPermissionDeniedLike(m.tool?.error || m.content),
+      )
+    ) {
+      permissionSuggestionReason.value = "permission_denied";
+      permissionSuggestionDismissed.value = false;
+    }
     scrollToBottom(false);
 
     if (isSecretaryMode.value) {
@@ -1366,6 +1493,9 @@ const attachIfNeeded = async (sessionIdRaw: string) => {
             console.warn("Failed to parse usage event:", e);
           }
         } else if (event.type === "error") {
+          if (isToolPermissionDeniedLike(event.data)) {
+            void markPermissionDenied();
+          }
           const suffix = event.data
             ? `\n\n[Error] ${event.data}`
             : "\n\n[Error] Request failed.";
@@ -1704,6 +1834,9 @@ const sendChat = async (rawMessage: string) => {
       (error) => {
         console.error("Stream error:", error);
         const parsed = parseApiError(error, "发送失败");
+        if (isToolPermissionDeniedLike(parsed.code || parsed.message)) {
+          void markPermissionDenied();
+        }
         const idx = findStreamingIndex();
         if (idx >= 0) {
           const msg = chatStore.messages[idx];
@@ -1719,10 +1852,11 @@ const sendChat = async (rawMessage: string) => {
     );
   } catch (error) {
     console.error("Chat error:", error);
-    appendAssistantErrorMessage(
-      parseApiError(error, "抱歉，发送失败，请稍后再试。"),
-      "抱歉，发送失败，请稍后再试。",
-    );
+    const parsed = parseApiError(error, "抱歉，发送失败，请稍后再试。");
+    if (isToolPermissionDeniedLike(parsed.code || parsed.message)) {
+      void markPermissionDenied();
+    }
+    appendAssistantErrorMessage(parsed, "抱歉，发送失败，请稍后再试。");
   } finally {
     if (activeStreamAbort.value === abort) {
       activeStreamAbort.value = null;
@@ -2341,10 +2475,29 @@ const handoffToTask = async () => {
   }
 };
 
+watch(
+  [inputMessage, currentPermissionMode],
+  () => {
+    if (currentPermissionMode.value !== "readonly" && currentPermissionMode.value !== "custom") {
+      permissionSuggestionReason.value = "";
+      permissionSuggestionDismissed.value = false;
+      return;
+    }
+    if (!messageLikelyNeedsElevatedPermissions(inputMessage.value)) {
+      permissionSuggestionDismissed.value = false;
+      if (permissionSuggestionReason.value !== "permission_denied") {
+        permissionSuggestionReason.value = "";
+      }
+    }
+  },
+  { flush: "post" },
+);
+
 onMounted(async () => {
   document.addEventListener("click", handleDocumentClick);
 
   await loadRuntimeConfig();
+  await refreshSimplePermissions();
   await loadTools();
   await loadModels();
   await loadSessions();
@@ -2419,22 +2572,152 @@ onUnmounted(() => {
             <p class="text-sm text-surface-100 truncate">
               {{ currentSessionTitle }}
             </p>
-            <p
-              v-if="!isSecretaryMode && sessionPolicyHash"
-              class="text-[11px] text-surface-500 truncate"
+            <div
+              ref="permissionPickerEl"
+              class="mt-2 flex flex-wrap items-center gap-2 relative"
             >
-              policy={{ sessionPolicyID || "未知" }} ·
-              {{ shortSessionPolicyHash }}
-              <a
-                href="/governance/tools"
-                class="ml-2 text-primary-400 hover:text-primary-300 underline"
+              <button
+                type="button"
+                data-testid="chat-permission-chip"
+                class="inline-flex items-center gap-2 rounded-full border border-surface-700/50 bg-surface-900/70 px-3 py-1 text-xs text-surface-200 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                @click="togglePermissionPicker"
               >
-                工具权限
-              </a>
-              <span v-if="sessionPolicyResolvedAt" class="ml-2"
-                >· {{ sessionPolicyResolvedAt }}</span
+                <span>执行权限：{{ currentPermissionLabel }}</span>
+                <span class="text-surface-500">· {{ currentPermissionApprovalLabel }}</span>
+              </button>
+              <span
+                v-if="simplePermissionSuccessMessage"
+                data-testid="chat-permission-success"
+                class="text-[11px] text-emerald-300"
               >
-            </p>
+                {{ simplePermissionSuccessMessage }}
+              </span>
+              <span
+                v-else-if="sessionPolicyHash"
+                class="text-[11px] text-surface-500 truncate"
+              >
+                policy={{ sessionPolicyID || "未知" }} · {{ shortSessionPolicyHash }}
+                <span v-if="sessionPolicyResolvedAt"> · {{ sessionPolicyResolvedAt }}</span>
+              </span>
+
+              <div
+                v-if="permissionPickerOpen"
+                data-testid="chat-permission-panel"
+                class="absolute left-0 top-full z-40 mt-2 w-[min(32rem,calc(100vw-2rem))] rounded-2xl border border-surface-700/60 bg-surface-950/95 p-4 shadow-2xl backdrop-blur"
+              >
+                <div class="space-y-3">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-surface-100">
+                        执行权限：{{ currentPermissionLabel }}
+                      </div>
+                      <div class="text-xs text-surface-500">
+                        {{ simplePermissionState?.effective_scope?.summary }}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="text-xs text-surface-500 hover:text-surface-300"
+                      :disabled="simplePermissionLoading || simplePermissionSaving"
+                      @click="refreshSimplePermissions"
+                    >
+                      刷新
+                    </button>
+                  </div>
+
+                  <div
+                    v-if="simplePermissionError"
+                    class="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+                  >
+                    {{ simplePermissionError.message }}
+                    <span v-if="simplePermissionError.hint" class="block mt-1 text-red-100/80">
+                      {{ simplePermissionError.hint }}
+                    </span>
+                  </div>
+
+                  <div class="grid grid-cols-1 gap-2">
+                    <button
+                      v-for="option in simplePermissionState?.available_modes || []"
+                      :key="option.mode"
+                      type="button"
+                      class="rounded-xl border px-3 py-3 text-left transition-colors"
+                      :class="
+                        option.current
+                          ? 'border-primary-500/50 bg-primary-500/10'
+                          : 'border-surface-700/50 bg-surface-900/50 hover:bg-surface-800/60'
+                      "
+                      :disabled="simplePermissionLoading || simplePermissionSaving || !option.available"
+                      @click="applyPermissionModeFromUI(option.mode, 'chat_header')"
+                    >
+                      <div class="flex items-center justify-between gap-3">
+                        <span class="text-sm font-medium text-surface-100">{{ option.label }}</span>
+                        <span
+                          v-if="option.current"
+                          class="text-[10px] uppercase tracking-wide text-primary-200"
+                        >
+                          当前
+                        </span>
+                      </div>
+                      <div class="mt-1 text-xs text-surface-400">{{ option.description }}</div>
+                      <div
+                        v-if="!option.available && option.unavailable_reason"
+                        class="mt-2 text-xs text-red-300"
+                      >
+                        {{ option.unavailable_reason }}
+                      </div>
+                    </button>
+                  </div>
+
+                  <div class="rounded-xl border border-surface-700/50 bg-surface-900/40 p-3">
+                    <div class="text-xs text-surface-500">高风险命令审批</div>
+                    <div class="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        class="px-3 py-1.5 rounded-lg text-xs border"
+                        :class="
+                          simplePermissionState?.command_approval_mode === 'auto'
+                            ? 'border-primary-500/50 bg-primary-500/10 text-primary-200'
+                            : 'border-surface-700/50 bg-surface-900/60 text-surface-300'
+                        "
+                        :disabled="simplePermissionLoading || simplePermissionSaving"
+                        @click="updatePermissionApprovalModeFromUI('auto', 'chat_header')"
+                      >
+                        自动
+                      </button>
+                      <button
+                        type="button"
+                        class="px-3 py-1.5 rounded-lg text-xs border"
+                        :class="
+                          simplePermissionState?.command_approval_mode === 'manual'
+                            ? 'border-primary-500/50 bg-primary-500/10 text-primary-200'
+                            : 'border-surface-700/50 bg-surface-900/60 text-surface-300'
+                        "
+                        :disabled="simplePermissionLoading || simplePermissionSaving"
+                        @click="updatePermissionApprovalModeFromUI('manual', 'chat_header')"
+                      >
+                        手动
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="canOpenAdvancedPermissions"
+                    class="text-xs text-surface-400"
+                  >
+                    需要更细的策略时：
+                    <a
+                      href="/governance/tools"
+                      class="text-primary-400 hover:text-primary-300 underline"
+                    >
+                      打开高级设置
+                    </a>
+                  </div>
+                  <div v-else class="text-xs text-surface-500">
+                    当前账户不能进入管理员级高级设置，但仍可直接使用上面的常见预设。
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="flex items-center gap-2 flex-wrap justify-end">
             <SecretaryStatusHints v-if="isSecretaryMode" />
@@ -2645,6 +2928,54 @@ onUnmounted(() => {
           >
             {{ workspaceChooseError }}
           </p>
+        </div>
+      </div>
+
+      <div
+        v-if="showPermissionSuggestion"
+        data-testid="chat-permission-suggestion"
+        class="max-w-4xl mx-auto px-4 pt-3"
+      >
+        <div class="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4">
+          <div class="text-sm font-medium text-amber-100">建议调整执行权限</div>
+          <div class="mt-2 text-sm text-amber-50/90">
+            {{ permissionSuggestionText }}
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-lg bg-amber-400/20 text-amber-50 text-xs hover:bg-amber-400/25"
+              :disabled="simplePermissionLoading || simplePermissionSaving"
+              @click="applyPermissionModeFromUI('sandbox_coding', 'secretary_prompt')"
+            >
+              切到沙箱开发（推荐）
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-lg bg-surface-900/70 text-surface-200 text-xs hover:bg-surface-800"
+              :disabled="simplePermissionLoading || simplePermissionSaving"
+              @click="applyPermissionModeFromUI('host_full', 'secretary_prompt')"
+            >
+              改为本机执行
+            </button>
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-lg bg-surface-900/50 text-surface-300 text-xs hover:bg-surface-800"
+              @click="dismissPermissionSuggestion"
+            >
+              继续当前权限
+            </button>
+            <a
+              v-if="canOpenAdvancedPermissions"
+              href="/governance/tools"
+              class="text-xs text-primary-300 underline"
+            >
+              高级设置
+            </a>
+          </div>
+          <div class="mt-3 text-xs text-amber-50/70">
+            {{ simplePermissionState?.effective_scope?.summary }}
+          </div>
         </div>
       </div>
 

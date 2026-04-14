@@ -137,6 +137,21 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 `,
 		`CREATE INDEX IF NOT EXISTS idx_auth_tokens_principal_id ON auth_tokens(principal_id);`,
 		`
+CREATE TABLE IF NOT EXISTS tool_permission_simple_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  principal_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  old_policy_json TEXT NOT NULL,
+  new_policy_json TEXT NOT NULL,
+  old_policy_hash TEXT NOT NULL,
+  new_policy_hash TEXT NOT NULL,
+  selected_mode TEXT NOT NULL,
+  command_approval_mode TEXT NOT NULL,
+  changed_at_ms INTEGER NOT NULL
+);
+`,
+		`CREATE INDEX IF NOT EXISTS idx_tool_permission_simple_audit_principal_id ON tool_permission_simple_audit(principal_id, changed_at_ms DESC);`,
+		`
 CREATE TABLE IF NOT EXISTS tool_approvals (
   id TEXT PRIMARY KEY,
   principal_id TEXT NOT NULL,

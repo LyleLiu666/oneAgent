@@ -84,7 +84,7 @@ func classifyAPIError(status int, err error) (code string, msg string, hint stri
 	if strings.Contains(lower, "not allowed") ||
 		strings.Contains(lower, "denied_by_rule") ||
 		strings.Contains(lower, "default_deny") {
-		return "tool_permission_denied", "操作被策略拒绝", "请前往“工具权限”页面调整 policy/profile 后重试"
+		return "tool_permission_denied", "操作被策略拒绝", "可直接切到“沙箱开发”或“本机执行”；如需自定义，再进入“工具权限”的高级设置"
 	}
 	if strings.Contains(lower, "no llm model configured") {
 		return "llm_model_missing", "还没有配置可用的大模型", "请前往“设置”添加 Provider，并至少设置一个默认 Model"

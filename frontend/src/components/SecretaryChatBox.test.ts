@@ -31,6 +31,57 @@ vi.mock('@/api/client', () => ({
   truncateSession: vi.fn(),
   getModels: vi.fn(async () => []),
   getTools: vi.fn(async () => []),
+  getSimpleToolPermissions: vi.fn(async () => ({
+    principal_id: 'local',
+    current_mode: 'readonly',
+    command_approval_mode: 'auto',
+    available_modes: [
+      {
+        mode: 'readonly',
+        label: '只读查看',
+        description: '可读、可查、不可改。',
+        risk_level: 'low',
+        available: true,
+        current: true,
+        recommended: false,
+      },
+      {
+        mode: 'sandbox_coding',
+        label: '沙箱开发',
+        description: '允许改代码和跑测试，但尽量放在隔离环境里。',
+        risk_level: 'medium',
+        available: true,
+        current: false,
+        recommended: true,
+      },
+    ],
+    effective_scope: {
+      summary: '仅影响后续执行',
+      affects: [],
+      does_not_affect: [],
+      future_executions_only: true,
+      running_attempts_unchanged: true,
+      secretary_remains_read_only: true,
+    },
+    snapshot: { principal_id: 'local', policy: { id: 'default' }, policy_hash: 'abc12345', resolved_at: 't' },
+    advanced_settings_available: true,
+  })),
+  updateSimpleToolPermissions: vi.fn(async () => ({
+    principal_id: 'local',
+    current_mode: 'sandbox_coding',
+    command_approval_mode: 'auto',
+    available_modes: [],
+    effective_scope: {
+      summary: '仅影响后续执行',
+      affects: [],
+      does_not_affect: [],
+      future_executions_only: true,
+      running_attempts_unchanged: true,
+      secretary_remains_read_only: true,
+    },
+    snapshot: { principal_id: 'local', policy: { id: 'simple_sandbox_coding' }, policy_hash: 'def67890', resolved_at: 't' },
+    advanced_settings_available: true,
+  })),
   chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
   browseWorkspaceDir: vi.fn(),
   createWorkspaceDir: vi.fn(),
@@ -120,6 +171,31 @@ it('hands off input to task queue and appends a persisted receipt (SecretaryChat
   expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
 
   wrapper.unmount()
+})
+
+it('shows a permission suggestion card when the request obviously needs write/run capability', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  await wrapper.get('textarea').setValue('请帮我修改代码并运行测试')
+  await flushPromises()
+
+  expect(wrapper.get('[data-testid="chat-permission-suggestion"]').text()).toContain('沙箱开发')
 })
 
 it('closes reset modal after confirming reset', async () => {

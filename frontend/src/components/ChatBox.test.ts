@@ -28,6 +28,48 @@ vi.mock('@/api/client', () => ({
     truncateSession: vi.fn(),
     getModels: vi.fn(async () => []),
     getTools: vi.fn(async () => []),
+    getSimpleToolPermissions: vi.fn(async () => ({
+        principal_id: 'local',
+        current_mode: 'readonly',
+        command_approval_mode: 'auto',
+        available_modes: [
+            {
+                mode: 'readonly',
+                label: '只读查看',
+                description: '可读、可查、不可改。',
+                risk_level: 'low',
+                available: true,
+                current: true,
+                recommended: false,
+            },
+        ],
+        effective_scope: {
+            summary: '仅影响后续执行',
+            affects: [],
+            does_not_affect: [],
+            future_executions_only: true,
+            running_attempts_unchanged: true,
+            secretary_remains_read_only: true,
+        },
+        snapshot: { principal_id: 'local', policy: { id: 'default' }, policy_hash: 'abc12345', resolved_at: 't' },
+        advanced_settings_available: true,
+    })),
+    updateSimpleToolPermissions: vi.fn(async () => ({
+        principal_id: 'local',
+        current_mode: 'sandbox_coding',
+        command_approval_mode: 'auto',
+        available_modes: [],
+        effective_scope: {
+            summary: '仅影响后续执行',
+            affects: [],
+            does_not_affect: [],
+            future_executions_only: true,
+            running_attempts_unchanged: true,
+            secretary_remains_read_only: true,
+        },
+        snapshot: { principal_id: 'local', policy: { id: 'simple_sandbox_coding' }, policy_hash: 'def67890', resolved_at: 't' },
+        advanced_settings_available: true,
+    })),
     chooseWorkspaceDir: vi.fn(async () => ({ path: '/tmp/workspace' })),
     browseWorkspaceDir: vi.fn(),
     createWorkspaceDir: vi.fn(),
@@ -224,7 +266,64 @@ it('keeps session header above messages (for tool popover)', async () => {
 
     const header = wrapper.get('.session-header')
     expect(header.classes()).toContain('relative')
-    expect(header.classes()).toContain('z-30')
+  expect(header.classes()).toContain('z-30')
+})
+
+it('shows the current execution permission chip in the header', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="chat-permission-chip"]').text()).toContain('只读查看')
+})
+
+it('does not show the secretary permission suggestion card in full mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('请帮我修改代码并运行测试')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="chat-permission-suggestion"]').exists()).toBe(false)
 })
 
 it('allows messages pane to scroll (min-h-0)', async () => {

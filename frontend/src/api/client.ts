@@ -1119,6 +1119,48 @@ export interface ToolPolicyResponse {
   snapshot: ToolPolicySnapshot;
 }
 
+export type SimpleToolPermissionMode =
+  | "readonly"
+  | "sandbox_coding"
+  | "host_full"
+  | "custom";
+
+export interface SimpleToolPermissionModeOption {
+  mode: Exclude<SimpleToolPermissionMode, "custom">;
+  label: string;
+  description: string;
+  risk_level: string;
+  available: boolean;
+  unavailable_reason?: string;
+  current: boolean;
+  recommended: boolean;
+}
+
+export interface SimpleToolPermissionScope {
+  summary: string;
+  affects: string[];
+  does_not_affect: string[];
+  future_executions_only: boolean;
+  running_attempts_unchanged: boolean;
+  secretary_remains_read_only: boolean;
+}
+
+export interface SimpleToolPermissionResponse {
+  principal_id: string;
+  current_mode: SimpleToolPermissionMode;
+  command_approval_mode: CommandApprovalMode;
+  available_modes: SimpleToolPermissionModeOption[];
+  effective_scope: SimpleToolPermissionScope;
+  snapshot: ToolPolicySnapshot;
+  advanced_settings_available: boolean;
+}
+
+export interface UpdateSimpleToolPermissionRequest {
+  mode?: Exclude<SimpleToolPermissionMode, "custom">;
+  command_approval_mode?: CommandApprovalMode;
+  source?: "chat_header" | "secretary_prompt" | "tool_permissions_page";
+}
+
 export async function createAuthToken(
   principalId: string,
 ): Promise<AuthTokenResponse> {
@@ -1149,6 +1191,19 @@ export async function setToolPolicy(
   return api(`/api/admin/tool_policies/${encodeURIComponent(principalId)}`, {
     method: "PUT",
     body: policy,
+  });
+}
+
+export async function getSimpleToolPermissions(): Promise<SimpleToolPermissionResponse> {
+  return api("/api/tool_permissions/simple");
+}
+
+export async function updateSimpleToolPermissions(
+  payload: UpdateSimpleToolPermissionRequest,
+): Promise<SimpleToolPermissionResponse> {
+  return api("/api/tool_permissions/simple", {
+    method: "PUT",
+    body: payload,
   });
 }
 
