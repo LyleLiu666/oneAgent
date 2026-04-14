@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import * as apiClient from '@/api/client'
@@ -63,6 +63,10 @@ vi.mock('@/api/client', () => ({
   listTaskAttemptFiles: vi.fn(),
   readTaskAttemptFileSnapshot: vi.fn(),
 }))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
 
 it('hands off input to task queue and appends a persisted receipt (SecretaryChatBox)', async () => {
   vi.stubGlobal('localStorage', makeLocalStorage())
@@ -199,6 +203,55 @@ it('binds workspace when user replies with an absolute path for a pending worksp
   wrapper.unmount()
 })
 
+it('binds workspace when user replies with a one-segment absolute root path', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
+    session_id: 's1',
+    cursor_message_id: 0,
+    triage_runs: [
+      {
+        from_cursor: 0,
+        to_message_id: 1,
+        questions: ['要继续推进，我需要你发我项目目录（仓库根目录）的路径。'],
+      },
+    ],
+  })
+
+  ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+    session_id: 's1',
+    message_id: 1,
+    ack_message_id: 0,
+    ack_text: '',
+  })
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  await wrapper.get('textarea').setValue('/repo')
+  await wrapper.get('[data-testid="chat-send"]').trigger('click')
+  await flushPromises()
+
+  const args = (apiClient.appendSecretaryInboxMessage as any).mock.calls[0]?.[0]
+  expect(args).toBeTruthy()
+  expect(args.workspace).toBe('/repo')
+
+  wrapper.unmount()
+})
+
 it('shows setup guidance when no model is configured in secretary mode', async () => {
   vi.stubGlobal('localStorage', makeLocalStorage())
 
@@ -224,8 +277,9 @@ it('shows setup guidance when no model is configured in secretary mode', async (
   wrapper.unmount()
 })
 
-it('lets the user browse a directory only when secretary asks for a workspace', async () => {
+it('binds a browser-selected root path even when the path is only one segment deep', async () => {
   vi.stubGlobal('localStorage', makeLocalStorage())
+  ;(apiClient.appendSecretaryInboxMessage as any).mockClear()
 
   ;(apiClient.getConfig as any).mockResolvedValueOnce({
     default_workspace: '',
@@ -281,13 +335,66 @@ it('lets the user browse a directory only when secretary asks for a workspace', 
   expect(modal.attributes('open')).toBe('true')
 
   const modalVm = wrapper.getComponent({ name: 'WorkspaceBrowserModal' }) as any
-  modalVm.vm.$emit('select', '/tmp/workspace')
+  modalVm.vm.$emit('select', '/repo')
   await flushPromises()
 
   expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledWith({
-    content: '/tmp/workspace',
-    workspace: '/tmp/workspace',
+    content: '/repo',
+    workspace: '/repo',
   })
+
+  wrapper.unmount()
+})
+
+it('shows a secretary-visible error when choosing a workspace reply fails', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+  ;(apiClient.chooseWorkspaceDir as any).mockClear()
+
+  ;(apiClient.getConfig as any).mockResolvedValueOnce({
+    default_workspace: '',
+    base_url: '',
+    warnings: [],
+    workspace_chooser_supported: true,
+    workspace_browser_supported: false,
+  })
+  ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
+    session_id: 's1',
+    cursor_message_id: 0,
+    triage_runs: [
+      {
+        from_cursor: 0,
+        to_message_id: 1,
+        questions: ['请告诉我项目目录（仓库根目录）的路径。'],
+      },
+    ],
+  })
+  ;(apiClient.chooseWorkspaceDir as any).mockRejectedValueOnce(
+    new Error('选择目录失败'),
+  )
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    props: { initialMode: 'secretary' },
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  await wrapper.get('[data-testid="secretary-browse-workspace-reply"]').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.get('[data-testid="secretary-workspace-choose-error"]').text()).toContain(
+    '选择目录失败',
+  )
 
   wrapper.unmount()
 })

@@ -110,6 +110,9 @@ const workspacePath = ref(lastWorkspace.value);
 const workspaceChoosing = ref(false);
 const workspaceChooseError = ref("");
 const workspaceOnboardingDismissed = ref(false);
+const workspaceBrowserSelectionMode = ref<"workspace" | "secretary-reply">(
+  "workspace",
+);
 const sessionWorkspace = ref("");
 const sessionPolicyID = ref("");
 const sessionPolicyHash = ref("");
@@ -147,6 +150,103 @@ let secretaryRecoveryFocusLastPersistedKey = "";
 const normalizeSecretaryQuestions = (raw: any): string[] => {
   const list = Array.isArray(raw) ? raw : [];
   return list.map((q) => String(q ?? "").trim()).filter(Boolean);
+};
+
+const isWorkspaceBindingQuestion = (raw: any): boolean => {
+  const q = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (!q) return false;
+  return (
+    q.includes("项目目录") ||
+    q.includes("仓库根目录") ||
+    q.includes("工作区") ||
+    q.includes("workspace")
+  );
+};
+
+const extractWorkspacePathFromReply = (raw: any): string => {
+  const original = String(raw ?? "").trim();
+  if (!original) return "";
+
+  const firstLine = original.split("\n")[0]?.trim() || "";
+  if (!firstLine) return "";
+
+  const strippedIndex = firstLine
+    .replace(/^\s*\d+\s*[\.\)、\)\]]\s*/, "")
+    .trim();
+  if (!strippedIndex) return "";
+
+  const unwrapOnce = (s: string) => {
+    const trimmed = s.trim();
+    if (
+      (trimmed.startsWith("`") && trimmed.endsWith("`")) ||
+      (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+      return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+  };
+
+  const trimPathPunctuation = (s: string) => {
+    return s.replace(/[。.,;，；：:！!？?、)\]]+$/g, "").trim();
+  };
+
+  const isLikelyAbsWorkspace = (candidate: string) => {
+    const c = String(candidate || "").trim();
+    if (!c || c === "/") return false;
+    if (c.startsWith("/")) {
+      return c.length > 1;
+    }
+    if (/^[a-zA-Z]:[\\/]/.test(c)) {
+      const rest = c.slice(3);
+      return rest.length > 0;
+    }
+    if (c.startsWith("\\\\")) {
+      const parts = c
+        .slice(2)
+        .split(/[\\/]+/)
+        .filter(Boolean);
+      return parts.length >= 2;
+    }
+    return false;
+  };
+
+  const direct = trimPathPunctuation(unwrapOnce(strippedIndex));
+  if (isLikelyAbsWorkspace(direct)) return direct;
+
+  const backticked = strippedIndex.match(/`([^`]+)`/);
+  if (backticked?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(backticked[1]));
+    if (isLikelyAbsWorkspace(candidate)) return candidate;
+  }
+
+  const quoted = strippedIndex.match(/["']([^"']+)["']/);
+  if (quoted?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(quoted[1]));
+    if (isLikelyAbsWorkspace(candidate)) return candidate;
+  }
+
+  const winDrive = strippedIndex.match(/([a-zA-Z]:[\\/][^\s]+)/);
+  if (winDrive?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(winDrive[1]));
+    if (isLikelyAbsWorkspace(candidate)) return candidate;
+  }
+
+  const unc = strippedIndex.match(/(\\\\[^\s]+)/);
+  if (unc?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(unc[1]));
+    if (isLikelyAbsWorkspace(candidate)) return candidate;
+  }
+
+  const posix = strippedIndex.match(/(\/[^\s]+)/);
+  if (posix?.[1]) {
+    const candidate = trimPathPunctuation(unwrapOnce(posix[1]));
+    if (isLikelyAbsWorkspace(candidate)) return candidate;
+  }
+
+  return "";
 };
 
 const closeSecretaryPendingQuestionsModal = () => {
@@ -350,6 +450,14 @@ const workspaceOnboardingBlocking = computed(() => {
     isEmptyState &&
     !String(workspacePath.value || "").trim() &&
     !workspaceOnboardingDismissed.value
+  );
+});
+
+const secretaryWorkspaceQuestionPending = computed(() => {
+  if (!isSecretaryMode.value) return false;
+  if (String(sessionWorkspace.value || "").trim()) return false;
+  return secretaryPendingQuestions.value.some((q) =>
+    isWorkspaceBindingQuestion(q),
   );
 });
 
@@ -887,10 +995,27 @@ const applyChosenWorkspace = async (path: string) => {
   inputEl.value?.focus();
 };
 
+const replyWithChosenWorkspace = async (path: string) => {
+  const trimmed = String(path || "").trim();
+  if (!trimmed) return;
+  workspaceBrowserOpen.value = false;
+  secretaryPendingQuestionsModalOpen.value = false;
+  await sendSecretaryMessage(trimmed, { explicitWorkspace: trimmed });
+};
+
+const handleWorkspaceBrowserSelect = async (path: string) => {
+  if (workspaceBrowserSelectionMode.value === "secretary-reply") {
+    await replyWithChosenWorkspace(path);
+    return;
+  }
+  await applyChosenWorkspace(path);
+};
+
 const chooseWorkspace = async () => {
   if (workspaceChoosing.value) return;
   if (!workspaceChooserSupported.value) return;
   workspaceChooseError.value = "";
+  workspaceBrowserSelectionMode.value = "workspace";
   if (workspaceChooserStrategy.value === "browser") {
     workspaceBrowserOpen.value = true;
     return;
@@ -909,6 +1034,36 @@ const chooseWorkspace = async () => {
       "Failed to choose workspace folder.";
     workspaceChooseError.value = String(msg);
     console.error("Failed to choose workspace:", error);
+  } finally {
+    workspaceChoosing.value = false;
+  }
+};
+
+const chooseWorkspaceForSecretaryReply = async () => {
+  if (workspaceChoosing.value) return;
+  if (!workspaceChooserSupported.value) return;
+  workspaceChooseError.value = "";
+  secretaryPendingQuestionsModalOpen.value = false;
+  workspaceBrowserSelectionMode.value = "secretary-reply";
+  if (workspaceChooserStrategy.value === "browser") {
+    workspaceBrowserOpen.value = true;
+    return;
+  }
+  workspaceChoosing.value = true;
+  try {
+    const res: any = await chooseWorkspaceDir();
+    if (res && typeof res === "object" && res.canceled) return;
+    const path = res?.path;
+    if (typeof path === "string" && path.trim()) {
+      await replyWithChosenWorkspace(path);
+    }
+  } catch (error) {
+    const msg =
+      (error as any)?.data?.error ||
+      (error as any)?.message ||
+      "Failed to choose workspace folder.";
+    workspaceChooseError.value = String(msg);
+    console.error("Failed to choose workspace for secretary reply:", error);
   } finally {
     workspaceChoosing.value = false;
   }
@@ -1746,7 +1901,10 @@ const attachSecretaryStream = () => {
   );
 };
 
-const sendSecretaryMessage = async (rawMessage: string) => {
+const sendSecretaryMessage = async (
+  rawMessage: string,
+  options?: { explicitWorkspace?: string },
+) => {
   const message = String(rawMessage || "").trim();
   if (!message) return;
   if (loadingHistory.value) return;
@@ -1766,10 +1924,26 @@ const sendSecretaryMessage = async (rawMessage: string) => {
 
   secretaryInboxSubmitting.value = true;
   try {
+    const existingWorkspace = String(sessionWorkspace.value || "").trim();
+    const explicitWorkspace = String(options?.explicitWorkspace || "").trim();
+    const shouldInferWorkspace =
+      !existingWorkspace &&
+      !explicitWorkspace &&
+      secretaryPendingQuestions.value.some((q) =>
+        isWorkspaceBindingQuestion(q),
+      );
+    const inferredWorkspace = shouldInferWorkspace
+      ? extractWorkspacePathFromReply(message)
+      : "";
+    const workspaceToBind =
+      existingWorkspace || explicitWorkspace || inferredWorkspace;
+    const boundWorkspaceNow =
+      !existingWorkspace && Boolean(explicitWorkspace || inferredWorkspace);
+
     const res: any = await appendSecretaryInboxMessage({
       content: message,
-      // Best-effort: bind workspace if the session already has one.
-      workspace: String(sessionWorkspace.value || "").trim() || undefined,
+      // Best-effort: bind workspace when asked (repo root path).
+      workspace: workspaceToBind || undefined,
     });
 
     const serverSessionId = String(res?.session_id || "").trim();
@@ -1810,6 +1984,11 @@ const sendSecretaryMessage = async (rawMessage: string) => {
 
     upsertServerTextMessage(res?.ack_message_id, "assistant", res?.ack_text);
     loadSessions();
+
+    if (boundWorkspaceNow && workspaceToBind) {
+      sessionWorkspace.value = workspaceToBind;
+      workspacePath.value = workspaceToBind;
+    }
   } catch (error) {
     console.error("Failed to append secretary inbox message:", error);
     // Mark the optimistic message as failed (best-effort).
@@ -2276,6 +2455,25 @@ onUnmounted(() => {
               </span>
             </button>
             <button
+              v-if="
+                isSecretaryMode &&
+                secretaryWorkspaceQuestionPending &&
+                workspaceChooserSupported
+              "
+              type="button"
+              data-testid="secretary-browse-workspace-reply"
+              class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="workspaceChoosing || secretaryInboxSubmitting"
+              title="秘书正在等待项目目录；选择后会作为你的回复发送"
+              @click="chooseWorkspaceForSecretaryReply"
+            >
+              <Loader2
+                v-if="workspaceChoosing"
+                class="w-4 h-4 animate-spin inline-block"
+              />
+              <span v-else>选择目录并回复</span>
+            </button>
+            <button
               type="button"
               data-testid="chat-toggle-mode"
               class="bg-surface-900 text-surface-200 text-xs sm:text-sm rounded-lg px-3 py-1.5 border border-surface-800 hover:bg-surface-800 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
@@ -2432,6 +2630,21 @@ onUnmounted(() => {
               </div>
             </template>
           </div>
+        </div>
+        <div
+          v-if="
+            isSecretaryMode &&
+            secretaryWorkspaceQuestionPending &&
+            workspaceChooseError
+          "
+          class="max-w-4xl mx-auto px-4 pb-3"
+        >
+          <p
+            data-testid="secretary-workspace-choose-error"
+            class="text-xs text-red-400"
+          >
+            {{ workspaceChooseError }}
+          </p>
         </div>
       </div>
 
@@ -2843,6 +3056,34 @@ onUnmounted(() => {
             sessionWorkspace
           }}</span>
         </div>
+        <div
+          v-if="secretaryWorkspaceQuestionPending"
+          class="rounded-2xl border border-surface-800 bg-surface-950/40 px-4 py-3 space-y-3"
+        >
+          <div class="text-xs text-surface-300">
+            秘书正在等待你提供项目目录。你可以直接回复绝对路径，也可以用目录浏览器来选。
+          </div>
+          <button
+            v-if="workspaceChooserSupported"
+            type="button"
+            data-testid="secretary-pending-questions-browse-workspace"
+            class="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium bg-surface-800/70 text-surface-200 hover:bg-surface-700/70 disabled:opacity-60 disabled:cursor-not-allowed"
+            :disabled="workspaceChoosing || secretaryInboxSubmitting"
+            @click="chooseWorkspaceForSecretaryReply"
+          >
+            <Loader2
+              v-if="workspaceChoosing"
+              class="h-4 w-4 animate-spin"
+            />
+            <span v-else>选择目录并回复</span>
+          </button>
+          <div v-else class="text-xs text-amber-300">
+            {{
+              workspaceChooserHint ||
+              "当前环境不支持目录选择，请直接回复绝对路径。"
+            }}
+          </div>
+        </div>
         <ol class="space-y-2 text-sm text-surface-100 list-decimal list-inside">
           <li
             v-for="q in secretaryPendingQuestions"
@@ -2861,9 +3102,14 @@ onUnmounted(() => {
 
   <WorkspaceBrowserModal
     :open="workspaceBrowserOpen"
+    :title="
+      workspaceBrowserSelectionMode === 'secretary-reply'
+        ? '选择项目目录并回复给秘书'
+        : '选择工作区文件夹'
+    "
     :initial-path="workspacePath"
     @close="workspaceBrowserOpen = false"
-    @select="applyChosenWorkspace"
+    @select="handleWorkspaceBrowserSelect"
   />
 
   <div

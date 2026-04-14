@@ -201,14 +201,13 @@ const extractWorkspacePathFromReply = (raw: any): string => {
 
   const isLikelyAbsWorkspace = (candidate: string) => {
     const c = String(candidate || "").trim();
-    if (!c) return false;
+    if (!c || c === "/") return false;
     if (c.startsWith("/")) {
-      const parts = c.split("/").filter(Boolean);
-      return parts.length >= 2;
+      return c.length > 1;
     }
     if (/^[a-zA-Z]:[\\/]/.test(c)) {
       const rest = c.slice(3);
-      return /[\\/]/.test(rest);
+      return rest.length > 0;
     }
     if (c.startsWith("\\\\")) {
       const parts = c
@@ -1029,7 +1028,7 @@ const replyWithChosenWorkspace = async (path: string) => {
   if (!trimmed) return;
   workspaceBrowserOpen.value = false;
   secretaryPendingQuestionsModalOpen.value = false;
-  await sendSecretaryMessage(trimmed);
+  await sendSecretaryMessage(trimmed, { explicitWorkspace: trimmed });
 };
 
 const handleWorkspaceBrowserSelect = async (path: string) => {
@@ -1926,7 +1925,10 @@ const attachSecretaryStream = () => {
   );
 };
 
-const sendSecretaryMessage = async (rawMessage: string) => {
+const sendSecretaryMessage = async (
+  rawMessage: string,
+  options?: { explicitWorkspace?: string },
+) => {
   const message = String(rawMessage || "").trim();
   if (!message) return;
   if (loadingHistory.value) return;
@@ -1947,16 +1949,20 @@ const sendSecretaryMessage = async (rawMessage: string) => {
   secretaryInboxSubmitting.value = true;
   try {
     const existingWorkspace = String(sessionWorkspace.value || "").trim();
+    const explicitWorkspace = String(options?.explicitWorkspace || "").trim();
     const shouldInferWorkspace =
       !existingWorkspace &&
+      !explicitWorkspace &&
       secretaryPendingQuestions.value.some((q) =>
         isWorkspaceBindingQuestion(q),
       );
     const inferredWorkspace = shouldInferWorkspace
       ? extractWorkspacePathFromReply(message)
       : "";
-    const workspaceToBind = existingWorkspace || inferredWorkspace;
-    const boundFromReply = !existingWorkspace && Boolean(inferredWorkspace);
+    const workspaceToBind =
+      existingWorkspace || explicitWorkspace || inferredWorkspace;
+    const boundWorkspaceNow =
+      !existingWorkspace && Boolean(explicitWorkspace || inferredWorkspace);
 
     const payload: any = {
       content: message,
@@ -2004,7 +2010,7 @@ const sendSecretaryMessage = async (rawMessage: string) => {
     upsertServerTextMessage(res?.ack_message_id, "assistant", res?.ack_text);
     loadSessions();
 
-    if (boundFromReply && workspaceToBind) {
+    if (boundWorkspaceNow && workspaceToBind) {
       sessionWorkspace.value = workspaceToBind;
       workspacePath.value = workspaceToBind;
     }
@@ -2679,6 +2685,21 @@ onUnmounted(() => {
             </template>
 
           </div>
+        </div>
+        <div
+          v-if="
+            isSecretaryMode &&
+            secretaryWorkspaceQuestionPending &&
+            workspaceChooseError
+          "
+          class="max-w-4xl mx-auto px-4 pb-3"
+        >
+          <p
+            data-testid="secretary-workspace-choose-error"
+            class="text-xs text-red-400"
+          >
+            {{ workspaceChooseError }}
+          </p>
         </div>
       </div>
 

@@ -786,6 +786,188 @@ it('surfaces pending triage questions in a modal (secretary mode)', async () => 
     wrapper.unmount()
 })
 
+it('binds a browser-selected root path in chat secretary mode even when the path is only one segment deep', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.appendSecretaryInboxMessage as any).mockClear()
+    ;(apiClient.getConfig as any).mockResolvedValueOnce({
+        default_workspace: '',
+        base_url: '',
+        warnings: [],
+        workspace_chooser_supported: false,
+        workspace_browser_supported: true,
+    })
+    ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
+        session_id: 's1',
+        cursor_message_id: 0,
+        triage_runs: [
+            {
+                from_cursor: 0,
+                to_message_id: 1,
+                questions: ['要继续推进，我需要你发我项目目录（仓库根目录）的路径。'],
+            },
+        ],
+    })
+    ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+        session_id: 's1',
+        message_id: 1,
+        ack_message_id: 0,
+        ack_text: '',
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="chat-workspace-choose"]').exists()).toBe(false)
+
+    const browseButton = wrapper.get('[data-testid="secretary-browse-workspace-reply"]')
+    await browseButton.trigger('click')
+    await flushPromises()
+
+    const modal = wrapper.find('workspace-browser-modal-stub')
+    expect(modal.exists()).toBe(true)
+    expect(modal.attributes('open')).toBe('true')
+
+    const modalVm = wrapper.getComponent({ name: 'WorkspaceBrowserModal' }) as any
+    modalVm.vm.$emit('select', '/repo')
+    await flushPromises()
+
+    expect(apiClient.appendSecretaryInboxMessage).toHaveBeenCalledWith({
+        content: '/repo',
+        workspace: '/repo',
+    })
+
+    wrapper.unmount()
+})
+
+it('binds a one-segment absolute root path when the user types it in chat secretary mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
+        session_id: 's1',
+        cursor_message_id: 0,
+        triage_runs: [
+            {
+                from_cursor: 0,
+                to_message_id: 1,
+                questions: ['要继续推进，我需要你发我项目目录（仓库根目录）的路径。'],
+            },
+        ],
+    })
+    ;(apiClient.appendSecretaryInboxMessage as any).mockResolvedValueOnce({
+        session_id: 's1',
+        message_id: 1,
+        ack_message_id: 0,
+        ack_text: '',
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('/repo')
+    await wrapper.get('[data-testid="chat-send"]').trigger('click')
+    await flushPromises()
+
+    const args = (apiClient.appendSecretaryInboxMessage as any).mock.calls[0]?.[0]
+    expect(args).toBeTruthy()
+    expect(args.workspace).toBe('/repo')
+
+    wrapper.unmount()
+})
+
+it('shows a secretary-visible error when choosing a workspace reply fails in chat secretary mode', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.chooseWorkspaceDir as any).mockClear()
+    ;(apiClient.getConfig as any).mockResolvedValueOnce({
+        default_workspace: '',
+        base_url: '',
+        warnings: [],
+        workspace_chooser_supported: true,
+        workspace_browser_supported: false,
+    })
+    ;(apiClient.getSecretaryState as any).mockResolvedValueOnce({
+        session_id: 's1',
+        cursor_message_id: 0,
+        triage_runs: [
+            {
+                from_cursor: 0,
+                to_message_id: 1,
+                questions: ['请告诉我项目目录（仓库根目录）的路径。'],
+            },
+        ],
+    })
+    ;(apiClient.chooseWorkspaceDir as any).mockRejectedValueOnce(
+        new Error('选择目录失败'),
+    )
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'secretary' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="secretary-browse-workspace-reply"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="secretary-workspace-choose-error"]').text()).toContain(
+        '选择目录失败',
+    )
+
+    wrapper.unmount()
+})
+
 it('allows multiple sends in secretary mode without calling triage', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
