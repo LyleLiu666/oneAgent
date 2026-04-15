@@ -28,12 +28,18 @@ make build
 
 ### SDK 依赖模式
 
-默认情况下，仓库会使用 repo 内固定下来的 SDK 快照，不再跟着你本机 SDK 工作目录的最新代码自动漂移。
+默认情况下，仓库会使用 repo 内固定下来的 SDK 快照，而且这两个快照必须精确对齐到上游 tag，不再跟着你本机 SDK 工作目录的最新代码自动漂移。
 
 默认 Docker 启动：
 
 ```bash
 make docker-up
+```
+
+检查当前仓库里的 SDK 快照是否和 `backend/go.mod` 里声明的 tag 一致：
+
+```bash
+make check-sdk-pins
 ```
 
 如果你要本地联调 SDK 源码，再显式切到本地 override：
@@ -52,6 +58,7 @@ go work init ./backend /Users/liu_y/code/goProject/AgentAll/agentsdk /Users/liu_
 说明：
 - `go.work` 已加入 `.gitignore`，只影响你本机
 - 默认模式更稳定，review 和 Docker 构建更容易复现
+- 默认模式不会直接在 Docker 里拉私有 SDK tag；而是使用仓库内、已对齐 tag 的快照，避免凭据环境影响默认构建
 - 只有你明确开启本地 override 时，`oneAgent` 才会吃 repo 外部的本地 SDK 源码
 
 ### Release（产物打包）

@@ -1,4 +1,4 @@
-.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth benchmark benchmark-smoke docker-up docker-up-sdk-local
+.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth benchmark benchmark-smoke docker-up docker-up-sdk-local check-sdk-pins
 
 DIST_DIR := dist
 ONEAGENT_BIN := $(DIST_DIR)/oneagent
@@ -14,7 +14,10 @@ sync-frontend: build-frontend
 	@find backend/internal/web/static -mindepth 1 -maxdepth 1 ! -name .gitkeep -exec rm -rf {} +
 	@cp -R frontend/dist/* backend/internal/web/static/
 
-build-backend: sync-frontend
+check-sdk-pins:
+	@bash scripts/check_sdk_pins.sh
+
+build-backend: check-sdk-pins sync-frontend
 	@mkdir -p $(DIST_DIR)
 	@cd backend && go build -o ../$(ONEAGENT_BIN) ./cmd/oneagent
 
@@ -40,6 +43,7 @@ benchmark-smoke:
 	@BENCHMARK_LIMIT=3 bash scripts/benchmark_run.sh
 
 docker-up:
+	@bash scripts/check_sdk_pins.sh
 	@docker compose -f docker-compose.yml up -d --build backend
 
 docker-up-sdk-local:

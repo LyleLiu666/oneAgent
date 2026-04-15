@@ -3,7 +3,7 @@ module github.com/liu_y/oneAgent/backend
 go 1.25.3
 
 require (
-	codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git v0.5.2
+	codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git v0.1.0
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-gonic/gin v1.10.0
 	github.com/google/uuid v1.6.0
@@ -22,7 +22,7 @@ require (
 )
 
 require (
-	codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git v0.5.2
+	codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git v0.5.3
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect

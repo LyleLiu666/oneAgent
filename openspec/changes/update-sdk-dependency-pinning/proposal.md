@@ -14,6 +14,7 @@
 
 ## What Changes
 - 将两个 SDK 以固定 commit 的 git submodule 形式钉在仓库内，作为默认稳定快照
+- 要求这两个默认快照必须精确对应上游 tag，并让 `backend/go.mod` 的版本声明与之对齐
 - 将默认 Go / Docker 构建切回仓库内固定快照，而不是开发机外部目录
 - 提供一个显式的 `sdk-local` Docker override，用于本地联调 `agentsdk` / `memorySdk`
 - 文档化本地 `go.work` 联调方式，避免把本地 override 再次提交进仓库

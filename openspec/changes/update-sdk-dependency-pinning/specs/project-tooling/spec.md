@@ -3,6 +3,7 @@
 The project MUST resolve `agentsdk` and `memorySdk` from deterministic, committed SDK snapshots by default, rather than from developer-local SDK working directories.
 
 The committed repository state MUST NOT require a separate developer-local checkout of those SDK repositories for the default Go or Docker build path.
+The committed SDK snapshots SHOULD align to explicit upstream release tags so the declared dependency versions and checked-in snapshots remain understandable and auditable.
 
 #### Scenario: Default backend dependency resolution uses pinned SDK snapshots
 - **GIVEN** the committed repository state
@@ -15,6 +16,12 @@ The committed repository state MUST NOT require a separate developer-local check
 - **WHEN** a developer runs the default Docker compose build path
 - **THEN** the backend image resolves SDK dependencies from pinned SDK snapshots
 - **AND** the compose file does not require local SDK build contexts by default
+
+#### Scenario: Pinned SDK snapshots stay aligned with declared release tags
+- **GIVEN** the committed repository state
+- **WHEN** a developer verifies the default SDK dependency pins
+- **THEN** each committed SDK snapshot resolves to an exact upstream tag
+- **AND** the corresponding version declared in `backend/go.mod` matches that tag
 
 ### Requirement: Local SDK source overrides MUST be explicit and opt-in
 The project MUST provide an explicit local-override path for SDK联调, but that path MUST be opt-in and separate from the default build flow.
