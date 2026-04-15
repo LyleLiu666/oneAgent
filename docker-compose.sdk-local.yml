@@ -1,0 +1,7 @@
+services:
+  backend:
+    build:
+      dockerfile: Dockerfile.sdk-local
+      additional_contexts:
+        agentsdk: /Users/liu_y/code/goProject/AgentAll/agentsdk
+        memorysdk: /Users/liu_y/code/goProject/AgentAll/memorySdk

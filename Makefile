@@ -1,4 +1,4 @@
-.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth benchmark benchmark-smoke
+.PHONY: build build-frontend sync-frontend build-backend serve doctor release clean openspec-truth benchmark benchmark-smoke docker-up docker-up-sdk-local
 
 DIST_DIR := dist
 ONEAGENT_BIN := $(DIST_DIR)/oneagent
@@ -38,3 +38,9 @@ benchmark:
 
 benchmark-smoke:
 	@BENCHMARK_LIMIT=3 bash scripts/benchmark_run.sh
+
+docker-up:
+	@docker compose -f docker-compose.yml up -d --build backend
+
+docker-up-sdk-local:
+	@docker compose -f docker-compose.yml -f docker-compose.sdk-local.yml up -d --build backend

@@ -1,0 +1,6 @@
+[submodule "third_party/agentsdk"]
+	path = third_party/agentsdk
+	url = https://codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git
+[submodule "third_party/memorySdk"]
+	path = third_party/memorySdk
+	url = https://github.com/LyleLiu666/memorySdk.git

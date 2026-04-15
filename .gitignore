@@ -29,6 +29,7 @@ backend/server
 backend/debug
 backend/vendor/
 backend/go.work
+go.work
 go.work.sum
 
 # Embedded frontend assets (generated)

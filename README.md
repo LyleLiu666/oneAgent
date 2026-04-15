@@ -26,6 +26,34 @@ make build
 - `--open`：启动后自动打开浏览器
 - `--workspace .`：设置默认 workspace（文件工具与命令工具的默认作用域/写入边界）；也可在 UI 顶部随时修改
 
+### SDK 依赖模式
+
+默认情况下，仓库会使用 repo 内固定下来的 SDK 快照，不再跟着你本机 SDK 工作目录的最新代码自动漂移。
+
+默认 Docker 启动：
+
+```bash
+make docker-up
+```
+
+如果你要本地联调 SDK 源码，再显式切到本地 override：
+
+```bash
+make docker-up-sdk-local
+```
+
+如果你是在宿主机上直接做 Go 开发，推荐用本地 `go.work`，而不是把 `replace` 提交回仓库：
+
+```bash
+cd /Users/liu_y/code/goProject/oneAgent
+go work init ./backend /Users/liu_y/code/goProject/AgentAll/agentsdk /Users/liu_y/code/goProject/AgentAll/memorySdk
+```
+
+说明：
+- `go.work` 已加入 `.gitignore`，只影响你本机
+- 默认模式更稳定，review 和 Docker 构建更容易复现
+- 只有你明确开启本地 override 时，`oneAgent` 才会吃 repo 外部的本地 SDK 源码
+
 ### Release（产物打包）
 
 ```bash

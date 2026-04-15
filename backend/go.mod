@@ -11,6 +11,10 @@ require (
 	gorm.io/gorm v1.25.12
 )
 
+replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git => ../third_party/agentsdk
+
+replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git => ../third_party/memorySdk
+
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/kr/pretty v0.3.1 // indirect
@@ -61,7 +65,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.39.0
 )
-
-replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git => /Users/liu_y/code/goProject/AgentAll/agentsdk
-
-replace codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git => /Users/liu_y/code/goProject/AgentAll/memorySdk
