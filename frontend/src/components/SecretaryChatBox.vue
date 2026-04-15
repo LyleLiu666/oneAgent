@@ -846,6 +846,27 @@ const loadTools = async () => {
   }
 };
 
+const resolveKnownToolIds = (toolIds: unknown[]) => {
+  const normalized = toolIds.map((id) => String(id));
+  if (tools.value.length === 0) return normalized;
+
+  const known = new Set(tools.value.map((tool: ToolOption) => tool.id));
+  return normalized.filter((id: string) => known.has(id));
+};
+
+const applyDefaultToolSelection = () => {
+  selectedToolIds.value = tools.value.map((tool: ToolOption) => tool.id);
+};
+
+const applySessionToolSelection = (sessionToolIds: unknown) => {
+  if (Array.isArray(sessionToolIds)) {
+    selectedToolIds.value = resolveKnownToolIds(sessionToolIds);
+    return;
+  }
+
+  applyDefaultToolSelection();
+};
+
 const selectAllTools = () => {
   selectedToolIds.value = tools.value.map((t: ToolOption) => t.id);
 };
@@ -930,12 +951,7 @@ const loadSessionMessages = async (
     if (sessionModelId) {
       selectedModelId.value = String(sessionModelId);
     }
-    const sessionToolIds = raw?.metadata?.tool_ids;
-    if (Array.isArray(sessionToolIds)) {
-      selectedToolIds.value = sessionToolIds.map((id: any) => String(id));
-    } else {
-      selectedToolIds.value = [];
-    }
+    applySessionToolSelection(raw?.metadata?.tool_ids);
     const sessionToolProtocol = raw?.metadata?.tool_protocol;
     if (sessionToolProtocol) {
       selectedToolProtocol.value = String(sessionToolProtocol).toLowerCase();

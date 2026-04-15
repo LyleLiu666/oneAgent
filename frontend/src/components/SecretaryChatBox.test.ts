@@ -198,6 +198,43 @@ it('shows a permission suggestion card when the request obviously needs write/ru
   expect(wrapper.get('[data-testid="chat-permission-suggestion"]').text()).toContain('沙箱开发')
 })
 
+it('keeps tools selected by default when secretary session has no tool_ids metadata', async () => {
+  vi.stubGlobal('localStorage', makeLocalStorage())
+
+  ;(apiClient.getTools as any).mockResolvedValueOnce([
+    { id: 'bash', name: 'Bash' },
+    { id: 'edit', name: 'Edit' },
+  ])
+  ;(apiClient.getSecretarySession as any).mockResolvedValueOnce({
+    id: 's1',
+    title: 'Secretary',
+    messages: [],
+    metadata: {},
+  })
+
+  const pinia = createPinia()
+  setActivePinia(pinia)
+
+  const { useUIStore } = await import('@/stores/ui')
+  useUIStore().setMode('secretary')
+  const { useSecretaryChatStore } = await import('@/stores/secretaryChat')
+  const secretaryChatStore = useSecretaryChatStore()
+  secretaryChatStore.setCurrentTools(['bash'])
+
+  const { default: SecretaryChatBox } = await import('@/components/SecretaryChatBox.vue')
+  const wrapper = shallowMount(SecretaryChatBox, {
+    global: {
+      plugins: [pinia],
+    },
+  })
+
+  await flushPromises()
+  await flushPromises()
+
+  expect(secretaryChatStore.currentToolIds).toEqual(['bash', 'edit'])
+  expect(wrapper.text()).not.toContain('工具 (0/2)')
+})
+
 it('closes reset modal after confirming reset', async () => {
   vi.stubGlobal('localStorage', makeLocalStorage())
 

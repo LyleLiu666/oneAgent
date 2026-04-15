@@ -241,6 +241,57 @@ it('opens the web workspace browser when native chooser is unavailable but brows
     expect((input.element as HTMLInputElement).value).toBe('/data/project')
 })
 
+it('keeps tools selected by default when a saved session has no tool_ids metadata', async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, String(value)),
+        removeItem: (key: string) => void store.delete(key),
+        clear: () => void store.clear(),
+    })
+
+    ;(apiClient.getTools as any).mockResolvedValueOnce([
+        { id: 'bash', name: 'Bash' },
+        { id: 'edit', name: 'Edit' },
+    ])
+    ;(apiClient.getSessions as any).mockResolvedValueOnce([
+        {
+            id: 'session-1',
+            title: 'Session 1',
+            created_at: '2026-04-15T00:00:00Z',
+            updated_at: '2026-04-15T00:00:00Z',
+        },
+    ])
+    ;(apiClient.getSession as any).mockResolvedValueOnce({
+        id: 'session-1',
+        messages: [],
+        metadata: {},
+    })
+
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const { useChatStore } = await import('@/stores/chat')
+    const chatStore = useChatStore()
+    chatStore.setCurrentSession('session-1')
+    chatStore.setCurrentTools(['bash'])
+
+    const { default: ChatBox } = await import('@/components/ChatBox.vue')
+
+    const wrapper = shallowMount(ChatBox, {
+        props: { initialMode: 'full' },
+        global: {
+            plugins: [pinia],
+        },
+    })
+
+    await flushPromises()
+    await flushPromises()
+
+    expect(chatStore.currentToolIds).toEqual(['bash', 'edit'])
+    expect(wrapper.text()).not.toContain('工具 (0/2)')
+})
+
 it('keeps session header above messages (for tool popover)', async () => {
     const store = new Map<string, string>()
     vi.stubGlobal('localStorage', {
