@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 
@@ -53,7 +55,7 @@ func TestBuildPromptCacheKey_ChangesWhenStableSummaryChanges(t *testing.T) {
 	}
 }
 
-func TestBuildPromptCacheKey_MatchesAgentSDK(t *testing.T) {
+func TestBuildPromptCacheKey_NormalizesAgentSDKOutputToProviderSafeLength(t *testing.T) {
 	t.Parallel()
 
 	in := PromptCacheKeyInput{
@@ -114,8 +116,17 @@ func TestBuildPromptCacheKey_MatchesAgentSDK(t *testing.T) {
 		t.Fatalf("agentsdk BuildPromptCacheKey: %v", err)
 	}
 
-	if got != want {
-		t.Fatalf("cache key mismatch: got %q want %q", got, want)
+	expected := want
+	if len(expected) > 64 {
+		sum := sha256.Sum256([]byte(expected))
+		expected = hex.EncodeToString(sum[:])
+	}
+
+	if got != expected {
+		t.Fatalf("cache key mismatch: got %q want %q", got, expected)
+	}
+	if len(got) > 64 {
+		t.Fatalf("cache key too long: len=%d key=%q", len(got), got)
 	}
 }
 

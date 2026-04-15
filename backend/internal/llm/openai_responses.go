@@ -67,6 +67,17 @@ type responsesRequest struct {
 	ToolChoice      any             `json:"tool_choice,omitempty"`
 }
 
+type responsesInputTokensDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
+type responsesUsage struct {
+	InputTokens        int                         `json:"input_tokens"`
+	OutputTokens       int                         `json:"output_tokens"`
+	TotalTokens        int                         `json:"total_tokens"`
+	InputTokensDetails responsesInputTokensDetails `json:"input_tokens_details,omitempty"`
+}
+
 type responsesResponse struct {
 	ID     string `json:"id,omitempty"`
 	Output []struct {
@@ -81,11 +92,7 @@ type responsesResponse struct {
 		} `json:"content,omitempty"`
 		Text string `json:"text,omitempty"`
 	} `json:"output"`
-	Usage struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-		TotalTokens  int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage responsesUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -219,8 +226,153 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 	reader := bufio.NewReader(resp.Body)
 	var fullContent strings.Builder
 	var firstTokenReceived bool
+	processChunk := func(chunk string) error {
+		if chunk == "" {
+			return nil
+		}
+		if !firstTokenReceived {
+			firstTokenReceived = true
+			if opts != nil && opts.Trace != nil && opts.Trace.OnFirstToken != nil {
+				opts.Trace.OnFirstToken(ctx)
+			}
+		}
 
+		fullContent.WriteString(chunk)
+		if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+			opts.Trace.OnToken(ctx, chunk)
+		}
+		if callback != nil {
+			if err := callback(chunk); err != nil {
+				if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+					opts.Trace.OnComplete(ctx, fullContent.String(), err)
+				}
+				return err
+			}
+		}
+		return nil
+	}
+
+	var prefixLines []string
+	firstNonEmpty := ""
 	for {
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			prefixLines = append(prefixLines, line)
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			firstNonEmpty = trimmed
+			if err == nil || err == io.EOF {
+				break
+			}
+			readErr := fmt.Errorf("stream read error: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", readErr)
+			}
+			return readErr
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			readErr := fmt.Errorf("stream read error: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", readErr)
+			}
+			return readErr
+		}
+	}
+
+	if firstNonEmpty != "" && !looksLikeSSELine(firstNonEmpty) {
+		rest, _ := io.ReadAll(reader)
+		raw := []byte(strings.Join(prefixLines, ""))
+		raw = append(raw, rest...)
+
+		var result responsesResponse
+		if err := json.Unmarshal(raw, &result); err != nil {
+			parseErr := fmt.Errorf("failed to decode responses API payload: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", parseErr)
+			}
+			return parseErr
+		}
+		if result.Error != nil {
+			err := fmt.Errorf("API error: %s", result.Error.Message)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", err)
+			}
+			return err
+		}
+
+		emitUsageInfo(ctx, opts, usageInfoFromResponsesUsage(result.Usage))
+
+		content, _ := extractResponsesContentAndToolCalls(result)
+		if strings.TrimSpace(content) == "" {
+			err := fmt.Errorf("empty completion content")
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", err)
+			}
+			return err
+		}
+		if err := processChunk(content); err != nil {
+			return err
+		}
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, fullContent.String(), nil)
+		}
+		return nil
+	}
+
+	processLine := func(line string) (bool, error) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return false, nil
+		}
+
+		data, ok := extractSSEDataLine(line)
+		if !ok {
+			return false, nil
+		}
+		if data == "[DONE]" {
+			return true, nil
+		}
+
+		if completed, ok := extractResponsesCompleted(data); ok {
+			emitUsageInfo(ctx, opts, usageInfoFromResponsesUsage(completed.Usage))
+			if fullContent.Len() == 0 {
+				content, _ := extractResponsesContentAndToolCalls(completed)
+				if strings.TrimSpace(content) != "" {
+					if err := processChunk(content); err != nil {
+						return false, err
+					}
+					return false, nil
+				}
+			}
+		}
+
+		chunk := extractResponsesStreamChunk(data)
+		if chunk == "" {
+			return false, nil
+		}
+		if err := processChunk(chunk); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	done := false
+	for _, line := range prefixLines {
+		var err error
+		done, err = processLine(line)
+		if err != nil {
+			return err
+		}
+		if done {
+			break
+		}
+	}
+
+	for !done {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -233,41 +385,8 @@ func (c *OpenAIResponsesClient) ChatCompletionStream(ctx context.Context, messag
 			return readErr
 		}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		data, ok := extractSSEDataLine(line)
-		if !ok {
-			continue
-		}
-		if data == "[DONE]" {
-			break
-		}
-
-		chunk := extractResponsesStreamChunk(data)
-		if chunk == "" {
-			continue
-		}
-
-		if !firstTokenReceived {
-			firstTokenReceived = true
-			if opts != nil && opts.Trace != nil && opts.Trace.OnFirstToken != nil {
-				opts.Trace.OnFirstToken(ctx)
-			}
-		}
-
-		fullContent.WriteString(chunk)
-
-		// Trace: OnToken
-		if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
-			opts.Trace.OnToken(ctx, chunk)
-		}
-		if err := callback(chunk); err != nil {
-			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-				opts.Trace.OnComplete(ctx, fullContent.String(), err)
-			}
+		done, err = processLine(line)
+		if err != nil {
 			return err
 		}
 	}
@@ -453,40 +572,141 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 		return ""
 	}
 
+	appendContentChunk := func(chunk string) error {
+		if chunk == "" {
+			return nil
+		}
+		ensureFirstToken()
+		fullContent.WriteString(chunk)
+		if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
+			opts.Trace.OnToken(ctx, chunk)
+		}
+		if callback != nil {
+			if err := callback(chunk); err != nil {
+				if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+					opts.Trace.OnComplete(ctx, fullContent.String(), err)
+				}
+				return err
+			}
+		}
+		return nil
+	}
+
+	var prefixLines []string
+	firstNonEmpty := ""
 	for {
 		line, err := reader.ReadString('\n')
+		if line != "" {
+			prefixLines = append(prefixLines, line)
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			firstNonEmpty = trimmed
+			if err == nil || err == io.EOF {
+				break
+			}
+			readErr := fmt.Errorf("stream read error: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", readErr)
+			}
+			return ChatCompletionResult{}, readErr
+		}
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
 			readErr := fmt.Errorf("stream read error: %w", err)
 			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-				opts.Trace.OnComplete(ctx, fullContent.String(), readErr)
+				opts.Trace.OnComplete(ctx, "", readErr)
 			}
 			return ChatCompletionResult{}, readErr
 		}
+	}
 
+	if firstNonEmpty != "" && !looksLikeSSELine(firstNonEmpty) {
+		rest, _ := io.ReadAll(reader)
+		raw := []byte(strings.Join(prefixLines, ""))
+		raw = append(raw, rest...)
+
+		var result responsesResponse
+		if err := json.Unmarshal(raw, &result); err != nil {
+			parseErr := fmt.Errorf("failed to decode responses API payload: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", parseErr)
+			}
+			return ChatCompletionResult{}, parseErr
+		}
+		if result.Error != nil {
+			err := fmt.Errorf("API error: %s", result.Error.Message)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, "", err)
+			}
+			return ChatCompletionResult{}, err
+		}
+
+		emitUsageInfo(ctx, opts, usageInfoFromResponsesUsage(result.Usage))
+
+		content, parsedCalls := extractResponsesContentAndToolCalls(result)
+		if err := appendContentChunk(content); err != nil {
+			return ChatCompletionResult{}, err
+		}
+
+		finalCalls := make([]ToolCall, 0, len(parsedCalls))
+		for _, call := range parsedCalls {
+			call.Function.Arguments = normalizeToolArgumentsJSONForTool(toolIndex[strings.TrimSpace(call.Function.Name)], call.Function.Arguments)
+			finalCalls = append(finalCalls, call)
+		}
+
+		if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+			opts.Trace.OnComplete(ctx, fullContent.String(), nil)
+		}
+		return ChatCompletionResult{
+			Content:   fullContent.String(),
+			ToolCalls: finalCalls,
+		}, nil
+	}
+
+	processLine := func(line string) (bool, error) {
 		line = strings.TrimSpace(line)
 		if line == "" {
-			continue
+			return false, nil
 		}
 
 		data, ok := extractSSEDataLine(line)
 		if !ok {
-			continue
+			return false, nil
 		}
 		if data == "[DONE]" {
-			break
+			return true, nil
+		}
+
+		if completed, ok := extractResponsesCompleted(data); ok {
+			emitUsageInfo(ctx, opts, usageInfoFromResponsesUsage(completed.Usage))
+			if fullContent.Len() == 0 && len(toolCallOrder) == 0 {
+				content, parsedCalls := extractResponsesContentAndToolCalls(completed)
+				if err := appendContentChunk(content); err != nil {
+					return false, err
+				}
+				for _, call := range parsedCalls {
+					existing := ensureToolCall(call.ID)
+					if existing == nil {
+						continue
+					}
+					existing.Type = call.Type
+					existing.Function.Name = call.Function.Name
+					existing.Function.Arguments = call.Function.Arguments
+				}
+			}
 		}
 
 		var event map[string]any
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
+			return false, nil
 		}
 
 		typ := strings.TrimSpace(getString(event, "type"))
 		if typ == "" {
-			continue
+			return false, nil
 		}
 
 		// Text output tokens.
@@ -500,27 +720,15 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 		case "response.output_text":
 			chunk = getString(event, "text")
 		}
-		if chunk != "" {
-			ensureFirstToken()
-			fullContent.WriteString(chunk)
-			if opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
-				opts.Trace.OnToken(ctx, chunk)
-			}
-			if callback != nil {
-				if err := callback(chunk); err != nil {
-					if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
-						opts.Trace.OnComplete(ctx, fullContent.String(), err)
-					}
-					return ChatCompletionResult{}, err
-				}
-			}
+		if err := appendContentChunk(chunk); err != nil {
+			return false, err
 		}
 
 		// Tool calls (best-effort: tolerate minor schema changes).
 		if strings.HasPrefix(typ, "response.output_item.") {
 			item, _ := event["item"].(map[string]any)
 			if strings.TrimSpace(getString(item, "type")) != "function_call" {
-				continue
+				return false, nil
 			}
 
 			callID := strings.TrimSpace(getString(item, "call_id"))
@@ -532,7 +740,7 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 			}
 			toolCall := ensureToolCall(callID)
 			if toolCall == nil {
-				continue
+				return false, nil
 			}
 
 			if itemID := strings.TrimSpace(getString(item, "id")); itemID != "" {
@@ -581,12 +789,12 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 				delta = getString(event, "arguments")
 			}
 			if callID == "" || delta == "" {
-				continue
+				return false, nil
 			}
 
 			toolCall := ensureToolCall(callID)
 			if toolCall == nil {
-				continue
+				return false, nil
 			}
 			builder, ok := toolArgsByID[toolCall.ID]
 			if !ok {
@@ -598,6 +806,39 @@ func (c *OpenAIResponsesClient) ChatCompletionStreamWithTools(ctx context.Contex
 			if added != "" && opts != nil && opts.Trace != nil && opts.Trace.OnToken != nil {
 				opts.Trace.OnToken(ctx, added)
 			}
+		}
+
+		return false, nil
+	}
+
+	done := false
+	for _, line := range prefixLines {
+		var err error
+		done, err = processLine(line)
+		if err != nil {
+			return ChatCompletionResult{}, err
+		}
+		if done {
+			break
+		}
+	}
+
+	for !done {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			readErr := fmt.Errorf("stream read error: %w", err)
+			if opts != nil && opts.Trace != nil && opts.Trace.OnComplete != nil {
+				opts.Trace.OnComplete(ctx, fullContent.String(), readErr)
+			}
+			return ChatCompletionResult{}, readErr
+		}
+
+		done, err = processLine(line)
+		if err != nil {
+			return ChatCompletionResult{}, err
 		}
 	}
 
@@ -733,6 +974,42 @@ func extractResponsesContentAndToolCalls(result responsesResponse) (content stri
 	}
 
 	return out.String(), toolCalls
+}
+
+func usageInfoFromResponsesUsage(in responsesUsage) UsageInfo {
+	return UsageInfo{
+		InputTokens:  in.InputTokens,
+		OutputTokens: in.OutputTokens,
+		TotalTokens:  in.TotalTokens,
+		CachedTokens: in.InputTokensDetails.CachedTokens,
+	}
+}
+
+func extractResponsesCompleted(raw string) (responsesResponse, bool) {
+	var envelope struct {
+		Type     string          `json:"type"`
+		Response json.RawMessage `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return responsesResponse{}, false
+	}
+	if strings.TrimSpace(envelope.Type) != "response.completed" {
+		return responsesResponse{}, false
+	}
+
+	if len(envelope.Response) > 0 && string(envelope.Response) != "null" {
+		var nested responsesResponse
+		if err := json.Unmarshal(envelope.Response, &nested); err == nil {
+			return nested, true
+		}
+	}
+
+	var direct responsesResponse
+	if err := json.Unmarshal([]byte(raw), &direct); err == nil {
+		return direct, true
+	}
+
+	return responsesResponse{}, true
 }
 
 func extractResponsesStreamChunk(raw string) string {

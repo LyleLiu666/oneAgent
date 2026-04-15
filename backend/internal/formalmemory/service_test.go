@@ -196,7 +196,7 @@ func TestNewService_EnqueueTurnEndExtractJob(t *testing.T) {
 	}
 
 	notBefore := time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)
-	payload := json.RawMessage(`{"turn_ref":"chat:session-1:turn-1","runlog_ref":"runlog:chat:session-1:turn-1"}`)
+	payload := json.RawMessage(`{"boundary_kind":"context_compaction","turn_ref":"chat:session-1:turn-1","runlog_ref":"runlog:chat:session-1:turn-1"}`)
 	result, err := svc.EnqueueTurnEndExtractJob(context.Background(), TurnEndRequest{
 		RunID:         "chat:session-1",
 		TurnID:        "turn-1",

@@ -55,6 +55,7 @@ type TraceCallback struct {
 	OnStart      func(ctx context.Context, input []ChatMessage)
 	OnFirstToken func(ctx context.Context)
 	OnToken      func(ctx context.Context, token string)
+	OnUsage      func(ctx context.Context, usage UsageInfo)
 	OnComplete   func(ctx context.Context, fullOutput string, err error)
 }
 
@@ -135,6 +136,15 @@ type ChatCompletionOptions struct {
 	// EXTENSION: Add for tool/function calling support.
 }
 
+// UsageInfo captures provider-reported token usage in a protocol-agnostic shape.
+// Input/Output correspond to prompt/completion for chat-completions style APIs.
+type UsageInfo struct {
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	TotalTokens  int `json:"total_tokens,omitempty"`
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
 // ============================================================================
 // OPENAI-COMPATIBLE CLIENT IMPLEMENTATION
 // ============================================================================
@@ -199,6 +209,17 @@ type chatCompletionRequest struct {
 	ToolChoice       any           `json:"tool_choice,omitempty"`
 }
 
+type openAIPromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
+type openAIUsage struct {
+	PromptTokens        int                       `json:"prompt_tokens"`
+	CompletionTokens    int                       `json:"completion_tokens"`
+	TotalTokens         int                       `json:"total_tokens"`
+	PromptTokensDetails openAIPromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
 // chatCompletionResponse is the response for non-streaming requests.
 type chatCompletionResponse struct {
 	ID      string `json:"id"`
@@ -210,11 +231,7 @@ type chatCompletionResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage openAIUsage `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -259,6 +276,7 @@ type streamChunk struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage openAIUsage `json:"usage,omitempty"`
 }
 
 type streamToolCallDelta struct {
@@ -281,6 +299,26 @@ type streamChunkWithTools struct {
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage openAIUsage `json:"usage,omitempty"`
+}
+
+func usageInfoFromOpenAIUsage(in openAIUsage) UsageInfo {
+	return UsageInfo{
+		InputTokens:  in.PromptTokens,
+		OutputTokens: in.CompletionTokens,
+		TotalTokens:  in.TotalTokens,
+		CachedTokens: in.PromptTokensDetails.CachedTokens,
+	}
+}
+
+func emitUsageInfo(ctx context.Context, opts *ChatCompletionOptions, usage UsageInfo) {
+	if opts == nil || opts.Trace == nil || opts.Trace.OnUsage == nil {
+		return
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.TotalTokens == 0 && usage.CachedTokens == 0 {
+		return
+	}
+	opts.Trace.OnUsage(ctx, usage)
 }
 
 // ChatCompletion performs a non-streaming chat completion.
@@ -470,6 +508,7 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 			}
 			return err
 		}
+		emitUsageInfo(ctx, opts, usageInfoFromOpenAIUsage(result.Usage))
 		content := parsed.Content
 		if strings.TrimSpace(content) == "" {
 			err := fmt.Errorf("empty completion content")
@@ -523,6 +562,7 @@ func (c *OpenAIClient) ChatCompletionStream(ctx context.Context, messages []Chat
 			// Skip malformed chunks.
 			return false, nil
 		}
+		emitUsageInfo(ctx, opts, usageInfoFromOpenAIUsage(chunk.Usage))
 
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
 			if !firstTokenReceived {
@@ -751,6 +791,7 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 			}
 			return ChatCompletionResult{}, err
 		}
+		emitUsageInfo(ctx, opts, usageInfoFromOpenAIUsage(result.Usage))
 
 		if parsed.Content != "" {
 			if opts != nil && opts.Trace != nil && opts.Trace.OnFirstToken != nil {
@@ -834,6 +875,7 @@ func (c *OpenAIClient) ChatCompletionStreamWithTools(ctx context.Context, messag
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return false, nil
 		}
+		emitUsageInfo(ctx, opts, usageInfoFromOpenAIUsage(chunk.Usage))
 		if len(chunk.Choices) == 0 {
 			return false, nil
 		}

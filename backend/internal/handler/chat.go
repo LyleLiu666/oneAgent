@@ -537,9 +537,15 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			// Start trace collection
 			traceStart := time.Now()
 			var traceEntries []model.TraceEntry
+			var usageAcc streamUsageAccumulator
+			var tokenProgress streamTokenProgress
+			var aggregatedUsage *llm.UsageInfo
+			var lastUsageEventPayload string
+			var lastKVCacheTrace string
 			// Trace callback integration
 			traceCallback := &llm.TraceCallback{
 				OnStart: func(ctx context.Context, input []llm.ChatMessage) {
+					usageAcc.StartCall()
 					broadcaster.Broadcast(StreamEvent{
 						Type: "trace",
 						Data: "Connected to AI...",
@@ -580,33 +586,41 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				},
 			}
 
-			// Token tracking state
-			var runeCount int
-			var lastBroadcastTokens int
-			var lastBroadcast time.Time
-
 			// UTF-8 buffering state
 			var incompleteUTF8 []byte
 
 			// Update the callback to use the state
 			traceCallback.OnToken = func(ctx context.Context, token string) {
-				runeCount += utf8.RuneCountInString(token)
-
-				// Approx tokens: ~4 runes ≈ 1 token (stable across chunking boundaries).
-				approxTokens := (runeCount + 3) / 4
-				if approxTokens <= 0 || approxTokens == lastBroadcastTokens {
-					return
-				}
-
-				// Throttle updates: every 5 tokens or 100ms
-				now := time.Now()
-				if approxTokens%5 == 0 || now.Sub(lastBroadcast) > 100*time.Millisecond {
+				if payload, ok := tokenProgress.AddToken(token, time.Now()); ok {
 					broadcaster.Broadcast(StreamEvent{
 						Type: "usage",
-						Data: fmt.Sprintf(`{"response_tokens": %d}`, approxTokens),
+						Data: payload,
 					})
-					lastBroadcastTokens = approxTokens
-					lastBroadcast = now
+				}
+			}
+			traceCallback.OnUsage = func(ctx context.Context, usage llm.UsageInfo) {
+				tokenProgress.MarkExactUsage()
+				total := usageAcc.UpdateCurrentCall(usage)
+				totalCopy := total
+				aggregatedUsage = &totalCopy
+
+				if payload, ok := buildChatUsageEventPayload(total); ok && payload != lastUsageEventPayload {
+					lastUsageEventPayload = payload
+					broadcaster.Broadcast(StreamEvent{
+						Type: "usage",
+						Data: payload,
+					})
+				}
+
+				if resolvedModel.EnableKVCache && buildKVCacheTrace(total) != "" {
+					traceMsg := buildKVCacheTrace(total)
+					if traceMsg != lastKVCacheTrace {
+						lastKVCacheTrace = traceMsg
+						broadcaster.Broadcast(StreamEvent{
+							Type: "trace",
+							Data: traceMsg,
+						})
+					}
 				}
 			}
 
@@ -1073,6 +1087,7 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 			}
 
 			callRecord.Response = fullContent
+			callRecord.Usage = aggregatedUsage
 			callRecord.PromptCacheEnabled = opts.EnablePromptCache
 			callRecord.PromptCacheDowngraded = opts.PromptCacheDowngraded
 			callRecord.PromptCacheDowngradeReason = strings.TrimSpace(opts.PromptCacheDowngradeReason)
@@ -1101,6 +1116,17 @@ func (h *ChatHandler) StreamChat(c *gin.Context) {
 				}
 				if callRecord.PromptCacheKeyHash != "" {
 					traceEntries[0].Metadata["prompt_cache_key_hash"] = callRecord.PromptCacheKeyHash
+				}
+				if aggregatedUsage != nil {
+					traceEntries[0].Metadata["llm_usage"] = map[string]any{
+						"input_tokens":  aggregatedUsage.InputTokens,
+						"output_tokens": aggregatedUsage.OutputTokens,
+						"total_tokens":  aggregatedUsage.TotalTokens,
+						"cached_tokens": aggregatedUsage.CachedTokens,
+					}
+					if aggregatedUsage.InputTokens > 0 {
+						traceEntries[0].Metadata["kv_cache_hit_ratio"] = normalizedCacheHitRatio(*aggregatedUsage)
+					}
 				}
 
 				traceEntries[0].Complete()

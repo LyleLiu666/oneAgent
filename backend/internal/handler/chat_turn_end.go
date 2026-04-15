@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/memorySdk.git/core"
 	"github.com/liu_y/oneAgent/backend/internal/formalmemory"
 )
 
@@ -69,6 +70,7 @@ func buildChatTurnEndPayload(input chatTurnEndInput) (json.RawMessage, error) {
 	}
 
 	payload := map[string]any{
+		"boundary_kind": string(core.BoundaryKindContextCompaction),
 		"turn_ref":      fmt.Sprintf("chat:%s:%s", sessionID, turnID),
 		"runlog_ref":    fmt.Sprintf("runlog:%s:%s", runID, turnID),
 		"run_id":        runID,

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,15 @@ type ProviderConfig struct {
 
 // NewClientForProvider creates an LLM client based on provider type.
 func NewClientForProvider(cfg ProviderConfig) (Client, error) {
+	if shouldUseResponsesClient(cfg) {
+		return NewOpenAIResponsesClient(ClientConfig{
+			Endpoint: cfg.Endpoint,
+			APIKey:   cfg.APIKey,
+			Model:    cfg.Model,
+			Timeout:  cfg.Timeout,
+		}), nil
+	}
+
 	switch cfg.ProviderType {
 	case ProviderTypeOpenAI:
 		return newOpenAIClient(ClientConfig{
@@ -37,13 +47,6 @@ func NewClientForProvider(cfg ProviderConfig) (Client, error) {
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
 		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
-	case ProviderTypeOpenAIResponse:
-		return NewOpenAIResponsesClient(ClientConfig{
-			Endpoint: cfg.Endpoint,
-			APIKey:   cfg.APIKey,
-			Model:    cfg.Model,
-			Timeout:  cfg.Timeout,
-		}), nil
 	case ProviderTypeClaude:
 		return NewAnthropicClient(ClientConfig{
 			Endpoint: cfg.Endpoint,
@@ -93,14 +96,21 @@ func NewClientForProvider(cfg ProviderConfig) (Client, error) {
 			Model:    cfg.Model,
 			Timeout:  cfg.Timeout,
 		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
-	case ProviderTypeCodex:
-		return newOpenAIClient(ClientConfig{
-			Endpoint: cfg.Endpoint,
-			APIKey:   cfg.APIKey,
-			Model:    cfg.Model,
-			Timeout:  cfg.Timeout,
-		}, cacheCapabilitiesForProvider(cfg.ProviderType).CacheStyle), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", cfg.ProviderType)
+	}
+}
+
+func shouldUseResponsesClient(cfg ProviderConfig) bool {
+	providerType := strings.ToLower(strings.TrimSpace(cfg.ProviderType))
+	model := strings.ToLower(strings.TrimSpace(cfg.Model))
+
+	switch providerType {
+	case ProviderTypeOpenAIResponse, ProviderTypeCodex:
+		return true
+	case ProviderTypeOpenAI:
+		return strings.Contains(model, "codex")
+	default:
+		return false
 	}
 }

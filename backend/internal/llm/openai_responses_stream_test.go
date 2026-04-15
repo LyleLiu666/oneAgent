@@ -104,3 +104,115 @@ func TestOpenAIResponsesClient_ChatCompletionStream_EmitsTraceTokens(t *testing.
 	}
 }
 
+func TestOpenAIResponsesClient_ChatCompletionStream_EmitsUsageFromResponseCompleted(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9021,\"output_tokens\":12,\"total_tokens\":9033,\"input_tokens_details\":{\"cached_tokens\":8832}}}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	var gotUsage UsageInfo
+	opts := &ChatCompletionOptions{
+		Trace: &TraceCallback{
+			OnUsage: func(ctx context.Context, usage UsageInfo) {
+				gotUsage = usage
+			},
+		},
+	}
+
+	if err := client.ChatCompletionStream(
+		context.Background(),
+		[]ChatMessage{{Role: "user", Content: "hi"}},
+		opts,
+		func(string) error { return nil },
+	); err != nil {
+		t.Fatalf("ChatCompletionStream: %v", err)
+	}
+
+	if gotUsage.InputTokens != 9021 {
+		t.Fatalf("expected input_tokens=9021, got %d", gotUsage.InputTokens)
+	}
+	if gotUsage.OutputTokens != 12 {
+		t.Fatalf("expected output_tokens=12, got %d", gotUsage.OutputTokens)
+	}
+	if gotUsage.TotalTokens != 9033 {
+		t.Fatalf("expected total_tokens=9033, got %d", gotUsage.TotalTokens)
+	}
+	if gotUsage.CachedTokens != 8832 {
+		t.Fatalf("expected cached_tokens=8832, got %d", gotUsage.CachedTokens)
+	}
+}
+
+func TestOpenAIResponsesClient_ChatCompletionStreamWithTools_EmitsUsageFromResponseCompleted(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"hi\\\"}\"}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":40,\"output_tokens\":5,\"total_tokens\":45,\"input_tokens_details\":{\"cached_tokens\":32}}}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(mock.Close)
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		Endpoint: mock.URL,
+		APIKey:   "sk-test",
+		Model:    "gpt-test",
+	})
+
+	var gotUsage UsageInfo
+	opts := &ChatCompletionOptions{
+		Tools: []Tool{
+			{
+				Type: "function",
+				Function: ToolFunction{
+					Name: "lookup",
+				},
+			},
+		},
+		Trace: &TraceCallback{
+			OnUsage: func(ctx context.Context, usage UsageInfo) {
+				gotUsage = usage
+			},
+		},
+	}
+
+	result, err := client.ChatCompletionStreamWithTools(
+		context.Background(),
+		[]ChatMessage{{Role: "user", Content: "hi"}},
+		opts,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("ChatCompletionStreamWithTools: %v", err)
+	}
+
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].Function.Name != "lookup" {
+		t.Fatalf("expected tool name lookup, got %q", result.ToolCalls[0].Function.Name)
+	}
+	if gotUsage.CachedTokens != 32 {
+		t.Fatalf("expected cached_tokens=32, got %d", gotUsage.CachedTokens)
+	}
+	if gotUsage.TotalTokens != 45 {
+		t.Fatalf("expected total_tokens=45, got %d", gotUsage.TotalTokens)
+	}
+}

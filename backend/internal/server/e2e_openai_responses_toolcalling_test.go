@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +19,16 @@ import (
 	"github.com/liu_y/oneAgent/backend/internal/tool"
 )
 
-func readAssistantTextAndUsageFromChat(t *testing.T, body io.Reader) (assistantText string, lastResponseTokens int) {
+type chatUsageEvent struct {
+	ResponseTokens int     `json:"response_tokens,omitempty"`
+	InputTokens    int     `json:"input_tokens,omitempty"`
+	OutputTokens   int     `json:"output_tokens,omitempty"`
+	TotalTokens    int     `json:"total_tokens,omitempty"`
+	CachedTokens   int     `json:"cached_tokens,omitempty"`
+	CacheHitRatio  float64 `json:"cache_hit_ratio,omitempty"`
+}
+
+func readAssistantTextAndUsageFromChat(t *testing.T, body io.Reader) (assistantText string, usage chatUsageEvent) {
 	t.Helper()
 	var out strings.Builder
 
@@ -35,14 +47,8 @@ func readAssistantTextAndUsageFromChat(t *testing.T, body io.Reader) (assistantT
 
 		switch evt.Type {
 		case "usage":
-			var usagePayload struct {
-				ResponseTokens int `json:"response_tokens"`
-			}
-			if err := json.Unmarshal([]byte(evt.Data), &usagePayload); err != nil {
+			if err := json.Unmarshal([]byte(evt.Data), &usage); err != nil {
 				continue
-			}
-			if usagePayload.ResponseTokens > 0 {
-				lastResponseTokens = usagePayload.ResponseTokens
 			}
 		case "msg":
 			var msg streamMsg
@@ -60,7 +66,7 @@ func readAssistantTextAndUsageFromChat(t *testing.T, body io.Reader) (assistantT
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("scan chat stream: %v", err)
 	}
-	return out.String(), lastResponseTokens
+	return out.String(), usage
 }
 
 func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
@@ -107,6 +113,7 @@ func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 			_, _ = io.WriteString(w, "data: [DONE]\n\n")
 		default:
 			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"DONE\"}\n\n")
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":100,\"output_tokens\":4,\"total_tokens\":104,\"input_tokens_details\":{\"cached_tokens\":60}}}}\n\n")
 			_, _ = io.WriteString(w, "data: [DONE]\n\n")
 		}
 		if f, ok := w.(http.Flusher); ok {
@@ -132,10 +139,11 @@ func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 
 	var modelResp createModelResp
 	mustPostJSON(t, srv.URL, rt.AuthToken, "/api/llm/models", map[string]any{
-		"provider_id": providerResp.ID,
-		"name":        "mock-model",
-		"model":       "gpt-test",
-		"is_default":  true,
+		"provider_id":     providerResp.ID,
+		"name":            "mock-model",
+		"model":           "gpt-test",
+		"enable_kv_cache": true,
+		"is_default":      true,
 	}, &modelResp)
 
 	workspace := t.TempDir()
@@ -164,12 +172,21 @@ func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 		t.Fatalf("chat status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	got, tokens := readAssistantTextAndUsageFromChat(t, resp.Body)
+	got, usage := readAssistantTextAndUsageFromChat(t, resp.Body)
 	if strings.TrimSpace(got) != "DONE" {
 		t.Fatalf("expected assistant=DONE, got %q", got)
 	}
-	if tokens <= 0 {
-		t.Fatalf("expected chat SSE to include usage response_tokens > 0, got %d", tokens)
+	if usage.ResponseTokens != 4 {
+		t.Fatalf("expected response_tokens=4, got %d", usage.ResponseTokens)
+	}
+	if usage.InputTokens != 100 || usage.TotalTokens != 104 {
+		t.Fatalf("unexpected usage totals: %+v", usage)
+	}
+	if usage.CachedTokens != 60 {
+		t.Fatalf("expected cached_tokens=60, got %d", usage.CachedTokens)
+	}
+	if math.Abs(usage.CacheHitRatio-0.6) > 0.0001 {
+		t.Fatalf("expected cache_hit_ratio=0.6, got %v", usage.CacheHitRatio)
 	}
 
 	mu.Lock()
@@ -199,5 +216,31 @@ func TestE2E_OpenAIResponsesProvider_ToolLoop_MVP(t *testing.T) {
 	}
 	if !sawOutput {
 		t.Fatalf("expected second request to include function_call_output for call_1, got %#v", input)
+	}
+
+	logPaths, err := filepath.Glob(filepath.Join(rt.Layout.LLMLogsDir, "*", "*", "*.json"))
+	if err != nil {
+		t.Fatalf("glob llm logs: %v", err)
+	}
+	if len(logPaths) != 1 {
+		t.Fatalf("expected 1 llm log, got %d (%v)", len(logPaths), logPaths)
+	}
+
+	rawLog, err := os.ReadFile(logPaths[0])
+	if err != nil {
+		t.Fatalf("read llm log: %v", err)
+	}
+
+	var logged struct {
+		Usage *chatUsageEvent `json:"usage"`
+	}
+	if err := json.Unmarshal(rawLog, &logged); err != nil {
+		t.Fatalf("unmarshal llm log: %v", err)
+	}
+	if logged.Usage == nil {
+		t.Fatal("expected llm log to include usage")
+	}
+	if logged.Usage.CachedTokens != 60 || logged.Usage.OutputTokens != 4 {
+		t.Fatalf("unexpected logged usage: %+v", logged.Usage)
 	}
 }

@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 
 	agentsdkprovider "codeup.aliyun.com/5f3ea334769820a3e8181c1e/go/agentsdk.git/provider"
 )
@@ -41,7 +44,7 @@ func BuildPromptCacheKey(in PromptCacheKeyInput) (string, error) {
 		})
 	}
 
-	return agentsdkprovider.BuildPromptCacheKey(agentsdkprovider.PromptCacheKeyInput{
+	key, err := agentsdkprovider.BuildPromptCacheKey(agentsdkprovider.PromptCacheKeyInput{
 		SessionID:     in.SessionID,
 		PrefixVersion: in.Epoch,
 		Model:         in.Model,
@@ -49,4 +52,17 @@ func BuildPromptCacheKey(in PromptCacheKeyInput) (string, error) {
 		Messages:      providerMessages,
 		Tools:         providerTools,
 	})
+	if err != nil {
+		return "", err
+	}
+	return normalizePromptCacheKeyLength(key), nil
+}
+
+func normalizePromptCacheKeyLength(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" || len(key) <= 64 {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }

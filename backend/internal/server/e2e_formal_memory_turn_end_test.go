@@ -96,6 +96,7 @@ func TestE2E_Chat_FormalMemoryTurnEndEnqueuesJob(t *testing.T) {
 	turnID, _ := payload["turn_id"].(string)
 	turnRef, _ := payload["turn_ref"].(string)
 	runlogRef, _ := payload["runlog_ref"].(string)
+	boundaryKind, _ := payload["boundary_kind"].(string)
 	if runID != "chat:"+sessionID {
 		t.Fatalf("expected run_id=%q, got %q", "chat:"+sessionID, runID)
 	}
@@ -107,6 +108,9 @@ func TestE2E_Chat_FormalMemoryTurnEndEnqueuesJob(t *testing.T) {
 	}
 	if runlogRef != fmt.Sprintf("runlog:%s:%s", runID, turnID) {
 		t.Fatalf("unexpected runlog_ref: %q", runlogRef)
+	}
+	if boundaryKind != "context_compaction" {
+		t.Fatalf("expected boundary_kind=context_compaction, got %q", boundaryKind)
 	}
 	if payload["session_id"] != sessionID {
 		t.Fatalf("expected session_id=%q, got %+v", sessionID, payload["session_id"])

@@ -26,6 +26,9 @@ func TestBuildChatTurnEndPayload_UsesStableRefsWithoutLocalPaths(t *testing.T) {
 	if decoded["turn_ref"] != "chat:session-1:turn-1" {
 		t.Fatalf("unexpected turn_ref: %+v", decoded["turn_ref"])
 	}
+	if decoded["boundary_kind"] != "context_compaction" {
+		t.Fatalf("unexpected boundary_kind: %+v", decoded["boundary_kind"])
+	}
 	if decoded["runlog_ref"] != "runlog:chat:session-1:turn-1" {
 		t.Fatalf("unexpected runlog_ref: %+v", decoded["runlog_ref"])
 	}

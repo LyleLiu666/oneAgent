@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/liu_y/oneAgent/backend/internal/llm"
 )
 
 type Writer struct {
@@ -24,8 +26,9 @@ type CallRecord struct {
 
 	Request any `json:"request"`
 
-	Response any    `json:"response,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Response any            `json:"response,omitempty"`
+	Error    string         `json:"error,omitempty"`
+	Usage    *llm.UsageInfo `json:"usage,omitempty"`
 
 	PromptCacheEnabled bool   `json:"prompt_cache_enabled"`
 	PromptCacheKeyHash string `json:"prompt_cache_key_hash,omitempty"`
